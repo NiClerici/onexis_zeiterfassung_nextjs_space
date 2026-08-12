@@ -1,0 +1,102 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native"]
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  code          String
+  weeklyHours   Float     @default(42)
+  pensum        Float     @default(100)
+  // Werte, die vor der ersten Pensumsänderung galten (Basis für rückwirkende Berechnungen)
+  baseWeeklyHours Float?
+  basePensum      Float?
+  vacationDays  Float     @default(25)
+  startDate     DateTime?
+  language      String    @default("de")
+  role          String    @default("user")
+  // Standard-Wochenplan (Stunden pro Wochentag) – wird im Kalender auf Zeiträume angewandt
+  stdHoursMon   Float     @default(0)
+  stdHoursTue   Float     @default(0)
+  stdHoursWed   Float     @default(0)
+  stdHoursThu   Float     @default(0)
+  stdHoursFri   Float     @default(0)
+  stdHoursSat   Float     @default(0)
+  stdHoursSun   Float     @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  securityQuestions SecurityQuestion[]
+  timeEntries      TimeEntry[]
+  customerHours    CustomerHour[]
+  pensumChanges    PensumChange[]
+  overtimePayouts  OvertimePayout[]
+}
+
+model PensumChange {
+  id          String   @id @default(cuid())
+  userId      String
+  pensum      Float
+  weeklyHours Float
+  effectiveFrom DateTime @db.Date
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, effectiveFrom])
+}
+
+model SecurityQuestion {
+  id       String @id @default(cuid())
+  userId   String
+  question String
+  answer   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model TimeEntry {
+  id     String   @id @default(cuid())
+  userId String
+  date   DateTime @db.Date
+  hours  Float
+  type   String   @default("work")
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model OvertimePayout {
+  id        String   @id @default(cuid())
+  userId    String
+  date      DateTime @db.Date
+  hours     Float
+  note      String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model CustomerHour {
+  id           String @id @default(cuid())
+  userId       String
+  year         Int
+  month        Int
+  customerName String
+  hours        Float
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, year, month, customerName])
+  @@index([userId, year, month])
+}

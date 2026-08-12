@@ -1,0 +1,268 @@
+"use client";
+
+import React, { createContext, useContext, useCallback } from "react";
+
+const translations: Record<string, string> = {
+  // Nav
+  "nav.calendar": "Kalender",
+  "nav.analytics": "Analytics",
+  "nav.profile": "Profil",
+  // Login
+  "login.title": "Anmelden",
+  "login.firstName": "Vorname",
+  "login.firstNamePlaceholder": "Dein Vorname",
+  "login.code": "Passwort eingeben",
+  "login.codePlaceholder": "",
+  "login.submit": "Anmelden",
+  "login.forgotCode": "Passwort vergessen?",
+  "login.noAccount": "Noch kein Konto?",
+  "login.register": "Registrieren",
+  "login.error": "Ungültiger Vorname oder Passwort",
+  // Register
+  "register.title": "Registrieren",
+  "register.firstName": "Vorname",
+  "register.lastName": "Nachname",
+  "register.code": "Passwort (4-8 Zeichen)",
+  "register.confirmCode": "Passwort bestätigen",
+  "register.securityQuestion": "Sicherheitsfrage",
+  "register.securityAnswer": "Antwort",
+  "register.customQuestion": "Eigene Frage eingeben",
+  "register.weeklyHours": "Wochenstunden",
+  "register.pensum": "Pensum (%)",
+  "register.vacationDays": "Ferientage (bei 100%)",
+  "register.startDate": "Startdatum",
+  "register.submit": "Registrieren",
+  "register.hasAccount": "Bereits registriert?",
+  "register.login": "Anmelden",
+  "register.note": "Diese Angaben kannst du später in deinem Profil noch bearbeiten.",
+  "register.error.codeMismatch": "Passwörter stimmen nicht überein",
+  "register.error.codeFormat": "Passwort muss 4-8 Zeichen enthalten",
+  "register.error.required": "Pflichtfeld",
+  "register.error.securityQuestions": "Bitte beide Sicherheitsfragen ausfüllen",
+  "register.question1": "Sicherheitsfrage 1",
+  "register.question2": "Sicherheitsfrage 2",
+  "register.answer1": "Antwort 1",
+  "register.answer2": "Antwort 2",
+  "register.optional": "Optional",
+  // Forgot code
+  "forgot.title": "Passwort zurücksetzen",
+  "forgot.step1": "Schritt 1: Identifikation",
+  "forgot.step2": "Schritt 2: Sicherheitsfrage",
+  "forgot.step3": "Schritt 3: Neues Passwort",
+  "forgot.firstName": "Vorname",
+  "forgot.lastName": "Nachname",
+  "forgot.next": "Weiter",
+  "forgot.newCode": "Neues Passwort (4-8 Zeichen)",
+  "forgot.confirmCode": "Passwort bestätigen",
+  "forgot.submit": "Passwort zurücksetzen",
+  "forgot.success": "Passwort erfolgreich zurückgesetzt!",
+  "forgot.error.userNotFound": "Benutzer nicht gefunden",
+  "forgot.error.wrongAnswers": "Falsche Antwort",
+  "forgot.backToLogin": "Zurück zum Login",
+  "forgot.caseSensitive": "Achte auf Gross- und Kleinschreibung.",
+  "forgot.answerOne": "Du musst nur eine der beiden Fragen beantworten.",
+  // Calendar
+  "calendar.greeting": "Hallo, {name}",
+  "calendar.today": "Heute",
+  "calendar.hours": "Stunden",
+  "calendar.type": "Typ",
+  "calendar.work": "Arbeitszeit",
+  "calendar.vacation": "Ferien",
+  "calendar.holiday": "Feiertag",
+  "calendar.save": "Speichern",
+  "calendar.cancel": "Abbrechen",
+  "calendar.delete": "Löschen",
+  "calendar.customerHours": "Kundenstunden",
+  "calendar.customerName": "Kundenname",
+  "calendar.addCustomer": "Kunde hinzufügen",
+  "calendar.noEntries": "Keine Einträge",
+  "calendar.monthCustomerHours": "Kundenstunden für",
+  "calendar.editCustomer": "Bearbeiten",
+  "calendar.deleteCustomer": "Löschen",
+  "calendar.deleteConfirm": "Wirklich löschen?",
+  "calendar.selectMonth": "Monat wählen",
+  // Weekdays
+  "weekday.mo": "Mo",
+  "weekday.tu": "Di",
+  "weekday.we": "Mi",
+  "weekday.th": "Do",
+  "weekday.fr": "Fr",
+  "weekday.sa": "Sa",
+  "weekday.su": "So",
+  // Months
+  "month.1": "Januar",
+  "month.2": "Februar",
+  "month.3": "März",
+  "month.4": "April",
+  "month.5": "Mai",
+  "month.6": "Juni",
+  "month.7": "Juli",
+  "month.8": "August",
+  "month.9": "September",
+  "month.10": "Oktober",
+  "month.11": "November",
+  "month.12": "Dezember",
+  // Analytics
+  "analytics.title": "Analytics",
+  "analytics.period": "Zeitraum",
+  "analytics.month": "Monat",
+  "analytics.quarter": "Quartal",
+  "analytics.year": "Jahr",
+  "analytics.custom": "Frei wählen",
+  "analytics.targetHours": "Sollarbeitszeit",
+  "analytics.actualHours": "Geleistete Stunden",
+  "analytics.difference": "Differenz",
+  "analytics.billingRate": "Verrechnungsgrad",
+  "analytics.customerHours": "Kundenstunden",
+  "analytics.workHours": "Arbeitsstunden",
+  "analytics.vacationDays": "Ferientage",
+  "analytics.holidays": "Feiertage",
+  "analytics.overview": "Übersicht",
+  "analytics.monthlyTrend": "Monatlicher Verlauf",
+  "analytics.from": "Von",
+  "analytics.to": "Bis",
+  "analytics.h": "h",
+  "analytics.noData": "Keine Daten für diesen Zeitraum",
+  "analytics.overtime": "Überzeit",
+  "analytics.vacationBalance": "Feriensaldo",
+  "analytics.totalVacation": "Total Ferientage",
+  "analytics.usedVacation": "Bezogen",
+  "analytics.remainingVacation": "Restlich",
+  "analytics.carryover": "Übertrag Vorjahr",
+  "analytics.stillToPlan": "Noch zu planen",
+  "analytics.plannedVacation": "Geplant",
+  "analytics.totalEntitlement": "Gesamtanspruch",
+  "analytics.forecast": "Prognose (inkl. geplante Zukunft)",
+  "analytics.plannedFuture": "Geplante Stunden (Zukunft)",
+  "analytics.fullTargetHours": "Sollstunden (gesamt)",
+  "analytics.totalIstPlusPlan": "Total (Ist + Geplant)",
+  "analytics.forecastBalance": "Prognose Saldo",
+  "analytics.forecastHint": "Rein informativ — berücksichtigt vorerfasste zukünftige Einträge im gewählten Zeitraum.",
+  "profile.deleteQuestion": "Frage löschen",
+  "profile.addQuestion": "Frage hinzufügen",
+  // Overtime payouts
+  "profile.overtimePayouts": "Überstunden-Auszahlungen",
+  "profile.overtimePayoutsDesc": "Hier kannst du ausbezahlte Überstunden erfassen. Diese werden vom Überzeitsaldo abgezogen.",
+  "profile.payoutDate": "Datum der Auszahlung",
+  "profile.payoutHours": "Ausbezahlte Stunden",
+  "profile.payoutNote": "Notiz (optional)",
+  "profile.payoutNotePlaceholder": "z.B. Auszahlung Q4 2026",
+  "profile.addPayout": "Auszahlung erfassen",
+  "profile.noPayouts": "Keine Auszahlungen erfasst",
+  "profile.payoutSaved": "Auszahlung erfasst!",
+  "analytics.paidOutOvertime": "Ausbezahlte Überstunden",
+  "analytics.netOvertime": "Überzeit (netto)",
+  // Profile
+  "profile.title": "Profil",
+  "profile.personalInfo": "Persönliche Daten",
+  "profile.workSettings": "Arbeitseinstellungen",
+  "profile.security": "Sicherheit",
+  "profile.save": "Speichern",
+  "profile.saved": "Gespeichert!",
+  "profile.changeCode": "Passwort ändern",
+  "profile.currentCode": "Aktuelles Passwort",
+  "profile.newCode": "Neues Passwort",
+  "profile.export": "Excel-Export",
+  "profile.exportMonth": "Monat",
+  "profile.exportYear": "Jahr",
+  "profile.exportCustom": "Zeitraum",
+  "profile.exportButton": "Exportieren",
+  "profile.logout": "Abmelden",
+  "profile.error": "Fehler beim Speichern",
+  "profile.pensumChange": "Pensumsänderung",
+  "profile.pensumChangeDesc": "Neues Pensum und Wochenstunden ab einem bestimmten Datum festlegen.",
+  "profile.effectiveFrom": "Gültig ab",
+  "profile.newPensum": "Neues Pensum (%)",
+  "profile.newWeeklyHours": "Neue Wochenstunden",
+  "profile.addPensumChange": "Pensumsänderung speichern",
+  "profile.pensumHistory": "Pensum-Verlauf",
+  "profile.noPensumChanges": "Keine Pensumsänderungen erfasst",
+  "profile.securityQuestions": "Sicherheitsfragen",
+  "profile.editSecurityQuestions": "Sicherheitsfragen bearbeiten",
+  "profile.verifyCode": "Passwort bestätigen",
+  "profile.securityQuestionsUpdated": "Sicherheitsfragen aktualisiert!",
+  "profile.retroactiveWarning": "Bei rückwirkender Pensumsänderungen müssen die eingegebenen Zeiten (z.B. Ferientage) ab diesem Datum manuell nachkontrolliert werden.",
+  // Standard-Wochenplan
+  "profile.standardWeek": "Standard-Wochenplan",
+  "profile.standardWeekDesc": "Hinterlege hier deine typische Arbeitswoche (Stunden pro Wochentag). Du kannst sie danach im Kalender auf beliebige Zeiträume anwenden.",
+  "profile.stdWeekSum": "Wochentotal",
+  "profile.stdWeekSave": "Standard-Wochenplan speichern",
+  "profile.stdWeekSaved": "Standard-Wochenplan gespeichert!",
+  "calendar.applyStdWeek": "Standardwoche anwenden",
+  "calendar.applyStdWeekTitle": "Standardwoche auf Zeitraum anwenden",
+  "calendar.applyStdWeekDesc": "Dein hinterlegter Standard-Wochenplan wird auf alle Tage im gewählten Zeitraum angewendet.",
+  "calendar.applyFrom": "Von",
+  "calendar.applyTo": "Bis",
+  "calendar.applyOverwrite": "Bestehende Arbeitszeit-Einträge überschreiben",
+  "calendar.applyOverwriteHint": "Ferien und Feiertage werden nie überschrieben.",
+  "calendar.applyNoTemplate": "Kein Standard-Wochenplan hinterlegt. Bitte zuerst im Profil einen Standard-Wochenplan definieren.",
+  "calendar.applyGoToProfile": "Zum Profil",
+  "calendar.applySubmit": "Anwenden",
+  "calendar.applyResult": "{created} erstellt · {updated} aktualisiert · {skipped} übersprungen",
+  "calendar.applyError": "Fehler beim Anwenden",
+  "calendar.applyPreview": "Vorschau",
+  "calendar.applyPreviewText": "{days} Tage im Zeitraum · {workDays} Tage mit Stunden",
+  "calendar.bulkVacation": "Ferien eintragen",
+  "calendar.bulkVacationTitle": "Ferien für Zeitraum eintragen",
+  "calendar.bulkVacationDesc": "Erstellt Ferieneinträge für alle Werktage (Mo–Fr) im gewählten Zeitraum. Wochenenden werden automatisch übersprungen.",
+  "calendar.vacPreviewTitle": "Vorschau",
+  "calendar.vacPreviewText": "{totalDays} Tage im Zeitraum · {workDays} Ferientage (Werktage)",
+  "calendar.vacOverwrite": "Bestehende Arbeitszeit-Einträge überschreiben",
+  "calendar.vacOverwriteHint": "Bestehende Feiertage werden nie überschrieben.",
+  "calendar.vacSubmit": "Ferien eintragen",
+  "calendar.vacResult": "{created} erstellt · {updated} aktualisiert · {skipped} übersprungen",
+  "calendar.vacError": "Fehler beim Eintragen der Ferien",
+  // Security questions
+  "sq.pet": "Wie heisst dein Haustier?",
+  "sq.city": "Wie lautet dein Heimatsort?",
+  "sq.food": "Was ist dein Lieblingsgericht?",
+  "sq.teacher": "Wie hiess dein/e erste/r Freund/-in?",
+  "sq.car": "Was war dein erstes Auto?",
+  "sq.custom": "Eigene Frage...",
+  // Common
+  "common.loading": "Laden...",
+  "common.error": "Ein Fehler ist aufgetreten",
+  "common.success": "Erfolgreich",
+};
+
+type I18nContextType = {
+  t: (key: string, params?: Record<string, string>) => string;
+};
+
+const I18nContext = createContext<I18nContextType>({
+  t: (key: string) => key,
+});
+
+export function I18nProvider({ children }: { children: React.ReactNode }) {
+  const t = useCallback(
+    (key: string, params?: Record<string, string>) => {
+      let str = translations?.[key] ?? key;
+      if (params) {
+        Object.entries(params ?? {}).forEach(([k, v]: [string, string]) => {
+          str = str?.replace?.(`{${k}}`, v ?? "") ?? str;
+        });
+      }
+      return str ?? key;
+    },
+    []
+  );
+
+  return (
+    <I18nContext.Provider value={{ t }}>
+      {children}
+    </I18nContext.Provider>
+  );
+}
+
+export function useI18n() {
+  return useContext(I18nContext);
+}
+
+export const securityQuestionKeys = [
+  "sq.pet",
+  "sq.city",
+  "sq.food",
+  "sq.teacher",
+  "sq.car",
+  "sq.custom",
+];
