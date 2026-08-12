@@ -144,7 +144,7 @@ Danach `npx prisma migrate dev` und `scripts/seed.ts` muss weiter durchlaufen.
 
 ---
 
-### - [ ] 4. Kalender + Tagesdialog
+### - [x] 4. Kalender + Tagesdialog
 
 `app/(app)/calendar/page.tsx`:
 - Woche startet **Montag**
@@ -224,3 +224,12 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   > eine invasivere Umstellung der Schleifenlogik auf UTC-Iteration erfordert
   > (Regressionsrisiko) und der Bug bereits vor diesem Umbau bestand. Sollte vor
   > Produktivbetrieb separat behoben werden.
+- Schritt 4: Tagesdialog nach components/day-entry-dialog.tsx ausgelagert. Im Browser
+  end-to-end getestet (Playwright, lokal installiert): Login, Tag öffnen, arbeit-Eintrag
+  mit von/bis/pause/kunde anlegen, Absenz-Eintrag anlegen (Von/Bis ausgeblendet, Stunden
+  defaultet korrekt auf Tagessoll), Eintrag löschen, Kalendergitter zeigt Summe+Farbcode
+  pro Tag und fehlende Sollstunden in Rot für leere Arbeitstage — keine Konsolenfehler.
+  Dabei Bug gefunden und gefixt: neue arbeit-Einträge schickten fälschlich einen
+  hours-Wert mit (Default-Vorbelegung des ausgeblendeten Felds) statt null; harmlos
+  für die Berechnung (stundenAusEintrag ignoriert hours bei arbeit, wenn von/bis
+  gesetzt sind), aber unsaubere Daten — behoben.

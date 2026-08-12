@@ -3,17 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ChevronRight, Plus, X, Trash2, Clock, Pencil, CalendarClock, Palmtree } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X, Trash2, Pencil, CalendarClock, Palmtree } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
-
-interface TimeEntry {
-  id: string;
-  date: string;
-  hours: number;
-  type: string;
-}
+import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput } from "@/lib/calc";
+import { DayEntryDialog, type DayTimeEntry, type DayCustomer } from "@/components/day-entry-dialog";
 
 interface CustomerHourEntry {
   id: string;
@@ -25,8 +20,8 @@ interface UserProfile {
   firstName: string;
   weeklyHours: number;
   pensum: number;
-  baseWeeklyHours?: number | null;
-  basePensum?: number | null;
+  vacationDays: number;
+  startDate: string | null;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
 }
 
@@ -37,6 +32,17 @@ interface PensumChange {
   effectiveFrom: string;
 }
 
+const TYPE_DOT_COLOR: Record<string, string> = {
+  arbeit: "bg-green-500",
+  ferien: "bg-sky-400",
+  feiertag: "bg-purple-400",
+  krank: "bg-red-400",
+  militaer: "bg-orange-400",
+  unbezahlt: "bg-gray-400",
+};
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
 export default function CalendarPage() {
   const { data: session } = useSession() || {};
   const { t } = useI18n();
@@ -44,21 +50,16 @@ export default function CalendarPage() {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
-  const [entries, setEntries] = useState<TimeEntry[]>([]);
+  const [entries, setEntries] = useState<DayTimeEntry[]>([]);
+  const [customers, setCustomers] = useState<DayCustomer[]>([]);
   const [customerHours, setCustomerHours] = useState<CustomerHourEntry[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
-  const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pensumChanges, setPensumChanges] = useState<PensumChange[]>([]);
   const [loading, setLoading] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const monthPickerRef = useRef<HTMLDivElement>(null);
-
-  // Day modal state
-  const [dayHours, setDayHours] = useState("0.00");
-  const [dayType, setDayType] = useState("work");
-  const [dayEntryId, setDayEntryId] = useState<string | null>(null);
 
   // Customer edit modal state
   const [editingCustomer, setEditingCustomer] = useState<CustomerHourEntry | null>(null);
@@ -97,6 +98,16 @@ export default function CalendarPage() {
     } catch (err: any) { console.error(err); }
   }, [currentDate?.year, currentDate?.month]);
 
+  const fetchCustomers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/customers");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setCustomers(data?.customers ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
   const fetchCustomerHours = useCallback(async () => {
     try {
       const res = await fetch(`/api/customer-hours?year=${currentDate?.year}&month=${currentDate?.month}`);
@@ -116,6 +127,8 @@ export default function CalendarPage() {
           firstName: data?.firstName ?? "",
           weeklyHours: data?.weeklyHours ?? 42,
           pensum: data?.pensum ?? 100,
+          vacationDays: data?.vacationDays ?? 25,
+          startDate: data?.startDate ?? null,
           standardWeek: data?.standardWeek ?? { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
         });
       }
@@ -133,7 +146,7 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => { fetchEntries(); fetchCustomerHours(); }, [fetchEntries, fetchCustomerHours]);
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); }, [fetchProfile, fetchPensumChanges]);
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchCustomers(); }, [fetchProfile, fetchPensumChanges, fetchCustomers]);
 
   // Close month picker on outside click
   useEffect(() => {
@@ -174,17 +187,28 @@ export default function CalendarPage() {
     weeks.push(currentWeek);
   }
 
-  const getEntryForDay = (day: number) => {
-    const dateStr = `${currentDate?.year}-${String(currentDate?.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return entries?.find?.((e: TimeEntry) => e?.date?.startsWith?.(dateStr)) ?? null;
+  const buildDateStr = (day: number) => `${currentDate?.year}-${String(currentDate?.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+  const getEntriesForDay = (day: number): DayTimeEntry[] => {
+    const dateStr = buildDateStr(day);
+    return entries?.filter?.((e) => e?.date?.startsWith?.(dateStr)) ?? [];
   };
 
-  const getStatusColor = (day: number) => {
-    const entry = getEntryForDay(day);
-    if (!entry) return "bg-gray-300";
-    if ((entry?.hours ?? 0) === 0) return "bg-gray-300";
-    if (entry?.type === "vacation" || entry?.type === "holiday") return "bg-sky-400";
-    return "bg-green-500";
+  const profil: Profil | null = profile
+    ? { pensum: profile.pensum, wochenstunden: profile.weeklyHours, startDate: profile.startDate, ferientage: profile.vacationDays }
+    : null;
+  const changes: PensumChangeInput[] = pensumChanges.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
+
+  const getTagesSoll = (day: number): number => {
+    if (!profil) return 0;
+    return sollStundenTag(buildDateStr(day), profil, changes);
+  };
+
+  const getDayTotalHours = (day: number, dayEntries: DayTimeEntry[], tagesSoll: number): number => {
+    return dayEntries.reduce(
+      (sum, e) => sum + stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll),
+      0
+    );
   };
 
   const isToday = (day: number) => {
@@ -192,78 +216,9 @@ export default function CalendarPage() {
     return now.getFullYear() === currentDate?.year && now.getMonth() + 1 === currentDate?.month && now.getDate() === day;
   };
 
-  // Get pensum/weeklyHours for a specific date (considering pensum changes)
-  const getPensumForDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    // Basis = Werte vor der ersten Pensumsänderung (nicht die aktuellen Profilwerte)
-    let effectivePensum = profile?.basePensum ?? profile?.pensum ?? 100;
-    let effectiveWeeklyHours = profile?.baseWeeklyHours ?? profile?.weeklyHours ?? 42;
-
-    // Apply pensum changes in chronological order
-    for (const change of pensumChanges) {
-      const changeDate = new Date(change.effectiveFrom);
-      if (changeDate <= date) {
-        effectivePensum = change.pensum;
-        effectiveWeeklyHours = change.weeklyHours;
-      }
-    }
-
-    return { pensum: effectivePensum, weeklyHours: effectiveWeeklyHours };
-  };
-
-  const getDailyHoursForDay = (day: number) => {
-    const dateStr = `${currentDate?.year}-${String(currentDate?.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    const { pensum, weeklyHours } = getPensumForDate(dateStr);
-    return (weeklyHours * pensum / 100) / 5;
-  };
-
-  const dailyHours = getDailyHoursForDay(selectedDay ?? 1);
-
   const openDayModal = (day: number) => {
     setSelectedDay(day);
-    const entry = getEntryForDay(day);
-    const dh = getDailyHoursForDay(day);
-    if (entry) {
-      setDayHours(entry?.hours?.toFixed?.(2) ?? "0.00");
-      setDayType(entry?.type ?? "work");
-      setDayEntryId(entry?.id ?? null);
-    } else {
-      setDayHours("0.00");
-      setDayType("work");
-      setDayEntryId(null);
-    }
     setDayModalOpen(true);
-  };
-
-  const handleDayTypeChange = (newType: string) => {
-    setDayType(newType);
-    if (newType === "vacation" || newType === "holiday") {
-      const dh = getDailyHoursForDay(selectedDay ?? 1);
-      setDayHours(dh?.toFixed?.(2) ?? "0.00");
-    }
-  };
-
-  const saveDayEntry = async () => {
-    if (selectedDay === null) return;
-    setLoading(true);
-    try {
-      const dateStr = `${currentDate?.year}-${String(currentDate?.month).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
-      const res = await fetch("/api/time-entries", {
-        method: dayEntryId ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: dayEntryId, date: dateStr, hours: Math.max(0, Math.min(24, parseFloat(dayHours) || 0)), type: dayType }),
-      });
-      if (res?.ok) { await fetchEntries(); setDayModalOpen(false); }
-    } catch (err: any) { console.error(err); } finally { setLoading(false); }
-  };
-
-  const deleteDayEntry = async () => {
-    if (!dayEntryId) return;
-    setLoading(true);
-    try {
-      const res = await fetch("/api/time-entries", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: dayEntryId }) });
-      if (res?.ok) { await fetchEntries(); setDayModalOpen(false); }
-    } catch (err: any) { console.error(err); } finally { setLoading(false); }
   };
 
   // Customer hours: Edit
@@ -469,6 +424,11 @@ export default function CalendarPage() {
   const weekdayKeys = ["weekday.mo", "weekday.tu", "weekday.we", "weekday.th", "weekday.fr", "weekday.sa", "weekday.su"];
   const totalCustomerHours = customerHours?.reduce?.((sum: number, ch: CustomerHourEntry) => sum + (ch?.hours ?? 0), 0) ?? 0;
 
+  const selectedDayEntries = selectedDay !== null ? getEntriesForDay(selectedDay) : [];
+  const selectedDayTagesSoll = selectedDay !== null ? getTagesSoll(selectedDay) : 0;
+  const selectedDayLabel = selectedDay !== null ? `${selectedDay}. ${t(`month.${currentDate?.month}`)} ${currentDate?.year}` : "";
+  const selectedDateStr = selectedDay !== null ? buildDateStr(selectedDay) : "";
+
   return (
     <div>
       {/* Greeting */}
@@ -562,23 +522,43 @@ export default function CalendarPage() {
         {/* Weeks */}
         {weeks?.map?.((week: (number | null)[], wi: number) => (
           <div key={wi} className="grid grid-cols-7 gap-1 mb-1">
-            {week?.map?.((day: number | null, di: number) => (
-              <button
-                key={di}
-                disabled={day === null}
-                onClick={() => day !== null && openDayModal(day)}
-                className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm ${
-                  day === null ? 'invisible' : 'hover:bg-accent cursor-pointer'
-                } ${isToday(day ?? 0) ? 'ring-2 ring-primary/30' : ''}`}
-              >
-                <span className={`font-medium ${isToday(day ?? 0) ? 'text-primary font-bold' : di >= 5 ? 'text-muted-foreground/60' : ''}`}>
-                  {day}
-                </span>
-                {day !== null && (
-                  <span className={`w-1.5 h-1.5 rounded-full mt-1 ${getStatusColor(day)}`} />
-                )}
-              </button>
-            ))}
+            {week?.map?.((day: number | null, di: number) => {
+              if (day === null) {
+                return <button key={di} disabled className="invisible py-2 rounded-xl" />;
+              }
+              const dayEntries = getEntriesForDay(day);
+              const tagesSoll = getTagesSoll(day);
+              const totalHours = getDayTotalHours(day, dayEntries, tagesSoll);
+              const distinctTypes = Array.from(new Set(dayEntries.map((e) => e.type)));
+              const weekday = new Date(currentDate.year, currentDate.month - 1, day).getDay();
+              const isWorkday = weekday !== 0 && weekday !== 6;
+              const isMissing = dayEntries.length === 0 && isWorkday && tagesSoll > 0;
+
+              return (
+                <button
+                  key={di}
+                  onClick={() => openDayModal(day)}
+                  className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm hover:bg-accent cursor-pointer ${isToday(day) ? 'ring-2 ring-primary/30' : ''}`}
+                >
+                  <span className={`font-medium ${isToday(day) ? 'text-primary font-bold' : di >= 5 ? 'text-muted-foreground/60' : ''}`}>
+                    {day}
+                  </span>
+                  {distinctTypes.length > 0 && (
+                    <span className="flex items-center gap-0.5 mt-0.5">
+                      {distinctTypes.map((typ) => (
+                        <span key={typ} className={`w-1.5 h-1.5 rounded-full ${TYPE_DOT_COLOR[typ] ?? 'bg-gray-300'}`} />
+                      ))}
+                    </span>
+                  )}
+                  {dayEntries.length === 0 && !isMissing && (
+                    <span className="w-1.5 h-1.5 rounded-full mt-0.5 bg-gray-300" />
+                  )}
+                  <span className={`text-[10px] font-mono mt-0.5 leading-none ${isMissing ? 'text-red-500 font-semibold' : 'text-muted-foreground'}`}>
+                    {dayEntries.length > 0 ? `${round1(totalHours)}h` : isMissing ? `${round1(tagesSoll)}h` : ' '}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         ))}
       </motion.div>
@@ -613,56 +593,24 @@ export default function CalendarPage() {
       </div>
 
       {/* Legend */}
-      <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-300" /> {t("calendar.noEntries")}</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-500" /> {t("calendar.work")}</span>
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-400" /> {t("calendar.vacation")}/{t("calendar.holiday")}</span>
+        {Object.entries(TYPE_DOT_COLOR).map(([typ, color]) => (
+          <span key={typ} className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${color}`} /> {t(`calendar.type.${typ}`)}</span>
+        ))}
       </div>
 
-      {/* Day Entry Modal */}
-      <AnimatePresence>
-        {dayModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm px-4" onClick={() => setDayModalOpen(false)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-sm" style={{ boxShadow: "var(--shadow-lg)" }}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display font-semibold">
-                  {selectedDay}. {t(`month.${currentDate?.month}`)} {currentDate?.year}
-                </h3>
-                <button onClick={() => setDayModalOpen(false)} className="p-1 rounded-lg hover:bg-accent transition"><X className="w-4 h-4" /></button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">{t("calendar.type")}</label>
-                  <div className="flex gap-2">
-                    {["work", "vacation", "holiday"].map((type: string) => (
-                      <button key={type} onClick={() => handleDayTypeChange(type)} className={`flex-1 py-2 rounded-xl text-sm font-medium transition ${dayType === type ? 'bg-primary text-primary-foreground' : 'bg-secondary text-foreground hover:bg-accent'}`}>
-                        {t(`calendar.${type}`)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {t("calendar.hours")}</label>
-                  <input type="number" step="0.25" min="0" max="24" value={dayHours} onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const v = e?.target?.value ?? "0.00";
-                    if (v === "") { setDayHours(""); return; }
-                    const num = parseFloat(v);
-                    if (isNaN(num)) return;
-                    if (num < 0) setDayHours("0");
-                    else if (num > 24) setDayHours("24");
-                    else setDayHours(v);
-                  }} className="w-full px-4 py-2.5 rounded-xl bg-secondary text-center font-mono text-lg focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-                </div>
-                <div className="flex gap-2">
-                  {dayEntryId && <button onClick={deleteDayEntry} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-destructive/10 text-destructive font-medium hover:bg-destructive/20 transition disabled:opacity-50 flex items-center justify-center gap-1"><Trash2 className="w-4 h-4" /> {t("calendar.delete")}</button>}
-                  <button onClick={saveDayEntry} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:opacity-90 transition disabled:opacity-50">{loading ? t("common.loading") : t("calendar.save")}</button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Day Entry Dialog */}
+      <DayEntryDialog
+        open={dayModalOpen}
+        onClose={() => setDayModalOpen(false)}
+        dateStr={selectedDateStr}
+        dayLabel={selectedDayLabel}
+        entries={selectedDayEntries}
+        customers={customers}
+        tagesSoll={selectedDayTagesSoll}
+        onChanged={fetchEntries}
+      />
 
       {/* Edit Customer Hour Modal */}
       <AnimatePresence>
