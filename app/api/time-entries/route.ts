@@ -59,11 +59,15 @@ export async function POST(req: Request) {
 
     const clampedHours = Math.max(0, Math.min(24, Number(hours) || 0));
 
-    const entry = await prisma.timeEntry.upsert({
-      where: { userId_date: { userId, date: new Date(date) } },
-      update: { hours: clampedHours, type: type ?? "work" },
-      create: { userId, date: new Date(date), hours: clampedHours, type: type ?? "work" },
-    });
+    const existing = await prisma.timeEntry.findFirst({ where: { userId, date: new Date(date) } });
+    const entry = existing
+      ? await prisma.timeEntry.update({
+          where: { id: existing.id },
+          data: { hours: clampedHours, type: type ?? "work" },
+        })
+      : await prisma.timeEntry.create({
+          data: { userId, date: new Date(date), hours: clampedHours, type: type ?? "work" },
+        });
 
     return NextResponse.json({ entry });
   } catch (error: any) {
@@ -99,11 +103,15 @@ export async function PUT(req: Request) {
     }
 
     // Fallback to upsert by date
-    const entry = await prisma.timeEntry.upsert({
-      where: { userId_date: { userId, date: new Date(date) } },
-      update: { hours: clampedHours, type: type ?? "work" },
-      create: { userId, date: new Date(date), hours: clampedHours, type: type ?? "work" },
-    });
+    const existing = await prisma.timeEntry.findFirst({ where: { userId, date: new Date(date) } });
+    const entry = existing
+      ? await prisma.timeEntry.update({
+          where: { id: existing.id },
+          data: { hours: clampedHours, type: type ?? "work" },
+        })
+      : await prisma.timeEntry.create({
+          data: { userId, date: new Date(date), hours: clampedHours, type: type ?? "work" },
+        });
 
     return NextResponse.json({ entry });
   } catch (error: any) {

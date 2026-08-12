@@ -38,6 +38,7 @@ model User {
   securityQuestions SecurityQuestion[]
   timeEntries      TimeEntry[]
   customerHours    CustomerHour[]
+  customers        Customer[]
   pensumChanges    PensumChange[]
   overtimePayouts  OvertimePayout[]
 }
@@ -65,15 +66,32 @@ model SecurityQuestion {
 }
 
 model TimeEntry {
-  id     String   @id @default(cuid())
-  userId String
-  date   DateTime @db.Date
-  hours  Float
-  type   String   @default("work")
-  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  userId     String
+  date       DateTime @db.Date
+  hours      Float?
+  type       String   @default("arbeit")
+  von        String?
+  bis        String?
+  pauseMin   Int      @default(0)
+  projekt    String?
+  notiz      String?
+  customerId String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
-  @@unique([userId, date])
   @@index([userId, date])
+}
+
+model Customer {
+  id        String      @id @default(cuid())
+  userId    String
+  name      String
+  billable  Boolean     @default(true)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  timeEntries TimeEntry[]
+
+  @@unique([userId, name])
 }
 
 model OvertimePayout {

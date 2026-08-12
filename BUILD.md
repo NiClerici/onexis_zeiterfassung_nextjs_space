@@ -104,7 +104,7 @@ Dazu diese Kantenfälle:
 
 ---
 
-### - [ ] 2. Schema-Migration
+### - [x] 2. Schema-Migration
 
 `prisma/schema.prisma`:
 - `TimeEntry`: `@@unique([userId, date])` **entfernen** (mehrere Einträge pro Tag)
@@ -198,3 +198,10 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   `bulk-vacation/route.ts` (Typ `Promise<any>[]` statt `Prisma.PrismaPromise<any>[]`).
   Minimal per Typannotation gefixt, damit das Gate sauber ist — keine
   Verhaltensänderung, keine Vorwegnahme von Schritt 3.
+- Schritt 2: Das Entfernen von `@@unique([userId, date])` bricht den
+  `upsert`-Aufruf auf `userId_date` in `app/api/time-entries/route.ts`
+  (bereits in Schritt 3 als bekannt dokumentiert). Minimal auf
+  `findFirst` + `update`/`create` umgestellt, um das bisherige
+  Ein-Eintrag-pro-Tag-Verhalten unverändert zu erhalten — von/bis/pauseMin/
+  projekt/notiz/customerId, Typ-Whitelist-Erweiterung und Mehrfacheinträge
+  pro Tag bleiben bewusst Schritt 3 vorbehalten.
