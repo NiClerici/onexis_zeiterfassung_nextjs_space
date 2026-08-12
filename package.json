@@ -5,7 +5,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
   },
   "prisma": {
     "seed": "tsx --require dotenv/config scripts/safe-seed.ts"
@@ -28,7 +31,8 @@
     "tailwindcss-animate": "1.0.7",
     "ts-node": "10.9.2",
     "tsx": "4.20.3",
-    "typescript": "5.2.2"
+    "typescript": "5.2.2",
+    "vitest": "^2.1.9"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
