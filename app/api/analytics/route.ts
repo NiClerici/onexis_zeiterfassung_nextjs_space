@@ -118,7 +118,8 @@ export async function GET(req: Request) {
 
     // Monatliche Aufschlüsselung fürs Chart
     const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
-    const monthlyData: Array<{ month: string; target: number; actual: number; customer: number }> = [];
+    const arbeitEintraege = eintraege.filter((e) => e.typ === "arbeit");
+    const monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }> = [];
     const currentMonth = new Date(startDate);
     while (currentMonth <= endDate) {
       const mYear = currentMonth.getUTCFullYear();
@@ -127,7 +128,9 @@ export async function GET(req: Request) {
       const mEndFull = new Date(Date.UTC(mYear, mMonth, 0));
       const mEnd = mEndFull > endDate ? endDate : mEndFull;
       const mk = kennzahlen({ from: mStart, to: mEnd, heute, eintraege, profil, changes, payouts, kunden });
-      monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, customer: mk.kundenstunden });
+      // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im Verlaufs-Chart
+      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [], kunden });
+      monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, work: mkWork.ist, customer: mk.kundenstunden });
       currentMonth.setUTCMonth(currentMonth.getUTCMonth() + 1);
     }
 

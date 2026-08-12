@@ -3,18 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ChevronRight, Plus, X, Trash2, Pencil, CalendarClock, Palmtree } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, CalendarClock, Palmtree } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
 import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput } from "@/lib/calc";
 import { DayEntryDialog, type DayTimeEntry, type DayCustomer } from "@/components/day-entry-dialog";
-
-interface CustomerHourEntry {
-  id: string;
-  customerName: string;
-  hours: number;
-}
 
 interface UserProfile {
   firstName: string;
@@ -52,25 +46,12 @@ export default function CalendarPage() {
   });
   const [entries, setEntries] = useState<DayTimeEntry[]>([]);
   const [customers, setCustomers] = useState<DayCustomer[]>([]);
-  const [customerHours, setCustomerHours] = useState<CustomerHourEntry[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pensumChanges, setPensumChanges] = useState<PensumChange[]>([]);
-  const [loading, setLoading] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const monthPickerRef = useRef<HTMLDivElement>(null);
-
-  // Customer edit modal state
-  const [editingCustomer, setEditingCustomer] = useState<CustomerHourEntry | null>(null);
-  const [editCustomerName, setEditCustomerName] = useState("");
-  const [editCustomerHours, setEditCustomerHours] = useState("");
-  const [editCustomerModalOpen, setEditCustomerModalOpen] = useState(false);
-
-  // New customer modal state
-  const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerHours, setNewCustomerHours] = useState("");
-  const [addCustomerModalOpen, setAddCustomerModalOpen] = useState(false);
 
   // Apply Standardwoche modal
   const [applyModalOpen, setApplyModalOpen] = useState(false);
@@ -108,16 +89,6 @@ export default function CalendarPage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
-  const fetchCustomerHours = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/customer-hours?year=${currentDate?.year}&month=${currentDate?.month}`);
-      if (res?.ok) {
-        const data = await res?.json?.().catch(() => ({}));
-        setCustomerHours(data?.customerHours ?? []);
-      }
-    } catch (err: any) { console.error(err); }
-  }, [currentDate?.year, currentDate?.month]);
-
   const fetchProfile = useCallback(async () => {
     try {
       const res = await fetch("/api/profile");
@@ -145,7 +116,7 @@ export default function CalendarPage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
-  useEffect(() => { fetchEntries(); fetchCustomerHours(); }, [fetchEntries, fetchCustomerHours]);
+  useEffect(() => { fetchEntries(); }, [fetchEntries]);
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchCustomers(); }, [fetchProfile, fetchPensumChanges, fetchCustomers]);
 
   // Close month picker on outside click
@@ -219,66 +190,6 @@ export default function CalendarPage() {
   const openDayModal = (day: number) => {
     setSelectedDay(day);
     setDayModalOpen(true);
-  };
-
-  // Customer hours: Edit
-  const openEditCustomer = (ch: CustomerHourEntry) => {
-    setEditingCustomer(ch);
-    setEditCustomerName(ch.customerName);
-    setEditCustomerHours(String(ch.hours));
-    setEditCustomerModalOpen(true);
-  };
-
-  const saveEditCustomer = async () => {
-    if (!editingCustomer) return;
-    setLoading(true);
-    try {
-      const res = await fetch("/api/customer-hours", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: editingCustomer.id, customerName: editCustomerName.trim(), hours: parseFloat(editCustomerHours) || 0 }),
-      });
-      if (res?.ok) { await fetchCustomerHours(); setEditCustomerModalOpen(false); setEditingCustomer(null); }
-    } catch (err: any) { console.error(err); } finally { setLoading(false); }
-  };
-
-  // Customer hours: Delete
-  const deleteCustomerHour = async (id: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/customer-hours", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (res?.ok) { await fetchCustomerHours(); }
-    } catch (err: any) { console.error(err); } finally { setLoading(false); }
-  };
-
-  // Customer hours: Add new
-  const openAddCustomer = () => {
-    // Pre-fill with last entered customer name
-    const lastCustomer = customerHours?.length > 0 ? customerHours[customerHours.length - 1]?.customerName ?? "" : "";
-    setNewCustomerName(lastCustomer);
-    setNewCustomerHours("");
-    setAddCustomerModalOpen(true);
-  };
-
-  const saveNewCustomer = async () => {
-    if (!newCustomerName.trim() || !(parseFloat(newCustomerHours) > 0)) return;
-    setLoading(true);
-    try {
-      const res = await fetch("/api/customer-hours", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          year: currentDate?.year,
-          month: currentDate?.month,
-          items: [...customerHours.map(ch => ({ customerName: ch.customerName, hours: ch.hours })), { customerName: newCustomerName.trim(), hours: parseFloat(newCustomerHours) }],
-        }),
-      });
-      if (res?.ok) { await fetchCustomerHours(); setAddCustomerModalOpen(false); }
-    } catch (err: any) { console.error(err); } finally { setLoading(false); }
   };
 
   // Month picker
@@ -422,7 +333,6 @@ export default function CalendarPage() {
   };
 
   const weekdayKeys = ["weekday.mo", "weekday.tu", "weekday.we", "weekday.th", "weekday.fr", "weekday.sa", "weekday.su"];
-  const totalCustomerHours = customerHours?.reduce?.((sum: number, ch: CustomerHourEntry) => sum + (ch?.hours ?? 0), 0) ?? 0;
 
   const selectedDayEntries = selectedDay !== null ? getEntriesForDay(selectedDay) : [];
   const selectedDayTagesSoll = selectedDay !== null ? getTagesSoll(selectedDay) : 0;
@@ -563,35 +473,6 @@ export default function CalendarPage() {
         ))}
       </motion.div>
 
-      {/* Customer hours list with edit/delete */}
-      <div className="mt-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium">{t("calendar.customerHours")}: {totalCustomerHours > 0 ? `${totalCustomerHours?.toFixed?.(1)}h` : t("calendar.noEntries")}</span>
-          <button
-            onClick={openAddCustomer}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition"
-          >
-            <Plus className="w-4 h-4" /> {t("calendar.addCustomer")}
-          </button>
-        </div>
-        {customerHours.length > 0 && (
-          <div className="space-y-1.5">
-            {customerHours.map((ch) => (
-              <div key={ch.id} className="flex items-center justify-between bg-card rounded-xl px-3 py-2 text-sm" style={{ boxShadow: "var(--shadow-sm)" }}>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{ch.customerName}</span>
-                  <span className="text-muted-foreground">{ch.hours}h</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button onClick={() => openEditCustomer(ch)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition" title={t("calendar.editCustomer")}><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => deleteCustomerHour(ch.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition" title={t("calendar.deleteCustomer")}><Trash2 className="w-3.5 h-3.5" /></button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* Legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-300" /> {t("calendar.noEntries")}</span>
@@ -611,31 +492,6 @@ export default function CalendarPage() {
         tagesSoll={selectedDayTagesSoll}
         onChanged={fetchEntries}
       />
-
-      {/* Edit Customer Hour Modal */}
-      <AnimatePresence>
-        {editCustomerModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm px-4" onClick={() => setEditCustomerModalOpen(false)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-sm" style={{ boxShadow: "var(--shadow-lg)" }}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display font-semibold">{t("calendar.editCustomer")}</h3>
-                <button onClick={() => setEditCustomerModalOpen(false)} className="p-1 rounded-lg hover:bg-accent transition"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.customerName")}</label>
-                  <input type="text" value={editCustomerName} onChange={(e) => setEditCustomerName(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.hours")}</label>
-                  <input type="number" step="0.5" min="0" value={editCustomerHours} onChange={(e) => setEditCustomerHours(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-                </div>
-                <button onClick={saveEditCustomer} disabled={loading} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:opacity-90 transition disabled:opacity-50">{loading ? t("common.loading") : t("calendar.save")}</button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Apply Standardwoche Modal */}
       <AnimatePresence>
@@ -730,31 +586,6 @@ export default function CalendarPage() {
                   </div>
                 </div>
               )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Add Customer Hour Modal */}
-      <AnimatePresence>
-        {addCustomerModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm px-4" onClick={() => setAddCustomerModalOpen(false)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-sm" style={{ boxShadow: "var(--shadow-lg)" }}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display font-semibold">{t("calendar.addCustomer")} — {t(`month.${currentDate?.month}`)} {currentDate?.year}</h3>
-                <button onClick={() => setAddCustomerModalOpen(false)} className="p-1 rounded-lg hover:bg-accent transition"><X className="w-4 h-4" /></button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.customerName")}</label>
-                  <input type="text" value={newCustomerName} onChange={(e) => setNewCustomerName(e.target.value)} placeholder={t("calendar.customerName")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.hours")}</label>
-                  <input type="number" step="0.5" min="0" value={newCustomerHours} onChange={(e) => setNewCustomerHours(e.target.value)} placeholder="h" className="w-full px-3 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-                </div>
-                <button onClick={saveNewCustomer} disabled={loading || !newCustomerName.trim() || !(parseFloat(newCustomerHours) > 0)} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:opacity-90 transition disabled:opacity-50">{loading ? t("common.loading") : t("calendar.save")}</button>
-              </div>
             </motion.div>
           </motion.div>
         )}

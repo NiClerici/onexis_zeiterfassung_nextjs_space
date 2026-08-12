@@ -37,7 +37,6 @@ model User {
 
   securityQuestions SecurityQuestion[]
   timeEntries      TimeEntry[]
-  customerHours    CustomerHour[]
   customers        Customer[]
   pensumChanges    PensumChange[]
   overtimePayouts  OvertimePayout[]
@@ -104,17 +103,4 @@ model OvertimePayout {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, date])
-}
-
-model CustomerHour {
-  id           String @id @default(cuid())
-  userId       String
-  year         Int
-  month        Int
-  customerName String
-  hours        Float
-  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, year, month, customerName])
-  @@index([userId, year, month])
 }

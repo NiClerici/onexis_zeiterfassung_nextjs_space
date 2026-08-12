@@ -14,8 +14,6 @@ interface VacationBalance {
   usedDays: number;
   plannedDays: number;
   remainingDays: number;
-  carryoverDays: number;
-  pensumAdjustedDays: number;
 }
 
 interface AnalyticsData {
@@ -31,7 +29,7 @@ interface AnalyticsData {
   fullTargetHours: number;
   forecastOvertime: number;
   vacationBalance: VacationBalance;
-  monthlyData: Array<{ month: string; target: number; actual: number; customer: number }>;
+  monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }>;
 }
 
 export default function AnalyticsPage() {
@@ -220,11 +218,6 @@ export default function AnalyticsPage() {
                 <div className="bg-secondary rounded-xl p-3">
                   <p className="text-xs text-muted-foreground mb-1">{t("analytics.totalEntitlement")}</p>
                   <p className="text-lg font-mono font-bold">{data.vacationBalance.totalDays}</p>
-                  {(data.vacationBalance.carryoverDays > 0 || data.vacationBalance.pensumAdjustedDays !== data.vacationBalance.totalDays) && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {data.vacationBalance.pensumAdjustedDays}{data.vacationBalance.carryoverDays > 0 ? ` + ${data.vacationBalance.carryoverDays} ${t("analytics.carryover")}` : ""}
-                    </p>
-                  )}
                 </div>
                 <div className="bg-secondary rounded-xl p-3">
                   <p className="text-xs text-muted-foreground mb-1">{t("analytics.usedVacation")}</p>

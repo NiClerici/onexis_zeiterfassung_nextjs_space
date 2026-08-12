@@ -8,7 +8,7 @@ interface AnalyticsData {
   customerHours: number;
   billingRate: number;
   holidays: number;
-  monthlyData: Array<{ month: string; target: number; actual: number; customer: number }>;
+  monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }>;
 }
 
 export default function AnalyticsCharts({ data, t }: { data: AnalyticsData; t: (key: string) => string }) {
@@ -62,7 +62,7 @@ export default function AnalyticsCharts({ data, t }: { data: AnalyticsData; t: (
               />
               <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "none", boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)" }} />
               <Legend verticalAlign="top" wrapperStyle={{ fontSize: 11 }} />
-              <Line type="monotone" dataKey="actual" name={t("analytics.workHours")} stroke="#34C759" strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="work" name={t("analytics.workHours")} stroke="#34C759" strokeWidth={2} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="customer" name={t("analytics.customerHours")} stroke="#FF9149" strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>
           </ResponsiveContainer>

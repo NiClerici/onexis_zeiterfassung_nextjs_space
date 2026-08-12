@@ -162,7 +162,7 @@ unter `components/` ziehen.
 
 ---
 
-### - [ ] 5. Analytics
+### - [x] 5. Analytics
 
 `app/(app)/analytics/page.tsx` + zugehörige Route:
 - Karten: Sollarbeitszeit, Geleistete Stunden (mit Delta), Überzeit,
@@ -233,3 +233,14 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   hours-Wert mit (Default-Vorbelegung des ausgeblendeten Felds) statt null; harmlos
   für die Berechnung (stundenAusEintrag ignoriert hours bei arbeit, wenn von/bis
   gesetzt sind), aber unsaubere Daten — behoben.
+- Schritt 5: Die Karten/Prognose/Feriensaldo-Blöcke und beide Charts existierten aus
+  Schritt 3 bereits im erwarteten Umfang; hier zusätzlich `CustomerHour` vollständig aus
+  Schema (Migration `remove_customer_hour`, Tabelle war leer), `app/api/customer-hours`
+  entfernt, sowie die alte manuelle "Kundenstunden"-Liste im Kalender entfernt (deren
+  Nachfolger, echte Kundenverwaltung, ist laut Schritt 6 dort geplant, nicht hier).
+  `export/route.ts` Sheet 2 zeigt jetzt echte Kunde/billable/Stunden aus TimeEntry+Customer
+  statt der alten manuellen CustomerHour-Tabelle. Monatlicher Verlauf-Chart verglich bisher
+  Gesamt-Ist (inkl. Absenzen) mit Kundenstunden — auf reine Arbeitsstunden (typ=arbeit)
+  korrigiert, wie der Titel "Arbeitsstunden vs. Kundenstunden" es verlangt.
+  Im Browser verifiziert (Playwright): Kalender, Analytics-Seite (alle Karten + beide
+  Charts) und /api/export laufen ohne Konsolen-/Serverfehler.

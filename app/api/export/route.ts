@@ -49,8 +49,6 @@ const fmtDate = (d: Date) => {
   return `${dd}.${mm}.${yyyy}`;
 };
 
-const monthNames = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
-
 const TYPE_LABELS: Record<string, string> = {
   arbeit: "Arbeitszeit",
   ferien: "Ferien",
@@ -141,22 +139,6 @@ export async function GET(req: Request) {
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-    const customerHours = await prisma.customerHour.findMany({
-      where: {
-        userId,
-        OR: (() => {
-          const conditions: any[] = [];
-          const current = new Date(startDate);
-          while (current <= endDate) {
-            conditions.push({ year: current.getUTCFullYear(), month: current.getUTCMonth() + 1 });
-            current.setUTCMonth(current.getUTCMonth() + 1);
-          }
-          return conditions?.length > 0 ? conditions : [{ year: 0, month: 0 }];
-        })(),
-      },
-      orderBy: [{ year: "asc" }, { month: "asc" }],
-    });
-
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, kunden });
 
     const allPayouts = await prisma.overtimePayout.findMany({ where: { userId } });
@@ -164,7 +146,16 @@ export async function GET(req: Request) {
     const netOvertime = k.ueberzeit;
     const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
 
-    const totalCustomerHours = customerHours.reduce((s: number, ch: any) => s + (ch?.hours ?? 0), 0);
+    // Stunden je Kunde im Zeitraum (arbeit-Einträge mit customerId), für Sheet 2
+    const customerBreakdown = kundenRaw
+      .map((kd) => {
+        const hours = eintraege
+          .filter((e) => e.customerId === kd.id && e.typ === "arbeit")
+          .reduce((sum, e) => sum + stundenAusEintrag(e, sollStundenTag(e.date, profil, changes)), 0);
+        return { name: kd.name, billable: kd.billable, hours };
+      })
+      .filter((c) => c.hours > 0)
+      .sort((a, b) => b.hours - a.hours);
 
     // ---- Feriensaldo für das Anzeigejahr ----
     const displayYear = startDate.getUTCFullYear();
@@ -223,26 +214,24 @@ export async function GET(req: Request) {
     // === Sheet 2: Kundenstunden ===
     const ws2 = workbook.addWorksheet("Kundenstunden");
     ws2.columns = [
-      { header: "Jahr", key: "year", width: 10 },
-      { header: "Monat", key: "month", width: 16 },
       { header: "Kunde", key: "customer", width: 28 },
+      { header: "Verrechenbar", key: "billable", width: 14 },
       { header: "Stunden", key: "hours", width: 12 },
     ];
-    styleHeaderRow(ws2.getRow(1), 4);
+    styleHeaderRow(ws2.getRow(1), 3);
 
-    for (const ch of customerHours ?? []) {
+    for (const c of customerBreakdown) {
       const row = ws2.addRow({
-        year: ch.year,
-        month: monthNames[(ch.month ?? 1) - 1] ?? "",
-        customer: ch.customerName ?? "",
-        hours: Math.round((ch?.hours ?? 0) * 100) / 100,
+        customer: c.name,
+        billable: c.billable ? "Ja" : "Nein",
+        hours: Math.round(c.hours * 100) / 100,
       });
-      styleDataRow(row, 4);
+      styleDataRow(row, 3);
     }
 
-    if ((customerHours?.length ?? 0) === 0) {
-      const emptyRow = ws2.addRow({ year: "", month: "", customer: "Keine Kundenstunden vorhanden", hours: "" });
-      emptyRow.getCell(3).font = { italic: true, color: { argb: "FF999999" } };
+    if (customerBreakdown.length === 0) {
+      const emptyRow = ws2.addRow({ customer: "Keine Kundenstunden vorhanden", billable: "", hours: "" });
+      emptyRow.getCell(1).font = { italic: true, color: { argb: "FF999999" } };
     }
 
     ws2.views = [{ state: "frozen", ySplit: 1 }];
