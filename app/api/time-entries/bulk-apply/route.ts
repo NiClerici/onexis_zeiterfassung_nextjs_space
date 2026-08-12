@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 
 // Wochentag-Index (0=So, 1=Mo, ... 6=Sa) → Template-Key
 function getTemplateHoursForDay(date: Date, tpl: {
@@ -98,7 +99,7 @@ export async function POST(req: Request) {
     let skippedProtected = 0; // Ferien/Feiertage werden nie überschrieben
 
     const current = new Date(fromDate);
-    const operations: Promise<any>[] = [];
+    const operations: Prisma.PrismaPromise<any>[] = [];
 
     while (current <= toDate) {
       const hours = getTemplateHoursForDay(current, tpl);

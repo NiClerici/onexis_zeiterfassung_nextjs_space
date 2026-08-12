@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 
 function parseDateYMD(s: string): Date | null {
   if (!s || typeof s !== "string") return null;
@@ -80,7 +81,7 @@ export async function POST(req: Request) {
     let skipped = 0;
 
     const current = new Date(fromDate);
-    const operations: Promise<any>[] = [];
+    const operations: Prisma.PrismaPromise<any>[] = [];
 
     while (current <= toDate) {
       const dayOfWeek = current.getDay();

@@ -77,7 +77,7 @@ Auf 1 Dezimale runden. **Pensum geht nicht ein.** Der Startmonat zählt mit
 
 ## Schritte
 
-### - [ ] 1. `lib/calc.ts` + Tests
+### - [x] 1. `lib/calc.ts` + Tests
 
 Reine Funktionen, **kein** Prisma-Import, keine DB — alles kommt als Parameter rein.
 Signaturen etwa:
@@ -192,3 +192,9 @@ unter `components/` ziehen.
 ## Notizen des Loops
 
 _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
+
+- Schritt 1: `npm run typecheck` schlug vor Beginn bereits fehl wegen zweier
+  vorbestehender Prisma-`$transaction`-Typfehler in `bulk-apply/route.ts` und
+  `bulk-vacation/route.ts` (Typ `Promise<any>[]` statt `Prisma.PrismaPromise<any>[]`).
+  Minimal per Typannotation gefixt, damit das Gate sauber ist — keine
+  Verhaltensänderung, keine Vorwegnahme von Schritt 3.
