@@ -129,7 +129,7 @@ Danach `npx prisma migrate dev` und `scripts/seed.ts` muss weiter durchlaufen.
 
 ---
 
-### - [ ] 3. API-Routen auf das neue Modell
+### - [x] 3. API-Routen auf das neue Modell
 
 - `app/api/time-entries/route.ts`: mehrere Einträge pro Tag, `von`/`bis`/`pauseMin`/
   `projekt`/`notiz`/`customerId` durchreichen. Der `upsert` auf `userId_date`
@@ -205,3 +205,22 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   Ein-Eintrag-pro-Tag-Verhalten unverändert zu erhalten — von/bis/pauseMin/
   projekt/notiz/customerId, Typ-Whitelist-Erweiterung und Mehrfacheinträge
   pro Tag bleiben bewusst Schritt 3 vorbehalten.
+- Schritt 1 (Korrektur während Schritt 3 entdeckt): feriensaldo() hat bezogen/geplant
+  faelschlich in Stunden statt in Tagen summiert (Einheiten-Mismatch mit anspruch, das in
+  Tagen ist). Behoben: Umrechnung ueber das Tagessoll des jeweiligen Eintragsdatums
+  (stunden / sollStundenTag), damit auch Halbtage korrekt anteilig zaehlen. Tests angepasst.
+- Schritt 3: time-entries/route.ts (GET), analytics/route.ts und export/route.ts bauten
+  Perioden-Grenzen bisher mit lokalen new Date(jahr, monat, tag)-Konstruktoren. Da der
+  Server nicht in UTC laeuft (hier: Europe/Zurich) und @db.Date-Werte anhand des
+  UTC-Kalendertags gespeichert/verglichen werden, fiel dadurch systematisch der letzte Tag
+  jeder Periode aus Monats-/Jahres-/Quartalsauswertungen heraus (verifiziert: ein Eintrag
+  am 31.08. wurde von der August-Abfrage nicht gefunden). In diesen drei Dateien auf
+  Date.UTC(...) bzw. UTC-Getter/Setter umgestellt und den Fix verifiziert. lib/calc.ts war
+  davon nicht betroffen (arbeitet intern bereits UTC-safe).
+  > HINWEIS (kein Blocker für diesen Schritt, Gates sind grün): bewusst nicht mitgefixt -
+  > time-entries/bulk-apply/route.ts und bulk-vacation/route.ts (parseDateYMD,
+  > Tagesschleifen-Iteration) haben denselben Konstruktionsfehler, sowohl beim Schreiben
+  > (dbDate) als auch beim Lesen bestehender Eintraege im Zeitraum. Nicht mitgefixt, da es
+  > eine invasivere Umstellung der Schleifenlogik auf UTC-Iteration erfordert
+  > (Regressionsrisiko) und der Bug bereits vor diesem Umbau bestand. Sollte vor
+  > Produktivbetrieb separat behoben werden.

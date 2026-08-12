@@ -99,9 +99,9 @@ export async function POST(req: Request) {
       const ex = existingMap.get(key);
       if (ex) {
         // Never overwrite holidays
-        if (ex.type === "holiday") {
+        if (ex.type === "feiertag") {
           skipped++;
-        } else if (ex.type === "vacation") {
+        } else if (ex.type === "ferien") {
           // Already vacation — skip
           skipped++;
         } else if (!overwriteExisting) {
@@ -110,7 +110,7 @@ export async function POST(req: Request) {
           operations.push(
             prisma.timeEntry.update({
               where: { id: ex.id },
-              data: { hours, type: "vacation" },
+              data: { hours, type: "ferien" },
             })
           );
           updated++;
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
       } else {
         operations.push(
           prisma.timeEntry.create({
-            data: { userId, date: dbDate, hours, type: "vacation" },
+            data: { userId, date: dbDate, hours, type: "ferien" },
           })
         );
         created++;

@@ -219,7 +219,8 @@ describe("ueberzeit berücksichtigt OvertimePayouts", () => {
 describe("feriensaldo", () => {
   const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
 
-  it("bezogen zählt Ferien bis heute, geplant danach", () => {
+  it("bezogen zählt Ferien bis heute, geplant danach — in Tagen, nicht Stunden", () => {
+    // Tagessoll bei 40h/100% = 8h/Tag → ein Ganztages-Eintrag mit 8h = 1 Tag
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-08-12",
@@ -229,9 +230,19 @@ describe("feriensaldo", () => {
         { date: "2026-09-01", typ: "ferien", hours: 8 },
       ],
     });
-    expect(result.bezogen).toBe(8);
-    expect(result.geplant).toBe(8);
-    expect(result.offen).toBe(round1(result.anspruch - 16));
+    expect(result.bezogen).toBe(1);
+    expect(result.geplant).toBe(1);
+    expect(result.offen).toBe(round1(result.anspruch - 2));
+  });
+
+  it("Halbtags-Ferieneintrag zählt anteilig (4h von 8h Tagessoll = 0.5 Tag)", () => {
+    const result = feriensaldo({
+      jahr: 2026,
+      heute: "2026-08-12",
+      profil,
+      eintraege: [{ date: "2026-08-10", typ: "ferien", hours: 4 }],
+    });
+    expect(result.bezogen).toBe(0.5);
   });
 
   it("Pensum geht nicht in den Anspruch ein", () => {

@@ -5,40 +5,41 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import ExcelJS from "exceljs";
+import {
+  kennzahlen,
+  feriensaldo,
+  sollStundenTag,
+  stundenAusEintrag,
+  type Profil,
+  type PensumChangeInput,
+  type EintragMitDatum,
+  type PayoutInput,
+  type KundeInput,
+} from "@/lib/calc";
 
-// Helper: get target hours for a date range considering pensum changes
-async function getTargetHoursForExport(userId: string, start: Date, end: Date) {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) return 0;
+function buildProfil(user: any): Profil {
+  return {
+    pensum: user?.pensum ?? 100,
+    wochenstunden: user?.weeklyHours ?? 42,
+    startDate: user?.startDate ?? null,
+    ferientage: user?.vacationDays ?? 25,
+  };
+}
 
-  const pensumChanges = await prisma.pensumChange.findMany({
-    where: { userId },
-    orderBy: { effectiveFrom: "asc" },
-  });
+function mapChanges(changes: any[]): PensumChangeInput[] {
+  return changes.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
+}
 
-  function getDailyRateForDate(date: Date): number {
-    let effectivePensum = user?.basePensum ?? user?.pensum ?? 100;
-    let effectiveWeeklyHours = user?.baseWeeklyHours ?? user?.weeklyHours ?? 42;
-    for (const change of pensumChanges) {
-      const changeDate = new Date(change.effectiveFrom);
-      if (changeDate <= date) {
-        effectivePensum = change.pensum;
-        effectiveWeeklyHours = change.weeklyHours;
-      }
-    }
-    return (effectiveWeeklyHours * effectivePensum / 100) / 5;
-  }
-
-  let total = 0;
-  const current = new Date(start);
-  while (current <= end) {
-    const day = current.getDay();
-    if (day !== 0 && day !== 6) {
-      total += getDailyRateForDate(current);
-    }
-    current.setDate(current.getDate() + 1);
-  }
-  return total;
+function mapEintraege(entries: any[]): EintragMitDatum[] {
+  return entries.map((e) => ({
+    date: e.date,
+    typ: e.type,
+    von: e.von,
+    bis: e.bis,
+    pauseMin: e.pauseMin,
+    hours: e.hours,
+    customerId: e.customerId,
+  }));
 }
 
 const fmtDate = (d: Date) => {
@@ -49,6 +50,15 @@ const fmtDate = (d: Date) => {
 };
 
 const monthNames = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
+
+const TYPE_LABELS: Record<string, string> = {
+  arbeit: "Arbeitszeit",
+  ferien: "Ferien",
+  krank: "Krank",
+  feiertag: "Feiertag",
+  militaer: "Militär",
+  unbezahlt: "Unbezahlt",
+};
 
 // Style helpers
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A56DB" } };
@@ -86,6 +96,9 @@ export async function GET(req: Request) {
     if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const userId = (session.user as any)?.id;
 
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
     const url = new URL(req.url);
     const type = url?.searchParams?.get?.("type") ?? "month";
     let startDate: Date;
@@ -95,24 +108,38 @@ export async function GET(req: Request) {
     const year = parseInt(url?.searchParams?.get?.("year") ?? String(now.getFullYear()));
     const month = parseInt(url?.searchParams?.get?.("month") ?? String(now.getMonth() + 1));
 
+    // UTC-Grenzen: @db.Date-Werte werden anhand des UTC-Kalendertags gespeichert/verglichen.
+    // Lokale Date-Konstruktoren würden in Zeitzonen ≠ UTC den letzten Tag der Periode abschneiden.
     if (type === "month") {
-      startDate = new Date(year, month - 1, 1);
-      endDate = new Date(year, month, 0);
+      startDate = new Date(Date.UTC(year, month - 1, 1));
+      endDate = new Date(Date.UTC(year, month, 0));
     } else if (type === "year") {
-      startDate = new Date(year, 0, 1);
-      endDate = new Date(year, 11, 31);
+      startDate = new Date(Date.UTC(year, 0, 1));
+      endDate = new Date(Date.UTC(year, 11, 31));
     } else {
       const fromStr = url?.searchParams?.get?.("from") ?? "";
       const toStr = url?.searchParams?.get?.("to") ?? "";
-      startDate = fromStr ? new Date(fromStr) : new Date(year, 0, 1);
-      endDate = toStr ? new Date(toStr) : new Date(year, 11, 31);
+      startDate = fromStr ? new Date(fromStr) : new Date(Date.UTC(year, 0, 1));
+      endDate = toStr ? new Date(toStr) : new Date(Date.UTC(year, 11, 31));
     }
 
-    // Fetch data
+    const profil = buildProfil(user);
+    const heute = new Date();
+
+    const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId }, orderBy: { effectiveFrom: "asc" } });
+    const changes = mapChanges(pensumChangesRaw);
+
+    const kundenRaw = await prisma.customer.findMany({ where: { userId } });
+    const kunden: KundeInput[] = kundenRaw.map((k) => ({ id: k.id, billable: k.billable }));
+
     const entries = await prisma.timeEntry.findMany({
       where: { userId, date: { gte: startDate, lte: endDate } },
       orderBy: { date: "asc" },
     });
+    const eintraege = mapEintraege(entries);
+
+    const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, date: { gte: startDate, lte: endDate } } });
+    const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
     const customerHours = await prisma.customerHour.findMany({
       where: {
@@ -121,8 +148,8 @@ export async function GET(req: Request) {
           const conditions: any[] = [];
           const current = new Date(startDate);
           while (current <= endDate) {
-            conditions.push({ year: current.getFullYear(), month: current.getMonth() + 1 });
-            current.setMonth(current.getMonth() + 1);
+            conditions.push({ year: current.getUTCFullYear(), month: current.getUTCMonth() + 1 });
+            current.setUTCMonth(current.getUTCMonth() + 1);
           }
           return conditions?.length > 0 ? conditions : [{ year: 0, month: 0 }];
         })(),
@@ -130,94 +157,23 @@ export async function GET(req: Request) {
       orderBy: [{ year: "asc" }, { month: "asc" }],
     });
 
-    // Summary calculations
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const pastEntries = entries.filter((e: any) => new Date(e.date) <= todayEnd);
-    const futureEntries = entries.filter((e: any) => new Date(e.date) > todayEnd);
-
-    const workHours = pastEntries.filter((e: any) => e?.type === "work").reduce((s: number, e: any) => s + (e?.hours ?? 0), 0);
-    const vacationHours = pastEntries.filter((e: any) => e?.type === "vacation").reduce((s: number, e: any) => s + (e?.hours ?? 0), 0);
-    const holidayHours = pastEntries.filter((e: any) => e?.type === "holiday").reduce((s: number, e: any) => s + (e?.hours ?? 0), 0);
-    const istHours = workHours + vacationHours + holidayHours;
-    const futureHoursTotal = futureEntries.reduce((s: number, e: any) => s + (e?.hours ?? 0), 0);
-    const totalIstPlusPlan = istHours + futureHoursTotal;
-
-    const fullTargetHours = await getTargetHoursForExport(userId, startDate, endDate);
-    const effectiveEndDate = endDate > todayEnd ? todayEnd : endDate;
-    const cappedTargetHours = effectiveEndDate >= startDate
-      ? await getTargetHoursForExport(userId, startDate, effectiveEndDate)
-      : 0;
-
-    const overtimeCurrent = istHours - cappedTargetHours;
-    const forecastBalance = totalIstPlusPlan - fullTargetHours;
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, kunden });
 
     const allPayouts = await prisma.overtimePayout.findMany({ where: { userId } });
-    const totalPaidOutHours = allPayouts?.reduce?.((s: number, p: any) => s + (p?.hours ?? 0), 0) ?? 0;
-    const netOvertime = overtimeCurrent - totalPaidOutHours;
+    const totalPaidOutHours = allPayouts.reduce((s, p) => s + p.hours, 0);
+    const netOvertime = k.ueberzeit;
+    const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
 
     const totalCustomerHours = customerHours.reduce((s: number, ch: any) => s + (ch?.hours ?? 0), 0);
 
-    // ---- Vacation balance calculation (same logic as analytics) ----
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    const pensumChanges = await prisma.pensumChange.findMany({ where: { userId }, orderBy: { effectiveFrom: "asc" } });
-    function getDailyRateForDate(date: Date): number {
-      let effectivePensum = user?.basePensum ?? user?.pensum ?? 100;
-      let effectiveWeeklyHours = user?.baseWeeklyHours ?? user?.weeklyHours ?? 42;
-      for (const change of pensumChanges) {
-        const changeDate = new Date(change.effectiveFrom);
-        if (changeDate <= date) { effectivePensum = change.pensum; effectiveWeeklyHours = change.weeklyHours; }
-      }
-      return (effectiveWeeklyHours * effectivePensum / 100) / 5;
-    }
-
-    const displayYear = startDate.getFullYear();
-    const userVacationDaysPerYear = user?.vacationDays ?? 25;
-    const userStartDate = user?.startDate ? new Date(user.startDate) : null;
-    let proRataVacation = userVacationDaysPerYear;
-    if (userStartDate) {
-      const sy = userStartDate.getFullYear();
-      if (sy === displayYear) {
-        const diy = ((displayYear % 4 === 0 && displayYear % 100 !== 0) || displayYear % 400 === 0) ? 366 : 365;
-        const soy = new Date(displayYear, 0, 1);
-        const dp = Math.max(0, Math.floor((userStartDate.getTime() - soy.getTime()) / (1000 * 60 * 60 * 24)));
-        proRataVacation = userVacationDaysPerYear * ((diy - dp) / diy);
-      } else if (sy > displayYear) { proRataVacation = 0; }
-    }
-
-    let carryoverDays = 0;
-    if (displayYear > 2020) {
-      const prevYearStart = new Date(displayYear - 1, 0, 1);
-      const prevYearEnd = new Date(displayYear - 1, 11, 31);
-      let prevYearEntitlement = userVacationDaysPerYear;
-      if (userStartDate) {
-        const sy = userStartDate.getFullYear();
-        if (sy === displayYear - 1) {
-          const dip = (((displayYear - 1) % 4 === 0 && (displayYear - 1) % 100 !== 0) || (displayYear - 1) % 400 === 0) ? 366 : 365;
-          const sop = new Date(displayYear - 1, 0, 1);
-          const dp = Math.max(0, Math.floor((userStartDate.getTime() - sop.getTime()) / (1000 * 60 * 60 * 24)));
-          prevYearEntitlement = userVacationDaysPerYear * ((dip - dp) / dip);
-        } else if (sy > displayYear - 1) { prevYearEntitlement = 0; }
-      }
-      const prevVacEntries = await prisma.timeEntry.findMany({ where: { userId, type: "vacation", date: { gte: prevYearStart, lte: prevYearEnd } } });
-      const prevVacHours = prevVacEntries?.reduce?.((s: number, e: any) => s + (e?.hours ?? 0), 0) ?? 0;
-      const prevDailyRate = getDailyRateForDate(prevYearEnd);
-      const prevUsedDays = prevDailyRate > 0 ? prevVacHours / prevDailyRate : 0;
-      carryoverDays = Math.max(0, prevYearEntitlement - prevUsedDays);
-    }
-
-    const currentYearStart = new Date(displayYear, 0, 1);
-    const currentYearEnd = new Date(displayYear, 11, 31);
-    const today = new Date(); today.setHours(23, 59, 59, 999);
-    const currentYearVacEntries = await prisma.timeEntry.findMany({ where: { userId, type: "vacation", date: { gte: currentYearStart, lte: currentYearEnd } } });
-    const yearDailyRate = getDailyRateForDate(new Date(displayYear, 6, 1));
-    const pastVacHours = currentYearVacEntries?.filter?.((e: any) => new Date(e.date) <= today)?.reduce?.((s: number, e: any) => s + (e?.hours ?? 0), 0) ?? 0;
-    const usedVacDays = yearDailyRate > 0 ? pastVacHours / yearDailyRate : 0;
-    const futureVacHours = currentYearVacEntries?.filter?.((e: any) => new Date(e.date) > today)?.reduce?.((s: number, e: any) => s + (e?.hours ?? 0), 0) ?? 0;
-    const plannedVacDays = yearDailyRate > 0 ? futureVacHours / yearDailyRate : 0;
-    const totalVacDays = proRataVacation + carryoverDays;
-    const remainingVacDays = totalVacDays - usedVacDays - plannedVacDays;
+    // ---- Feriensaldo für das Anzeigejahr ----
+    const displayYear = startDate.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(displayYear, 0, 1));
+    const yearEnd = new Date(Date.UTC(displayYear, 11, 31));
+    const yearFerienRaw = await prisma.timeEntry.findMany({
+      where: { userId, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
+    });
+    const fs = feriensaldo({ jahr: displayYear, heute, profil, eintraege: mapEintraege(yearFerienRaw) });
 
     // ---- Build Excel workbook ----
     const workbook = new ExcelJS.Workbook();
@@ -225,33 +181,43 @@ export async function GET(req: Request) {
 
     // === Sheet 1: Tageszeiten ===
     const ws1 = workbook.addWorksheet("Tageszeiten");
-    const typeMap: Record<string, string> = { work: "Arbeitszeit", vacation: "Ferien", holiday: "Feiertag" };
-
     ws1.columns = [
       { header: "Datum", key: "date", width: 16 },
       { header: "Wochentag", key: "weekday", width: 14 },
+      { header: "Von", key: "von", width: 10 },
+      { header: "Bis", key: "bis", width: 10 },
       { header: "Stunden", key: "hours", width: 12 },
       { header: "Typ", key: "type", width: 16 },
+      { header: "Kunde/Projekt", key: "projekt", width: 20 },
+      { header: "Notiz", key: "notiz", width: 24 },
     ];
-    styleHeaderRow(ws1.getRow(1), 4);
+    styleHeaderRow(ws1.getRow(1), 8);
 
     const weekdayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
     for (const entry of entries ?? []) {
       const d = new Date(entry.date);
+      const tagesSoll = sollStundenTag(d, profil, changes);
+      const stunden = stundenAusEintrag(
+        { typ: entry.type as any, von: entry.von, bis: entry.bis, pauseMin: entry.pauseMin, hours: entry.hours },
+        tagesSoll
+      );
       const row = ws1.addRow({
         date: fmtDate(d),
         weekday: weekdayNames[d.getDay()] ?? "",
-        hours: Math.round((entry?.hours ?? 0) * 100) / 100,
-        type: typeMap?.[entry?.type ?? ""] ?? entry?.type ?? "",
+        von: entry.von ?? "",
+        bis: entry.bis ?? "",
+        hours: Math.round(stunden * 100) / 100,
+        type: TYPE_LABELS[entry.type ?? ""] ?? entry.type ?? "",
+        projekt: entry.projekt ?? "",
+        notiz: entry.notiz ?? "",
       });
-      styleDataRow(row, 4);
-      // Color-code the type
-      const typeCell = row.getCell(4);
-      if (entry.type === "vacation") typeCell.font = { color: { argb: "FF2563EB" } };
-      else if (entry.type === "holiday") typeCell.font = { color: { argb: "FF9333EA" } };
+      styleDataRow(row, 8);
+      const typeCell = row.getCell(6);
+      if (entry.type === "ferien") typeCell.font = { color: { argb: "FF2563EB" } };
+      else if (entry.type === "feiertag") typeCell.font = { color: { argb: "FF9333EA" } };
+      else if (entry.type === "krank" || entry.type === "militaer") typeCell.font = { color: { argb: "FFDC2626" } };
     }
 
-    // Freeze header row
     ws1.views = [{ state: "frozen", ySplit: 1 }];
 
     // === Sheet 2: Kundenstunden ===
@@ -292,18 +258,15 @@ export async function GET(req: Request) {
     const summaryRows: Array<{ label: string; value: string | number; bold?: boolean; color?: string }> = [
       { label: "Zeitraum", value: `${fmtDate(startDate)} – ${fmtDate(endDate)}` },
       { label: "", value: "" },
-      { label: "Sollstunden (bis heute)", value: `${cappedTargetHours.toFixed(1)}h` },
-      { label: "Sollstunden (gesamt)", value: `${fullTargetHours.toFixed(1)}h` },
+      { label: "Sollstunden (bis heute)", value: `${k.soll.toFixed(1)}h` },
+      { label: "Sollstunden (gesamt)", value: `${k.sollGesamt.toFixed(1)}h` },
       { label: "", value: "" },
-      { label: "Arbeitsstunden", value: `${workHours.toFixed(1)}h` },
-      { label: "Ferienstunden", value: `${vacationHours.toFixed(1)}h` },
-      { label: "Feiertagsstunden", value: `${holidayHours.toFixed(1)}h` },
-      { label: "Ist-Stunden (bis heute)", value: `${istHours.toFixed(1)}h`, bold: true },
+      { label: "Ist-Stunden (bis heute)", value: `${k.ist.toFixed(1)}h`, bold: true },
       { label: "", value: "" },
-      { label: "Geplante Stunden (Zukunft)", value: `${futureHoursTotal.toFixed(1)}h` },
-      { label: "Total (Ist + Geplant)", value: `${totalIstPlusPlan.toFixed(1)}h`, bold: true },
+      { label: "Geplante Stunden (Zukunft)", value: `${k.geplantZukunft.toFixed(1)}h` },
+      { label: "Total (Ist + Geplant)", value: `${k.totalPrognose.toFixed(1)}h`, bold: true },
       { label: "", value: "" },
-      { label: "Überstunden (aktuell)", value: `${overtimeCurrent >= 0 ? "+" : ""}${overtimeCurrent.toFixed(1)}h`, color: overtimeCurrent >= 0 ? "FF16A34A" : "FFDC2626" },
+      { label: "Überstunden (aktuell)", value: `${overtimeGross >= 0 ? "+" : ""}${overtimeGross.toFixed(1)}h`, color: overtimeGross >= 0 ? "FF16A34A" : "FFDC2626" },
     ];
 
     if (totalPaidOutHours > 0) {
@@ -315,18 +278,16 @@ export async function GET(req: Request) {
 
     summaryRows.push(
       { label: "", value: "" },
-      { label: "Kundenstunden (Total)", value: `${totalCustomerHours.toFixed(1)}h` },
-      { label: "Verrechnungsgrad", value: `${workHours > 0 ? ((totalCustomerHours / workHours) * 100).toFixed(1) : "0.0"}%` },
+      { label: "Kundenstunden (Total)", value: `${k.kundenstunden.toFixed(1)}h` },
+      { label: "Verrechnungsgrad", value: `${k.verrechnungsgrad.toFixed(1)}%` },
       { label: "", value: "" },
-      { label: "Prognose Saldo", value: `${forecastBalance >= 0 ? "+" : ""}${forecastBalance.toFixed(1)}h`, bold: true, color: forecastBalance >= 0 ? "FF16A34A" : "FFDC2626" },
+      { label: "Prognose Saldo", value: `${k.prognoseSaldo >= 0 ? "+" : ""}${k.prognoseSaldo.toFixed(1)}h`, bold: true, color: k.prognoseSaldo >= 0 ? "FF16A34A" : "FFDC2626" },
       { label: "", value: "" },
       { label: `Feriensaldo ${displayYear}`, value: "", bold: true },
-      { label: "Ferienanspruch", value: `${(Math.round(proRataVacation * 10) / 10)} Tage` },
-      ...(carryoverDays > 0 ? [{ label: "Übertrag Vorjahr", value: `${(Math.round(carryoverDays * 10) / 10)} Tage` }] : []),
-      { label: "Gesamtanspruch", value: `${(Math.round(totalVacDays * 10) / 10)} Tage`, bold: true },
-      { label: "Bezogen", value: `${(Math.round(usedVacDays * 10) / 10)} Tage` },
-      { label: "Geplant", value: `${(Math.round(plannedVacDays * 10) / 10)} Tage` },
-      { label: "Restlich", value: `${(Math.round(remainingVacDays * 10) / 10)} Tage`, bold: true, color: remainingVacDays >= 0 ? "FF16A34A" : "FFDC2626" },
+      { label: "Gesamtanspruch", value: `${fs.anspruch} Tage`, bold: true },
+      { label: "Bezogen", value: `${fs.bezogen} Tage` },
+      { label: "Geplant", value: `${fs.geplant} Tage` },
+      { label: "Restlich", value: `${fs.offen} Tage`, bold: true, color: fs.offen >= 0 ? "FF16A34A" : "FFDC2626" },
     );
 
     for (const item of summaryRows) {

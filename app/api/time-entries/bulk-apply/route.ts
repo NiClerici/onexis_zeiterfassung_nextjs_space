@@ -6,6 +6,20 @@ import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 
+// Start 08:00, 30min Pause ab 6h Tagesstunden — liefert von/bis für "arbeit"-Einträge
+function buildArbeitszeit(hours: number): { von: string; bis: string; pauseMin: number } {
+  const pauseMin = hours >= 6 ? 30 : 0;
+  const startMinutes = 8 * 60;
+  const endMinutes = Math.min(23 * 60 + 59, startMinutes + Math.round(hours * 60) + pauseMin);
+  const bh = Math.floor(endMinutes / 60);
+  const bm = endMinutes % 60;
+  return {
+    von: "08:00",
+    bis: `${String(bh).padStart(2, "0")}:${String(bm).padStart(2, "0")}`,
+    pauseMin,
+  };
+}
+
 // Wochentag-Index (0=So, 1=Mo, ... 6=Sa) → Template-Key
 function getTemplateHoursForDay(date: Date, tpl: {
   mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number;
@@ -113,23 +127,25 @@ export async function POST(req: Request) {
         const ex = existingMap.get(key);
         if (ex) {
           // Ferien/Feiertage immer schützen
-          if (ex.type === "vacation" || ex.type === "holiday") {
+          if (ex.type === "ferien" || ex.type === "feiertag") {
             skippedProtected++;
           } else if (!overwriteExisting) {
             skippedExisting++;
           } else {
+            const { von, bis, pauseMin } = buildArbeitszeit(hours);
             operations.push(
               prisma.timeEntry.update({
                 where: { id: ex.id },
-                data: { hours, type: "work" },
+                data: { type: "arbeit", von, bis, pauseMin, hours: null },
               })
             );
             updated++;
           }
         } else {
+          const { von, bis, pauseMin } = buildArbeitszeit(hours);
           operations.push(
             prisma.timeEntry.create({
-              data: { userId, date: dbDate, hours, type: "work" },
+              data: { userId, date: dbDate, type: "arbeit", von, bis, pauseMin, hours: null },
             })
           );
           created++;

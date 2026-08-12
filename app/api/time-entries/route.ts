@@ -4,6 +4,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
+
+function isValidType(type: unknown): type is EintragTyp {
+  return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
+}
 
 export async function GET(req: Request) {
   try {
@@ -17,20 +22,28 @@ export async function GET(req: Request) {
 
     if (!year || !month) return NextResponse.json({ entries: [] });
 
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0);
+    // UTC-Grenzen: @db.Date-Werte werden anhand des UTC-Kalendertags gespeichert/verglichen.
+    // Lokale Date-Konstruktoren würden in Zeitzonen ≠ UTC den letzten Tag der Periode abschneiden.
+    const startDate = new Date(Date.UTC(year, month - 1, 1));
+    const endDate = new Date(Date.UTC(year, month, 0));
 
     const entries = await prisma.timeEntry.findMany({
       where: { userId, date: { gte: startDate, lte: endDate } },
-      orderBy: { date: "asc" },
+      orderBy: [{ date: "asc" }, { von: "asc" }],
     });
 
     return NextResponse.json({
       entries: entries?.map?.((e: any) => ({
         id: e?.id,
         date: e?.date?.toISOString?.()?.split?.("T")?.[0] ?? "",
-        hours: e?.hours ?? 0,
-        type: e?.type ?? "work",
+        type: e?.type ?? "arbeit",
+        von: e?.von ?? null,
+        bis: e?.bis ?? null,
+        pauseMin: e?.pauseMin ?? 0,
+        projekt: e?.projekt ?? null,
+        notiz: e?.notiz ?? null,
+        customerId: e?.customerId ?? null,
+        hours: e?.hours ?? null,
       })) ?? [],
     });
   } catch (error: any) {
@@ -39,8 +52,6 @@ export async function GET(req: Request) {
   }
 }
 
-const VALID_TYPES = ["work", "vacation", "holiday"];
-
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -48,26 +59,37 @@ export async function POST(req: Request) {
     const userId = (session.user as any)?.id;
 
     const body = await req?.json?.().catch(() => ({}));
-    const { date, hours, type } = body ?? {};
+    const { date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
 
     if (!date || isNaN(new Date(date).getTime())) {
       return NextResponse.json({ error: "Invalid date" }, { status: 400 });
     }
-    if (type && !VALID_TYPES.includes(type)) {
+    if (!isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: { id: customerId, userId } });
+      if (!customer) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
+    }
 
-    const clampedHours = Math.max(0, Math.min(24, Number(hours) || 0));
+    const isArbeit = type === "arbeit";
+    const clampedPause = Math.max(0, Math.min(1440, Number(pauseMin) || 0));
+    const clampedHours = hours != null && hours !== "" ? Math.max(0, Math.min(24, Number(hours))) : null;
 
-    const existing = await prisma.timeEntry.findFirst({ where: { userId, date: new Date(date) } });
-    const entry = existing
-      ? await prisma.timeEntry.update({
-          where: { id: existing.id },
-          data: { hours: clampedHours, type: type ?? "work" },
-        })
-      : await prisma.timeEntry.create({
-          data: { userId, date: new Date(date), hours: clampedHours, type: type ?? "work" },
-        });
+    const entry = await prisma.timeEntry.create({
+      data: {
+        userId,
+        date: new Date(date),
+        type,
+        von: isArbeit ? (von || null) : null,
+        bis: isArbeit ? (bis || null) : null,
+        pauseMin: isArbeit ? clampedPause : 0,
+        projekt: projekt?.trim?.() || null,
+        notiz: notiz?.trim?.() || null,
+        customerId: customerId || null,
+        hours: clampedHours,
+      },
+    });
 
     return NextResponse.json({ entry });
   } catch (error: any) {
@@ -83,35 +105,47 @@ export async function PUT(req: Request) {
     const userId = (session.user as any)?.id;
 
     const body = await req?.json?.().catch(() => ({}));
-    const { id, date, hours, type } = body ?? {};
+    const { id, date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
+
+    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+    const existing = await prisma.timeEntry.findFirst({ where: { id, userId } });
+    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     if (date && isNaN(new Date(date).getTime())) {
       return NextResponse.json({ error: "Invalid date" }, { status: 400 });
     }
-    if (type && !VALID_TYPES.includes(type)) {
+    if (type !== undefined && !isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
-
-    const clampedHours = Math.max(0, Math.min(24, Number(hours) || 0));
-
-    if (id) {
-      const entry = await prisma.timeEntry.update({
-        where: { id, userId },
-        data: { hours: clampedHours, type: type ?? "work" },
-      });
-      return NextResponse.json({ entry });
+    if (customerId) {
+      const customer = await prisma.customer.findFirst({ where: { id: customerId, userId } });
+      if (!customer) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
     }
 
-    // Fallback to upsert by date
-    const existing = await prisma.timeEntry.findFirst({ where: { userId, date: new Date(date) } });
-    const entry = existing
-      ? await prisma.timeEntry.update({
-          where: { id: existing.id },
-          data: { hours: clampedHours, type: type ?? "work" },
-        })
-      : await prisma.timeEntry.create({
-          data: { userId, date: new Date(date), hours: clampedHours, type: type ?? "work" },
-        });
+    const nextType: EintragTyp = isValidType(type) ? type : (existing.type as EintragTyp);
+    const isArbeit = nextType === "arbeit";
+    const clampedHours =
+      hours !== undefined ? (hours === null || hours === "" ? null : Math.max(0, Math.min(24, Number(hours)))) : undefined;
+
+    const entry = await prisma.timeEntry.update({
+      where: { id },
+      data: {
+        date: date ? new Date(date) : undefined,
+        type: nextType,
+        von: isArbeit ? (von !== undefined ? von || null : existing.von) : null,
+        bis: isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null,
+        pauseMin: isArbeit
+          ? pauseMin !== undefined
+            ? Math.max(0, Math.min(1440, Number(pauseMin) || 0))
+            : existing.pauseMin
+          : 0,
+        projekt: projekt !== undefined ? projekt?.trim?.() || null : undefined,
+        notiz: notiz !== undefined ? notiz?.trim?.() || null : undefined,
+        customerId: customerId !== undefined ? customerId || null : undefined,
+        hours: clampedHours,
+      },
+    });
 
     return NextResponse.json({ entry });
   } catch (error: any) {

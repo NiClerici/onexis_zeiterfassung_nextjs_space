@@ -237,6 +237,9 @@ export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
   }
   anspruch = round1(anspruch);
 
+  // bezogen/geplant sind wie anspruch in Tagen. Jeder Eintrag wird über das
+  // Tagessoll seines Datums in einen Tage-Anteil umgerechnet (Halbtage etc.
+  // bleiben so korrekt anteilig).
   let bezogen = 0;
   let geplant = 0;
   for (const eintrag of input.eintraege) {
@@ -245,8 +248,9 @@ export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
     if (d.getUTCFullYear() !== jahr) continue;
     const tagesSoll = sollStundenTag(d, profil, []);
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
-    if (d.getTime() <= heute.getTime()) bezogen += stunden;
-    else geplant += stunden;
+    const tage = tagesSoll > 0 ? stunden / tagesSoll : 0;
+    if (d.getTime() <= heute.getTime()) bezogen += tage;
+    else geplant += tage;
   }
   bezogen = round1(bezogen);
   geplant = round1(geplant);
