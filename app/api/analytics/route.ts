@@ -23,6 +23,7 @@ function buildProfil(membership: any): Profil {
     pensum: membership?.basePensum ?? membership?.pensum ?? 100,
     wochenstunden: membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42,
     startDate: membership?.startDate ?? null,
+    exitDate: membership?.exitDate ?? null,
     ferientage: membership?.vacationDays ?? 25,
   };
 }

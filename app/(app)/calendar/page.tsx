@@ -20,6 +20,7 @@ interface UserProfile {
   basePensum: number | null;
   vacationDays: number;
   startDate: string | null;
+  exitDate: string | null;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
 }
 
@@ -106,6 +107,7 @@ export default function CalendarPage() {
           basePensum: data?.basePensum ?? null,
           vacationDays: data?.vacationDays ?? 25,
           startDate: data?.startDate ?? null,
+          exitDate: data?.exitDate ?? null,
           standardWeek: data?.standardWeek ?? { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
         });
       }
@@ -178,6 +180,7 @@ export default function CalendarPage() {
         pensum: profile.basePensum ?? profile.pensum,
         wochenstunden: profile.baseWeeklyHours ?? profile.weeklyHours,
         startDate: profile.startDate,
+        exitDate: profile.exitDate,
         ferientage: profile.vacationDays,
       }
     : null;

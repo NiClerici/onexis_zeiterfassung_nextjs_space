@@ -26,6 +26,9 @@ export async function GET() {
       basePensum: membership?.basePensum ?? null,
       vacationDays: membership?.vacationDays ?? 25,
       startDate: membership?.startDate?.toISOString?.() ?? null,
+      // Nur lesend — Austrittsdatum wird ausschliesslich über /admin/team
+      // gesetzt (MIGRATION.md Punkt 4c), nicht von der Person selbst.
+      exitDate: membership?.exitDate?.toISOString?.() ?? null,
       language: user?.language ?? "de",
       standardWeek: {
         mon: membership?.stdHoursMon ?? 0,

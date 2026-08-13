@@ -13,6 +13,7 @@ const testProfil: Profil = {
   pensum: 60,
   ferientage: 25,
   startDate: "2026-04-01",
+  exitDate: null,
 };
 
 describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, Stichtag 12.08.2026)", () => {
@@ -96,6 +97,7 @@ describe("Pensumwechsel mitten im Monat", () => {
     pensum: 100,
     ferientage: 25,
     startDate: "2026-01-01",
+    exitDate: null,
   };
   const changes = [{ effectiveFrom: "2026-08-15", pensum: 50, wochenstunden: 40 }];
 
@@ -118,7 +120,7 @@ describe("Pensumwechsel mitten im Monat", () => {
 
 describe("Zeitraum komplett vor startDate", () => {
   it("Soll ist 0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-04-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-04-01", exitDate: null };
     const result = kennzahlen({
       from: "2026-01-05",
       to: "2026-01-09",
@@ -134,9 +136,59 @@ describe("Zeitraum komplett vor startDate", () => {
   });
 });
 
+describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
+  // 2026-08-14 ist ein Freitag, 2026-08-17 der nächste Werktag (Montag).
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: "2026-08-14" };
+
+  it("exitDate selbst zählt noch als normaler Arbeitstag (letzter Arbeitstag)", () => {
+    expect(sollStundenTag("2026-08-14", profil, [])).toBeCloseTo(8, 5);
+  });
+
+  it("der erste Werktag nach exitDate hat Tagessoll 0", () => {
+    expect(sollStundenTag("2026-08-17", profil, [])).toBe(0);
+  });
+
+  it("Zeitraum komplett nach exitDate: soll und sollGesamt sind 0", () => {
+    const result = kennzahlen({
+      from: "2026-08-17",
+      to: "2026-08-21",
+      heute: "2026-08-19",
+      eintraege: [],
+      profil,
+      changes: [],
+      payouts: [],
+      kunden: [],
+    });
+    expect(result.soll).toBe(0);
+    expect(result.sollGesamt).toBe(0);
+  });
+
+  it("Zeitraum umspannt exitDate: nur Tage bis und mit exitDate zählen ins Soll", () => {
+    // Woche 10.–14.8.2026 (Mo–Fr): nur Mo–Fr bis inkl. 14.8. zählen = 5 Tage × 8h = 40h.
+    // 17.–21.8. (nächste Woche, komplett nach exitDate) trägt nichts bei.
+    const result = kennzahlen({
+      from: "2026-08-10",
+      to: "2026-08-21",
+      heute: "2026-08-21",
+      eintraege: [],
+      profil,
+      changes: [],
+      payouts: [],
+      kunden: [],
+    });
+    expect(result.soll).toBe(40);
+    expect(result.sollGesamt).toBe(40);
+  });
+
+  it("ohne exitDate (null) bleibt das Verhalten unverändert", () => {
+    const profilOhneExit: Profil = { ...profil, exitDate: null };
+    expect(sollStundenTag("2026-08-17", profilOhneExit, [])).toBeCloseTo(8, 5);
+  });
+});
+
 describe("Zeitraum komplett in der Zukunft", () => {
   it("soll = 0, sollGesamt > 0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = kennzahlen({
       from: "2026-09-01",
       to: "2026-09-30",
@@ -154,7 +206,7 @@ describe("Zeitraum komplett in der Zukunft", () => {
 
 describe("verrechnungsgrad", () => {
   it("bei ist == 0 ist 0, kein NaN", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = kennzahlen({
       from: "2026-08-01",
       to: "2026-08-02",
@@ -171,7 +223,7 @@ describe("verrechnungsgrad", () => {
   });
 
   it("berechnet sich aus billable Kundenstunden / ist", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = kennzahlen({
       from: "2026-08-10",
       to: "2026-08-11",
@@ -196,7 +248,7 @@ describe("verrechnungsgrad", () => {
 
 describe("ueberzeit berücksichtigt OvertimePayouts", () => {
   it("zieht Auszahlungen im Zeitraum ab", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = kennzahlen({
       from: "2026-08-10",
       to: "2026-08-11",
@@ -218,7 +270,7 @@ describe("ueberzeit berücksichtigt OvertimePayouts", () => {
 });
 
 describe("feriensaldo", () => {
-  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
 
   it("bezogen zählt Ferien bis heute, geplant danach — in Tagen, nicht Stunden", () => {
     // Tagessoll bei 40h/100% = 8h/Tag → ein Ganztages-Eintrag mit 8h = 1 Tag
@@ -267,7 +319,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
   // sonst wäre das Tagessoll 0 und die Umrechnung stillschweigend 0 Tage.
 
   it("Reduktion 100% → 60% per 01.09.: beide Ferientage zählen je exakt 1.0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-12-31",
@@ -285,7 +337,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
   });
 
   it("Erhöhung 60% → 100% per 01.09.: beide Ferientage zählen je exakt 1.0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 60, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 60, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-12-31",
@@ -302,7 +354,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
   });
 
   it("geplant (nach heute) wird ebenfalls über das korrekte Tagessoll gerechnet", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-08-12",

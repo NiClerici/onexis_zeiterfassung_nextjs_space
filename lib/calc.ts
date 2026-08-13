@@ -16,6 +16,10 @@ export interface Profil {
   pensum: number;
   wochenstunden: number;
   startDate: Date | string | null;
+  // Analog zu startDate: an und vor exitDate zählt der Tag noch normal
+  // (letzter Arbeitstag), erst danach ist das Tagessoll 0 (MIGRATION.md
+  // Punkt 4d, Austritt eines Mitglieds).
+  exitDate: Date | string | null;
   ferientage: number;
 }
 
@@ -130,6 +134,9 @@ export function sollStundenTag(
 ): number {
   const d = toUTCDate(datum);
   if (profil.startDate && d.getTime() < toUTCDate(profil.startDate).getTime()) {
+    return 0;
+  }
+  if (profil.exitDate && d.getTime() > toUTCDate(profil.exitDate).getTime()) {
     return 0;
   }
   const day = d.getUTCDay();
