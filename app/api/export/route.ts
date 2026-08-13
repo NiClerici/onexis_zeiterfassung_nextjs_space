@@ -137,6 +137,7 @@ export async function GET(req: Request) {
     const entries = await prisma.timeEntry.findMany({
       where: { userId, orgId, date: { gte: startDate, lte: endDate } },
       orderBy: { date: "asc" },
+      include: { customer: { select: { name: true } }, project: { select: { name: true } } },
     });
     const eintraege = mapEintraege(entries);
 
@@ -198,6 +199,10 @@ export async function GET(req: Request) {
         tagesSoll
       );
       sheet1TotalHours += stunden;
+      // Kunde/Projekt aus der Relation statt dem alten Freitext (MIGRATION.md
+      // Punkt 5) — entry.projekt bleibt als Fallback für Alt-Einträge, die vor
+      // der Migration angelegt und nie mit einem Kunden verknüpft wurden.
+      const kundeProjekt = [(entry as any).customer?.name, (entry as any).project?.name].filter(Boolean).join(" – ") || entry.projekt || "";
       const row = ws1.addRow({
         date: fmtDate(d),
         weekday: weekdayNames[d.getDay()] ?? "",
@@ -205,7 +210,7 @@ export async function GET(req: Request) {
         bis: entry.bis ?? "",
         hours: Math.round(stunden * 100) / 100,
         type: TYPE_LABELS[entry.type ?? ""] ?? entry.type ?? "",
-        projekt: entry.projekt ?? "",
+        projekt: kundeProjekt,
         notiz: entry.notiz ?? "",
       });
       styleDataRow(row, 8);

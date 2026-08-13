@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     const { orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { name, billable } = body ?? {};
+    const { name, billable, hourlyRate } = body ?? {};
 
     const trimmedName = name?.trim?.();
     if (!trimmedName) return NextResponse.json({ error: "Name fehlt" }, { status: 400 });
@@ -36,8 +36,13 @@ export async function POST(req: Request) {
     const existing = await prisma.customer.findFirst({ where: { orgId, name: trimmedName } });
     if (existing) return NextResponse.json({ error: "Kunde existiert bereits" }, { status: 409 });
 
+    const parsedRate = hourlyRate !== undefined && hourlyRate !== null && hourlyRate !== "" ? Number(hourlyRate) : null;
+    if (parsedRate !== null && (isNaN(parsedRate) || parsedRate < 0)) {
+      return NextResponse.json({ error: "Ungültiger Stundensatz" }, { status: 400 });
+    }
+
     const customer = await prisma.customer.create({
-      data: { orgId, name: trimmedName, billable: billable !== undefined ? Boolean(billable) : true },
+      data: { orgId, name: trimmedName, billable: billable !== undefined ? Boolean(billable) : true, hourlyRate: parsedRate },
     });
 
     return NextResponse.json({ customer });
@@ -53,7 +58,7 @@ export async function PUT(req: Request) {
     const { orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { id, name, billable } = body ?? {};
+    const { id, name, billable, hourlyRate } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
@@ -66,11 +71,20 @@ export async function PUT(req: Request) {
       if (duplicate) return NextResponse.json({ error: "Kunde existiert bereits" }, { status: 409 });
     }
 
+    let parsedRate: number | null | undefined = undefined;
+    if (hourlyRate !== undefined) {
+      parsedRate = hourlyRate === null || hourlyRate === "" ? null : Number(hourlyRate);
+      if (parsedRate !== null && (isNaN(parsedRate) || parsedRate < 0)) {
+        return NextResponse.json({ error: "Ungültiger Stundensatz" }, { status: 400 });
+      }
+    }
+
     const customer = await prisma.customer.update({
       where: { id },
       data: {
         name: trimmedName || existing.name,
         billable: billable !== undefined ? Boolean(billable) : existing.billable,
+        hourlyRate: parsedRate !== undefined ? parsedRate : existing.hourlyRate,
       },
     });
 

@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
 import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput } from "@/lib/calc";
-import { DayEntryDialog, type DayTimeEntry, type DayCustomer } from "@/components/day-entry-dialog";
+import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
 
 interface UserProfile {
   firstName: string;
@@ -51,6 +51,7 @@ export default function CalendarPage() {
   });
   const [entries, setEntries] = useState<DayTimeEntry[]>([]);
   const [customers, setCustomers] = useState<DayCustomer[]>([]);
+  const [projects, setProjects] = useState<DayProject[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -94,6 +95,16 @@ export default function CalendarPage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch("/api/projects");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setProjects(data?.projects ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
   const fetchProfile = useCallback(async () => {
     try {
       const res = await fetch("/api/profile");
@@ -125,7 +136,7 @@ export default function CalendarPage() {
   }, []);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchCustomers(); }, [fetchProfile, fetchPensumChanges, fetchCustomers]);
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchCustomers, fetchProjects]);
 
   // Close month picker on outside click
   useEffect(() => {
@@ -505,6 +516,7 @@ export default function CalendarPage() {
         dayLabel={selectedDayLabel}
         entries={selectedDayEntries}
         customers={customers}
+        projects={projects}
         tagesSoll={selectedDayTagesSoll}
         onChanged={fetchEntries}
       />

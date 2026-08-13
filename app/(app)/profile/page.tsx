@@ -36,6 +36,16 @@ interface CustomerData {
   id: string;
   name: string;
   billable: boolean;
+  hourlyRate: number | null;
+}
+
+interface ProjectData {
+  id: string;
+  customerId: string;
+  name: string;
+  hourlyRate: number | null;
+  budgetHours: number | null;
+  active: boolean;
 }
 const clampNumInput = (value: string, min: number, max: number): string => {
   if (value === "") return "";
@@ -85,9 +95,19 @@ export default function ProfilePage() {
   // Customer management state
   const [customers, setCustomers] = useState<CustomerData[]>([]);
   const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerRate, setNewCustomerRate] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
+  const [editCustomerRate, setEditCustomerRate] = useState("");
+
+  // Project management state (MIGRATION.md Punkt 5)
+  const [projects, setProjects] = useState<ProjectData[]>([]);
+  const [newProjectCustomerId, setNewProjectCustomerId] = useState("");
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectRate, setNewProjectRate] = useState("");
+  const [newProjectBudget, setNewProjectBudget] = useState("");
+  const [savingProject, setSavingProject] = useState(false);
 
   // Overtime payouts state
   const [overtimePayouts, setOvertimePayouts] = useState<OvertimePayoutData[]>([]);
@@ -160,7 +180,17 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers]);
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch("/api/projects");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setProjects(data?.projects ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers, fetchProjects]);
 
   // Check if effectiveFrom is in the past
   useEffect(() => {
@@ -318,12 +348,13 @@ export default function ProfilePage() {
       const res = await fetch("/api/customers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newCustomerName.trim() }),
+        body: JSON.stringify({ name: newCustomerName.trim(), hourlyRate: newCustomerRate || undefined }),
       });
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
         toast.success(t("profile.customerSaved"));
         setNewCustomerName("");
+        setNewCustomerRate("");
         await fetchCustomers();
       } else { toast.error(data?.error ?? t("profile.customerError")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
@@ -345,6 +376,7 @@ export default function ProfilePage() {
   const startEditCustomer = (customer: CustomerData) => {
     setEditingCustomerId(customer.id);
     setEditCustomerName(customer.name);
+    setEditCustomerRate(customer.hourlyRate != null ? String(customer.hourlyRate) : "");
   };
 
   const saveEditCustomer = async () => {
@@ -354,7 +386,7 @@ export default function ProfilePage() {
       const res = await fetch("/api/customers", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: editingCustomerId, name: editCustomerName.trim() }),
+        body: JSON.stringify({ id: editingCustomerId, name: editCustomerName.trim(), hourlyRate: editCustomerRate || null }),
       });
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
@@ -376,6 +408,55 @@ export default function ProfilePage() {
       if (res?.ok) { toast.success(t("profile.customerDeleted")); await fetchCustomers(); }
       else { toast.error(t("profile.customerError")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
+  };
+
+  const addProject = async () => {
+    if (!newProjectCustomerId || !newProjectName.trim()) return;
+    setSavingProject(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: newProjectCustomerId,
+          name: newProjectName.trim(),
+          hourlyRate: newProjectRate || undefined,
+          budgetHours: newProjectBudget || undefined,
+        }),
+      });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        toast.success(t("profile.projectSaved"));
+        setNewProjectName(""); setNewProjectRate(""); setNewProjectBudget("");
+        await fetchProjects();
+      } else { toast.error(data?.error ?? t("profile.projectError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
+  };
+
+  const toggleProjectActive = async (project: ProjectData) => {
+    setSavingProject(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: project.id, active: !project.active }),
+      });
+      if (res?.ok) { await fetchProjects(); }
+      else { toast.error(t("profile.projectError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
+  };
+
+  const deleteProject = async (id: string) => {
+    setSavingProject(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res?.ok) { toast.success(t("profile.projectDeleted")); await fetchProjects(); }
+      else { toast.error(t("profile.projectError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
   };
 
   const handleExport = async () => {
@@ -590,6 +671,15 @@ export default function ProfilePage() {
             placeholder={t("profile.customerNamePlaceholder")}
             className="flex-1 px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
           />
+          <input
+            type="number"
+            min="0"
+            step="5"
+            value={newCustomerRate}
+            onChange={(e) => setNewCustomerRate(e.target.value)}
+            placeholder={t("profile.hourlyRate")}
+            className="w-28 px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+          />
           <button
             onClick={addCustomer}
             disabled={savingCustomer || !newCustomerName.trim()}
@@ -612,12 +702,21 @@ export default function ProfilePage() {
                       className="flex-1 px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                       autoFocus
                     />
+                    <input
+                      type="number"
+                      min="0"
+                      step="5"
+                      value={editCustomerRate}
+                      onChange={(e) => setEditCustomerRate(e.target.value)}
+                      placeholder={t("profile.hourlyRate")}
+                      className="w-24 px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                    />
                     <button onClick={saveEditCustomer} disabled={savingCustomer} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition"><CheckCircle className="w-3.5 h-3.5" /></button>
                     <button onClick={() => setEditingCustomerId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><X className="w-3.5 h-3.5" /></button>
                   </>
                 ) : (
                   <>
-                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}</span>
+                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}{c.hourlyRate != null && <span className="text-muted-foreground font-normal"> · {c.hourlyRate.toFixed(0)} CHF/h</span>}</span>
                     <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none shrink-0">
                       <input type="checkbox" checked={c.billable} onChange={() => toggleCustomerBillable(c)} className="accent-primary" />
                       {t("profile.billable")}
@@ -631,6 +730,84 @@ export default function ProfilePage() {
           </div>
         ) : (
           <p className="text-xs text-muted-foreground text-center">{t("profile.noCustomers")}</p>
+        )}
+      </motion.div>
+
+      {/* Project Management (MIGRATION.md Punkt 5) */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Banknote className="w-4 h-4 text-primary" /> {t("profile.projects")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("profile.projectsDesc")}</p>
+
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <select
+            value={newProjectCustomerId}
+            onChange={(e) => setNewProjectCustomerId(e.target.value)}
+            className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+          >
+            <option value="">{t("profile.selectCustomer")}</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={newProjectName}
+            onChange={(e) => setNewProjectName(e.target.value)}
+            placeholder={t("profile.projectNamePlaceholder")}
+            className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+          />
+          <input
+            type="number"
+            min="0"
+            step="5"
+            value={newProjectRate}
+            onChange={(e) => setNewProjectRate(e.target.value)}
+            placeholder={t("profile.hourlyRate")}
+            className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+          />
+          <input
+            type="number"
+            min="0"
+            step="5"
+            value={newProjectBudget}
+            onChange={(e) => setNewProjectBudget(e.target.value)}
+            placeholder={t("profile.budgetHours")}
+            className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+          />
+        </div>
+        <button
+          onClick={addProject}
+          disabled={savingProject || !newProjectCustomerId || !newProjectName.trim()}
+          className="w-full mb-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+        >
+          <Plus className="w-4 h-4" /> {t("profile.addProject")}
+        </button>
+
+        {projects.length > 0 ? (
+          <div className="space-y-1.5">
+            {projects.map((p) => {
+              const customerName = customers.find((c) => c.id === p.customerId)?.name ?? "";
+              return (
+                <div key={p.id} className={`flex items-center justify-between bg-secondary rounded-xl px-3 py-2 text-sm gap-2 ${!p.active ? "opacity-50" : ""}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{p.name}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {customerName}
+                      {p.hourlyRate != null && ` · ${p.hourlyRate.toFixed(0)} CHF/h`}
+                      {p.budgetHours != null && ` · Budget ${p.budgetHours.toFixed(0)}h`}
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none shrink-0">
+                    <input type="checkbox" checked={p.active} onChange={() => toggleProjectActive(p)} className="accent-primary" />
+                    {t("profile.active")}
+                  </label>
+                  <button onClick={() => deleteProject(p.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground text-center">{t("profile.noProjects")}</p>
         )}
       </motion.div>
 

@@ -24,6 +24,30 @@ function parseDateYMD(s: unknown): Date | null {
   return date;
 }
 
+// Löst customerId/projectId auf und liefert das für neue/geänderte Zeilen
+// passende billable-Default. Ein Projekt gehört immer zu genau einem Kunden
+// (Project.customerId ist required) — ist projectId gesetzt, gewinnt dessen
+// customerId gegenüber einer abweichend mitgeschickten customerId, damit die
+// beiden Felder nie auseinanderlaufen.
+async function resolveProjectAndCustomer(
+  orgId: string,
+  projectId: unknown,
+  customerId: unknown
+): Promise<{ projectId: string | null; customerId: string | null; defaultBillable: boolean } | { error: string }> {
+  if (projectId) {
+    const project = await prisma.project.findFirst({ where: { id: projectId as string, orgId } });
+    if (!project) return { error: "Invalid project" };
+    const customer = await prisma.customer.findUnique({ where: { id: project.customerId } });
+    return { projectId: project.id, customerId: project.customerId, defaultBillable: customer?.billable ?? false };
+  }
+  if (customerId) {
+    const customer = await prisma.customer.findFirst({ where: { id: customerId as string, orgId } });
+    if (!customer) return { error: "Invalid customer" };
+    return { projectId: null, customerId: customer.id, defaultBillable: customer.billable };
+  }
+  return { projectId: null, customerId: null, defaultBillable: false };
+}
+
 export async function GET(req: Request) {
   try {
     const { userId, orgId } = await requireOrg();
@@ -52,9 +76,10 @@ export async function GET(req: Request) {
         von: e?.von ?? null,
         bis: e?.bis ?? null,
         pauseMin: e?.pauseMin ?? 0,
-        projekt: e?.projekt ?? null,
         notiz: e?.notiz ?? null,
         customerId: e?.customerId ?? null,
+        projectId: e?.projectId ?? null,
+        billable: e?.billable ?? false,
         hours: e?.hours ?? null,
       })) ?? [],
     });
@@ -70,7 +95,7 @@ export async function POST(req: Request) {
     const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
+    const { date, type, von, bis, pauseMin, notiz, customerId, projectId, billable, hours } = body ?? {};
 
     const parsedDate = parseDateYMD(date);
     if (!parsedDate) {
@@ -79,16 +104,14 @@ export async function POST(req: Request) {
     if (!isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
-    if (customerId) {
-      // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden —
-      // jedes Mitglied darf jedem Org-Kunden Stunden zuordnen.
-      const customer = await prisma.customer.findFirst({ where: { id: customerId, orgId } });
-      if (!customer) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
-    }
+
+    const resolved = await resolveProjectAndCustomer(orgId, projectId, customerId);
+    if ("error" in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
 
     const isArbeit = type === "arbeit";
     const clampedPause = Math.max(0, Math.min(1440, Number(pauseMin) || 0));
     const clampedHours = hours != null && hours !== "" ? Math.max(0, Math.min(24, Number(hours))) : null;
+    const resolvedBillable = billable !== undefined ? Boolean(billable) : resolved.defaultBillable;
 
     const entry = await prisma.timeEntry.create({
       data: {
@@ -99,9 +122,10 @@ export async function POST(req: Request) {
         von: isArbeit ? (von || null) : null,
         bis: isArbeit ? (bis || null) : null,
         pauseMin: isArbeit ? clampedPause : 0,
-        projekt: projekt?.trim?.() || null,
         notiz: notiz?.trim?.() || null,
-        customerId: customerId || null,
+        customerId: resolved.customerId,
+        projectId: resolved.projectId,
+        billable: resolvedBillable,
         hours: clampedHours,
       },
     });
@@ -119,7 +143,7 @@ export async function PUT(req: Request) {
     const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { id, date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
+    const { id, date, type, von, bis, pauseMin, notiz, customerId, projectId, billable, hours } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
@@ -135,9 +159,18 @@ export async function PUT(req: Request) {
     if (type !== undefined && !isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
-    if (customerId) {
-      const customer = await prisma.customer.findFirst({ where: { id: customerId, orgId } });
-      if (!customer) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
+
+    // projectId/customerId nur neu auflösen, wenn mindestens eines der beiden
+    // Felder im Request mitkommt — sonst bleiben beide unangetastet.
+    let nextCustomerId: string | null | undefined = undefined;
+    let nextProjectId: string | null | undefined = undefined;
+    let defaultBillable = existing.billable;
+    if (projectId !== undefined || customerId !== undefined) {
+      const resolved = await resolveProjectAndCustomer(orgId, projectId, customerId);
+      if ("error" in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
+      nextCustomerId = resolved.customerId;
+      nextProjectId = resolved.projectId;
+      defaultBillable = resolved.defaultBillable;
     }
 
     const nextType: EintragTyp = isValidType(type) ? type : (existing.type as EintragTyp);
@@ -157,9 +190,10 @@ export async function PUT(req: Request) {
             ? Math.max(0, Math.min(1440, Number(pauseMin) || 0))
             : existing.pauseMin
           : 0,
-        projekt: projekt !== undefined ? projekt?.trim?.() || null : undefined,
         notiz: notiz !== undefined ? notiz?.trim?.() || null : undefined,
-        customerId: customerId !== undefined ? customerId || null : undefined,
+        customerId: nextCustomerId,
+        projectId: nextProjectId,
+        billable: billable !== undefined ? Boolean(billable) : defaultBillable,
         hours: clampedHours,
       },
     });
