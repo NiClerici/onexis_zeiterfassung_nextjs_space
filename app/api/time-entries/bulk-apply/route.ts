@@ -24,7 +24,7 @@ function buildArbeitszeit(hours: number): { von: string; bis: string; pauseMin: 
 function getTemplateHoursForDay(date: Date, tpl: {
   mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number;
 }): number {
-  const d = date.getDay();
+  const d = date.getUTCDay();
   switch (d) {
     case 1: return tpl.mon;
     case 2: return tpl.tue;
@@ -45,8 +45,9 @@ function parseDateYMD(s: string): Date | null {
   const mo = parseInt(m[2]);
   const d = parseInt(m[3]);
   if (!y || !mo || !d) return null;
-  // Lokales Datum verwenden (kein UTC-Shift)
-  return new Date(y, mo - 1, d);
+  // UTC-Grenzen: @db.Date-Werte werden anhand des UTC-Kalendertags gespeichert/verglichen.
+  // Lokale Date-Konstruktoren würden in Zeitzonen ≠ UTC auf den falschen Tag verschieben.
+  return new Date(Date.UTC(y, mo - 1, d));
 }
 
 export async function POST(req: Request) {
@@ -102,7 +103,7 @@ export async function POST(req: Request) {
     const existingMap = new Map<string, { id: string; type: string }>();
     for (const e of existing) {
       const d = new Date(e.date);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
       existingMap.set(key, { id: e.id, type: e.type });
     }
 
@@ -117,9 +118,9 @@ export async function POST(req: Request) {
 
     while (current <= toDate) {
       const hours = getTemplateHoursForDay(current, tpl);
-      const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
-      // Datum-Objekt für DB (lokal, ohne UTC-Shift)
-      const dbDate = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+      const key = `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, "0")}-${String(current.getUTCDate()).padStart(2, "0")}`;
+      // UTC-Grenzen: siehe parseDateYMD oben.
+      const dbDate = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
 
       if (hours <= 0) {
         skippedZero++;
@@ -151,7 +152,7 @@ export async function POST(req: Request) {
           created++;
         }
       }
-      current.setDate(current.getDate() + 1);
+      current.setUTCDate(current.getUTCDate() + 1);
     }
 
     // Alle Operationen atomar in einer Transaktion ausführen

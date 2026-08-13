@@ -14,7 +14,9 @@ function parseDateYMD(s: string): Date | null {
   const mo = parseInt(m[2]);
   const d = parseInt(m[3]);
   if (!y || !mo || !d) return null;
-  return new Date(y, mo - 1, d);
+  // UTC-Grenzen: @db.Date-Werte werden anhand des UTC-Kalendertags gespeichert/verglichen.
+  // Lokale Date-Konstruktoren würden in Zeitzonen ≠ UTC auf den falschen Tag verschieben.
+  return new Date(Date.UTC(y, mo - 1, d));
 }
 
 export async function POST(req: Request) {
@@ -72,7 +74,7 @@ export async function POST(req: Request) {
     const existingMap = new Map<string, { id: string; type: string }>();
     for (const e of existing) {
       const d = new Date(e.date);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
       existingMap.set(key, { id: e.id, type: e.type });
     }
 
@@ -84,13 +86,14 @@ export async function POST(req: Request) {
     const operations: Prisma.PrismaPromise<any>[] = [];
 
     while (current <= toDate) {
-      const dayOfWeek = current.getDay();
-      const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
-      const dbDate = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+      const dayOfWeek = current.getUTCDay();
+      const key = `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, "0")}-${String(current.getUTCDate()).padStart(2, "0")}`;
+      // UTC-Grenzen: siehe parseDateYMD oben.
+      const dbDate = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
 
       // Skip weekends
       if (dayOfWeek === 0 || dayOfWeek === 6) {
-        current.setDate(current.getDate() + 1);
+        current.setUTCDate(current.getUTCDate() + 1);
         continue;
       }
 
@@ -124,7 +127,7 @@ export async function POST(req: Request) {
         created++;
       }
 
-      current.setDate(current.getDate() + 1);
+      current.setUTCDate(current.getUTCDate() + 1);
     }
 
     // Alle Operationen atomar in einer Transaktion ausführen
