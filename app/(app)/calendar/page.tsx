@@ -14,6 +14,10 @@ interface UserProfile {
   firstName: string;
   weeklyHours: number;
   pensum: number;
+  // Historische Basis vor der ersten Pensumsänderung — das ist der Wert, den
+  // pensumAt() als Fallback für frühere Daten braucht.
+  baseWeeklyHours: number | null;
+  basePensum: number | null;
   vacationDays: number;
   startDate: string | null;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
@@ -98,6 +102,8 @@ export default function CalendarPage() {
           firstName: data?.firstName ?? "",
           weeklyHours: data?.weeklyHours ?? 42,
           pensum: data?.pensum ?? 100,
+          baseWeeklyHours: data?.baseWeeklyHours ?? null,
+          basePensum: data?.basePensum ?? null,
           vacationDays: data?.vacationDays ?? 25,
           startDate: data?.startDate ?? null,
           standardWeek: data?.standardWeek ?? { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
@@ -165,8 +171,15 @@ export default function CalendarPage() {
     return entries?.filter?.((e) => e?.date?.startsWith?.(dateStr)) ?? [];
   };
 
+  // basePensum/baseWeeklyHours zuerst: Profil ist der Fallback von pensumAt()
+  // für Daten vor der ersten Pensumsänderung, also die historische Basis.
   const profil: Profil | null = profile
-    ? { pensum: profile.pensum, wochenstunden: profile.weeklyHours, startDate: profile.startDate, ferientage: profile.vacationDays }
+    ? {
+        pensum: profile.basePensum ?? profile.pensum,
+        wochenstunden: profile.baseWeeklyHours ?? profile.weeklyHours,
+        startDate: profile.startDate,
+        ferientage: profile.vacationDays,
+      }
     : null;
   const changes: PensumChangeInput[] = pensumChanges.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
 

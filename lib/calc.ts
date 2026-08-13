@@ -75,6 +75,7 @@ export interface FeriensaldoInput {
   jahr: number;
   heute: Date | string;
   profil: Profil;
+  changes: PensumChangeInput[];
   eintraege: EintragMitDatum[];
 }
 
@@ -224,7 +225,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
 }
 
 export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
-  const { jahr, profil } = input;
+  const { jahr, profil, changes } = input;
   const heute = toUTCDate(input.heute);
   const startDate = profil.startDate ? toUTCDate(profil.startDate) : null;
 
@@ -239,14 +240,16 @@ export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
 
   // bezogen/geplant sind wie anspruch in Tagen. Jeder Eintrag wird über das
   // Tagessoll seines Datums in einen Tage-Anteil umgerechnet (Halbtage etc.
-  // bleiben so korrekt anteilig).
+  // bleiben so korrekt anteilig). changes muss dabei durchgereicht werden —
+  // sonst wird nach einem Pensumswechsel mit dem falschen Tagessoll geteilt
+  // und ein voller Ferientag zählt z.B. nur als 0.6 Tage.
   let bezogen = 0;
   let geplant = 0;
   for (const eintrag of input.eintraege) {
     if (eintrag.typ !== "ferien") continue;
     const d = toUTCDate(eintrag.date);
     if (d.getUTCFullYear() !== jahr) continue;
-    const tagesSoll = sollStundenTag(d, profil, []);
+    const tagesSoll = sollStundenTag(d, profil, changes);
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     const tage = tagesSoll > 0 ? stunden / tagesSoll : 0;
     if (d.getTime() <= heute.getTime()) bezogen += tage;

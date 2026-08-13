@@ -53,6 +53,7 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       jahr: 2026,
       heute: "2026-08-12",
       profil: testProfil,
+      changes: [],
       eintraege: [],
     });
     expect(result.anspruch).toBe(18.8);
@@ -225,6 +226,7 @@ describe("feriensaldo", () => {
       jahr: 2026,
       heute: "2026-08-12",
       profil,
+      changes: [],
       eintraege: [
         { date: "2026-08-10", typ: "ferien", hours: 8 },
         { date: "2026-09-01", typ: "ferien", hours: 8 },
@@ -240,6 +242,7 @@ describe("feriensaldo", () => {
       jahr: 2026,
       heute: "2026-08-12",
       profil,
+      changes: [],
       eintraege: [{ date: "2026-08-10", typ: "ferien", hours: 4 }],
     });
     expect(result.bezogen).toBe(0.5);
@@ -247,11 +250,67 @@ describe("feriensaldo", () => {
 
   it("Pensum geht nicht in den Anspruch ein", () => {
     const teilzeitProfil: Profil = { ...profil, pensum: 50 };
-    const result = feriensaldo({ jahr: 2026, heute: "2026-08-12", profil: teilzeitProfil, eintraege: [] });
+    const result = feriensaldo({ jahr: 2026, heute: "2026-08-12", profil: teilzeitProfil, changes: [], eintraege: [] });
     expect(result.anspruch).toBe(25);
   });
 
   function round1(n: number): number {
     return Math.round(n * 10) / 10;
   }
+});
+
+describe("feriensaldo mit Pensumswechsel", () => {
+  // Ferien-Einträge tragen ihre Stunden explizit (so schreibt bulk-vacation sie,
+  // pensum-korrekt gerundet). Nur dann schlägt der Bug zu: bei hours = null
+  // erbt der Eintrag dasselbe falsche Tagessoll und der Fehler kürzt sich weg.
+  // 14.08.2026 ist ein Freitag, 01.09.2026 ein Dienstag — beides Werktage,
+  // sonst wäre das Tagessoll 0 und die Umrechnung stillschweigend 0 Tage.
+
+  it("Reduktion 100% → 60% per 01.09.: beide Ferientage zählen je exakt 1.0", () => {
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const result = feriensaldo({
+      jahr: 2026,
+      heute: "2026-12-31",
+      profil,
+      changes: [{ effectiveFrom: "2026-09-01", pensum: 60, wochenstunden: 40 }],
+      eintraege: [
+        { date: "2026-08-14", typ: "ferien", hours: 8 }, // Tagessoll 8h (100%)
+        { date: "2026-09-01", typ: "ferien", hours: 4.8 }, // Tagessoll 4.8h (60%)
+      ],
+    });
+    // Ohne durchgereichte changes: 4.8h / 8h = 0.6 → bezogen 1.6 statt 2
+    expect(result.bezogen).toBe(2);
+    expect(result.anspruch).toBe(25);
+    expect(result.offen).toBe(23);
+  });
+
+  it("Erhöhung 60% → 100% per 01.09.: beide Ferientage zählen je exakt 1.0", () => {
+    const profil: Profil = { wochenstunden: 40, pensum: 60, ferientage: 25, startDate: "2026-01-01" };
+    const result = feriensaldo({
+      jahr: 2026,
+      heute: "2026-12-31",
+      profil,
+      changes: [{ effectiveFrom: "2026-09-01", pensum: 100, wochenstunden: 40 }],
+      eintraege: [
+        { date: "2026-08-14", typ: "ferien", hours: 4.8 }, // Tagessoll 4.8h (60%)
+        { date: "2026-09-01", typ: "ferien", hours: 8 }, // Tagessoll 8h (100%)
+      ],
+    });
+    // Ohne durchgereichte changes: 8h / 4.8h = 1.67 → bezogen 2.7 statt 2
+    expect(result.bezogen).toBe(2);
+    expect(result.offen).toBe(23);
+  });
+
+  it("geplant (nach heute) wird ebenfalls über das korrekte Tagessoll gerechnet", () => {
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01" };
+    const result = feriensaldo({
+      jahr: 2026,
+      heute: "2026-08-12",
+      profil,
+      changes: [{ effectiveFrom: "2026-09-01", pensum: 60, wochenstunden: 40 }],
+      eintraege: [{ date: "2026-09-01", typ: "ferien", hours: 4.8 }],
+    });
+    expect(result.geplant).toBe(1);
+    expect(result.bezogen).toBe(0);
+  });
 });

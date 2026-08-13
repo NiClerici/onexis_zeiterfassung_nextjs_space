@@ -17,10 +17,15 @@ import {
   type KundeInput,
 } from "@/lib/calc";
 
+// Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
+// für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
+// aktuelle Wert. user.pensum/weeklyHours werden von /api/pensum-changes bei
+// jeder Änderung auf den neuesten Stand überschrieben; die Basis liegt in
+// basePensum/baseWeeklyHours. Gleiches Muster wie in bulk-vacation/route.ts.
 function buildProfil(user: any): Profil {
   return {
-    pensum: user?.pensum ?? 100,
-    wochenstunden: user?.weeklyHours ?? 42,
+    pensum: user?.basePensum ?? user?.pensum ?? 100,
+    wochenstunden: user?.baseWeeklyHours ?? user?.weeklyHours ?? 42,
     startDate: user?.startDate ?? null,
     ferientage: user?.vacationDays ?? 25,
   };
@@ -164,7 +169,7 @@ export async function GET(req: Request) {
     const yearFerienRaw = await prisma.timeEntry.findMany({
       where: { userId, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
     });
-    const fs = feriensaldo({ jahr: displayYear, heute, profil, eintraege: mapEintraege(yearFerienRaw) });
+    const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, eintraege: mapEintraege(yearFerienRaw) });
 
     // ---- Build Excel workbook ----
     const workbook = new ExcelJS.Workbook();
