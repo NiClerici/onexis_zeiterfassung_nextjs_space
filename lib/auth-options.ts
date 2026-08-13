@@ -30,11 +30,21 @@ export const authOptions: NextAuthOptions = {
           await recordAttempt("login", email, ip, isValid);
           if (!user || !isValid) return null;
 
+          // Ein Mensch kann später in mehreren Organisationen sein (MIGRATION.md
+          // Punkt 3) — hier wird bewusst die zuerst beigetretene genommen, bis
+          // eine Org-Wechsel-UI existiert (nicht Teil von Punkt 3/4).
+          const membership = await prisma.membership.findFirst({
+            where: { userId: user.id },
+            orderBy: { createdAt: "asc" },
+          });
+
           return {
             id: user.id,
             email: user.email,
             name: `${user.firstName} ${user.lastName}`.trim(),
             mustSetPassword: user.mustSetPassword,
+            orgId: membership?.orgId ?? null,
+            role: membership?.role ?? null,
           } as any;
         } catch (error: any) {
           console.error("Auth error:", error);
@@ -53,6 +63,8 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user?.id;
         token.mustSetPassword = user?.mustSetPassword ?? false;
+        token.orgId = user?.orgId ?? null;
+        token.role = user?.role ?? null;
       }
       // Wird von set-password/page.tsx nach erfolgreichem Setzen des neuen
       // Passworts über useSession().update() ausgelöst, damit die Sperre ohne
@@ -66,6 +78,8 @@ export const authOptions: NextAuthOptions = {
       if (session?.user) {
         (session.user as any).id = token?.id;
         (session.user as any).mustSetPassword = token?.mustSetPassword ?? false;
+        (session.user as any).orgId = token?.orgId ?? null;
+        (session.user as any).role = token?.role ?? null;
       }
       return session;
     },
