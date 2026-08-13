@@ -70,8 +70,8 @@ beforeAll(async () => {
   await prisma.membership.create({ data: { orgId: ORG_A, userId: shared, role: "member", entryDate: new Date() } });
   await prisma.membership.create({ data: { orgId: ORG_B, userId: shared, role: "member", entryDate: new Date() } });
 
-  const custA = await prisma.customer.create({ data: { orgId: ORG_A, userId: a1, name: "Kunde A" } });
-  const custB = await prisma.customer.create({ data: { orgId: ORG_B, userId: b1, name: "Kunde B" } });
+  const custA = await prisma.customer.create({ data: { orgId: ORG_A, name: "Kunde A" } });
+  const custB = await prisma.customer.create({ data: { orgId: ORG_B, name: "Kunde B" } });
   customerA = custA.id;
   customerB = custB.id;
 

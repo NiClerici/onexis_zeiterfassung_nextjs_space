@@ -223,7 +223,7 @@ zweiten Weg geboten hätte, Passwörter zu erraten.
 
 ---
 
-### - [ ] 3. Mandantenfähigkeit: Organization + Membership
+### - [x] 3. Mandantenfähigkeit: Organization + Membership
 
 Das ist der grösste Punkt. Aktuell hängt alles an `userId`; `Customer` sogar
 pro Nutzer statt pro Firma. Arbeite ihn in genau dieser Reihenfolge ab und
@@ -284,6 +284,56 @@ Dieser Punkt gilt erst als erledigt, wenn diese Tests existieren und grün sind.
 
 **3f. Seed.** `scripts/seed.ts` erzeugt zwei Organisationen mit je mehreren
 Rollen, damit Mandantentrennung real klickbar ist.
+
+**Ergebnis:** Vollständig umgesetzt, in sechs Commits (einer je Unterpunkt,
+plus ein siebter für den abschliessenden Drop). Abweichung von der
+wörtlichen Reihenfolge, bewusst und dokumentiert: 3b (Datenmigration) wurde
+in zwei Migrationen aufgeteilt statt einer.
+
+- **Additive Migration** (`20260813124101_org_membership_additive`, Teil
+  von 3a): Organization + Membership angelegt, orgId **nullable** an
+  TimeEntry/Customer/PensumChange/OvertimePayout ergänzt, echte
+  Datenmigration statt reinem Schema-Diff — Organisation „ONEXIS" angelegt,
+  jeder Bestandsnutzer als Membership eingehängt (erster = owner, Rest =
+  member), Arbeitseinstellungen kopiert, orgId auf allen Bestandsdaten
+  gesetzt, gleichnamige Customer je Org zusammengeführt. Kein Datenverlust,
+  alte Spalten blieben bestehen — deshalb ohne Rückfrage direkt angewendet.
+- **3c, 3d, 3e, 3f** wie im Punkt beschrieben umgesetzt (Details in den
+  einzelnen Commit-Nachrichten `MIGRATION #3a` bis `#3f`).
+- **Abschliessende Migration** (`20260813130427_org_membership_cleanup`):
+  erst NACH 3d (alle Routen umgestellt) und 3e (Isolationstests grün)
+  wurden die jetzt redundanten Spalten gedroppt — `Customer.userId` sowie
+  `User.weeklyHours/pensum/baseWeeklyHours/basePensum/vacationDays/
+  startDate/stdHoursMon–Sun/role` — und orgId überall auf `NOT NULL`
+  gesetzt (vorher per SQL verifiziert: 0 Zeilen mit `orgId IS NULL`). Diese
+  eine Migration ist destruktiv; wie mit dem Nutzer abgestimmt wurde sie
+  als Datei vorgelegt, nicht sofort ausgeführt, und erst nach expliziter
+  Freigabe mit `prisma migrate deploy` angewendet.
+- **Grund für die Aufteilung:** Ein einziger Migrationsschritt, der sofort
+  droppt, hätte den ganzen Punkt zu einem einzigen unteilbaren, riskanten
+  Commit gemacht — genau das, was „committe nach jedem Unterpunkt" verhindern
+  soll. Die additive Migration ist ohne Risiko sofort anwendbar; das
+  eigentliche Droppen ist der einzige Schritt, der wirklich Rückfrage
+  verdient, und wird jetzt auch nicht mehr durch fünf harmlose Unterpunkte
+  verzögert.
+- **Zwei fachliche Verschiebungen, kein Implementierungsdetail:** Kunden
+  gehören jetzt der Organisation statt dem einzelnen Mitarbeitenden (alle
+  Mitglieder sehen dieselbe Kundenliste — Voraussetzung für Punkt 5/8).
+  `User.role` wurde ersatzlos entfernt (durch `Membership.role` abgelöst;
+  grep bestätigte vor dem Entfernen, dass es nirgends gelesen wurde).
+- **Isolationstests:** 14 API-Level-Tests (`lib/api-isolation.test.ts`) +
+  11 Einheitstests für `lib/access.ts` (`lib/access.test.ts`), macht
+  25 neue Tests, 48 insgesamt grün. Darunter ein Härtetest mit einem
+  Nutzer, der Mitglied in **beiden** Test-Organisationen ist — der einzige
+  Fall, in dem `userId` allein nicht mehr zwischen Organisationen
+  disambiguiert; zwei Sanity-Checks (orgId testweise aus einer Query
+  entfernt) bestätigten, dass die Tests eine echte Regression fangen
+  würden, bevor der Punkt als erledigt galt.
+- **Browser-verifiziert** (Playwright, mehrere Durchläufe vor und nach der
+  abschliessenden Migration): Bestandsnutzer John unverändert nutzbar
+  (Profil, Kalender, Analytics — exakt dieselben Zahlen wie vor Punkt 3);
+  zwei verschiedene Demo-Logins aus zwei verschiedenen Organisationen
+  zeigen nachweislich unterschiedliche, nicht überlappende Kundendaten.
 
 ---
 
@@ -509,3 +559,22 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   deckt "Rate-Limiting auf `/api/auth/*`" (nicht nur den Login) mit einer
   Tabelle ab. `/api/auth/login/route.ts` (ungenutzter, ungedrosselter
   Zweit-Endpunkt für denselben Credential-Check) im selben Zug entfernt.
+- Punkt 3: in sechs Commits abgearbeitet (3a/3c/3d/3e/3f je einzeln, 3b in
+  zwei Migrationen aufgeteilt — additiv sofort, destruktiv erst nach 3d/3e
+  und expliziter Freigabe). Ausführliche Begründung unter **Ergebnis:**
+  beim Punkt selbst.
+- Punkt 3, methodischer Fund beim Schreiben der Isolationstests: ein Sanity-
+  Check (orgId testweise aus einer Query entfernt, Tests müssen dann rot
+  werden) deckte auf, dass die ersten GET-Tests orgId-Isolation gar nicht
+  wirklich bewiesen — userId allein disambiguiert in diesem Datensatz schon
+  zwischen Organisationen, weil jeder Testnutzer eindeutig einer Org
+  angehört. Erst ein Nutzer mit Mitgliedschaft in zwei Organisationen macht
+  den Unterschied sichtbar. Für künftige Isolationstests (Punkt 8/9)
+  relevant: ohne einen solchen Sanity-Check hätte sich ein grüner Testlauf
+  angefühlt wie ein Beweis, ohne einer zu sein.
+- Punkt 3, Auffälligkeit für Punkt 4/8: `requireOrg()` nimmt aktuell die
+  erste Membership eines Nutzers nach `createdAt` — es gibt noch keine
+  Org-Wechsel-UI. Sobald ein Mensch real in zwei Organisationen sein kann
+  (wovon Punkt 3 im Datenmodell bereits ausgeht), braucht es einen
+  bewussten Wechsel-Mechanismus, nicht nur die implizite Auswahl der
+  ältesten Mitgliedschaft.

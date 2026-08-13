@@ -25,7 +25,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { userId, orgId } = await requireOrg();
+    const { orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { name, billable } = body ?? {};
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     if (existing) return NextResponse.json({ error: "Kunde existiert bereits" }, { status: 409 });
 
     const customer = await prisma.customer.create({
-      data: { userId, orgId, name: trimmedName, billable: billable !== undefined ? Boolean(billable) : true },
+      data: { orgId, name: trimmedName, billable: billable !== undefined ? Boolean(billable) : true },
     });
 
     return NextResponse.json({ customer });
