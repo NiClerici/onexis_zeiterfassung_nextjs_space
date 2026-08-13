@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { signOut } from "next-auth/react";
 import { useI18n, securityQuestionKeys } from "@/lib/i18n";
-import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, KeyRound, Plus, CalendarClock, Banknote } from "lucide-react";
+import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, KeyRound, Plus, CalendarClock, Banknote, Users, Pencil, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 
@@ -31,6 +31,12 @@ interface OvertimePayoutData {
   date: string;
   hours: number;
   note: string | null;
+}
+
+interface CustomerData {
+  id: string;
+  name: string;
+  billable: boolean;
 }
 const clampNumInput = (value: string, min: number, max: number): string => {
   if (value === "") return "";
@@ -75,6 +81,13 @@ export default function ProfilePage() {
   const [basePensum, setBasePensum] = useState<number | null>(null);
   const [baseWeeklyHours, setBaseWeeklyHours] = useState<number | null>(null);
   const [showRetroWarning, setShowRetroWarning] = useState(false);
+
+  // Customer management state
+  const [customers, setCustomers] = useState<CustomerData[]>([]);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState("");
 
   // Overtime payouts state
   const [overtimePayouts, setOvertimePayouts] = useState<OvertimePayoutData[]>([]);
@@ -148,7 +161,17 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts]);
+  const fetchCustomers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/customers");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setCustomers(data?.customers ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers]);
 
   // Check if effectiveFrom is in the past
   useEffect(() => {
@@ -297,6 +320,73 @@ export default function ProfilePage() {
         await fetchOvertimePayouts();
       } else { toast.error(t("profile.error")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setSavingPayout(false); }
+  };
+
+  const addCustomer = async () => {
+    if (!newCustomerName.trim()) return;
+    setSavingCustomer(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCustomerName.trim() }),
+      });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        toast.success(t("profile.customerSaved"));
+        setNewCustomerName("");
+        await fetchCustomers();
+      } else { toast.error(data?.error ?? t("profile.customerError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
+  };
+
+  const toggleCustomerBillable = async (customer: CustomerData) => {
+    setSavingCustomer(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: customer.id, billable: !customer.billable }),
+      });
+      if (res?.ok) { await fetchCustomers(); }
+      else { toast.error(t("profile.customerError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
+  };
+
+  const startEditCustomer = (customer: CustomerData) => {
+    setEditingCustomerId(customer.id);
+    setEditCustomerName(customer.name);
+  };
+
+  const saveEditCustomer = async () => {
+    if (!editingCustomerId || !editCustomerName.trim()) return;
+    setSavingCustomer(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingCustomerId, name: editCustomerName.trim() }),
+      });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        toast.success(t("profile.customerSaved"));
+        setEditingCustomerId(null);
+        await fetchCustomers();
+      } else { toast.error(data?.error ?? t("profile.customerError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
+  };
+
+  const deleteCustomer = async (id: string) => {
+    setSavingCustomer(true);
+    try {
+      const res = await fetch("/api/customers", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (res?.ok) { toast.success(t("profile.customerDeleted")); await fetchCustomers(); }
+      else { toast.error(t("profile.customerError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
   };
 
   const verifySqCode = async () => {
@@ -551,6 +641,63 @@ export default function ProfilePage() {
         <button onClick={saveStandardWeek} disabled={savingStdWeek} className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
           {savingStdWeek ? t("common.loading") : <><CheckCircle className="w-4 h-4" /> {t("profile.stdWeekSave")}</>}
         </button>
+      </motion.div>
+
+      {/* Customer Management */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> {t("profile.customers")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("profile.customersDesc")}</p>
+
+        <div className="flex gap-2 mb-3">
+          <input
+            type="text"
+            value={newCustomerName}
+            onChange={(e) => setNewCustomerName(e.target.value)}
+            placeholder={t("profile.customerNamePlaceholder")}
+            className="flex-1 px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+          />
+          <button
+            onClick={addCustomer}
+            disabled={savingCustomer || !newCustomerName.trim()}
+            className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <Plus className="w-4 h-4" /> {t("profile.addCustomer")}
+          </button>
+        </div>
+
+        {customers.length > 0 ? (
+          <div className="space-y-1.5">
+            {customers.map((c) => (
+              <div key={c.id} className="flex items-center justify-between bg-secondary rounded-xl px-3 py-2 text-sm gap-2">
+                {editingCustomerId === c.id ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editCustomerName}
+                      onChange={(e) => setEditCustomerName(e.target.value)}
+                      className="flex-1 px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      autoFocus
+                    />
+                    <button onClick={saveEditCustomer} disabled={savingCustomer} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition"><CheckCircle className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setEditingCustomerId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><X className="w-3.5 h-3.5" /></button>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}</span>
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none shrink-0">
+                      <input type="checkbox" checked={c.billable} onChange={() => toggleCustomerBillable(c)} className="accent-primary" />
+                      {t("profile.billable")}
+                    </label>
+                    <button onClick={() => startEditCustomer(c)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition shrink-0"><Pencil className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => deleteCustomer(c.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground text-center">{t("profile.noCustomers")}</p>
+        )}
       </motion.div>
 
       {/* Security Questions */}

@@ -178,7 +178,7 @@ unter `components/` ziehen.
 
 ---
 
-### - [ ] 6. Profil + Export
+### - [x] 6. Profil + Export
 
 `app/(app)/profile/page.tsx`:
 - Kundenverwaltung: Liste, anlegen, umbenennen, `billable` togglen, löschen
@@ -244,3 +244,12 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   korrigiert, wie der Titel "Arbeitsstunden vs. Kundenstunden" es verlangt.
   Im Browser verifiziert (Playwright): Kalender, Analytics-Seite (alle Karten + beide
   Charts) und /api/export laufen ohne Konsolen-/Serverfehler.
+- Schritt 6: Kundenverwaltung als neue Karte im Profil ergänzt (Liste, anlegen,
+  umbenennen, `billable` togglen, löschen — CRUD gegen `/api/customers` aus Schritt 3).
+  Bestehende Blöcke (Pensumsänderung, Auszahlungen, Wochenplan, Sicherheitsfragen,
+  Passwort) brauchten keine Anpassung — ihre Feldnamen (weeklyHours/pensum/
+  vacationDays/startDate) waren nie an das alte TimeEntry-Modell gekoppelt.
+  Export Sheet 1 ("Tageszeiten") hat jetzt eine Summenzeile (Total der Stunden-Spalte).
+  Im Browser verifiziert (Playwright): Kunde anlegen/umbenennen/billable-Toggle über
+  die UI funktionieren (Zustand jeweils per API-Response bestätigt); Summenzeile im
+  Export programmatisch geprüft (7.5h + 4h → Total 11.5h, exakt).

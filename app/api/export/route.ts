@@ -185,6 +185,7 @@ export async function GET(req: Request) {
     styleHeaderRow(ws1.getRow(1), 8);
 
     const weekdayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+    let sheet1TotalHours = 0;
     for (const entry of entries ?? []) {
       const d = new Date(entry.date);
       const tagesSoll = sollStundenTag(d, profil, changes);
@@ -192,6 +193,7 @@ export async function GET(req: Request) {
         { typ: entry.type as any, von: entry.von, bis: entry.bis, pauseMin: entry.pauseMin, hours: entry.hours },
         tagesSoll
       );
+      sheet1TotalHours += stunden;
       const row = ws1.addRow({
         date: fmtDate(d),
         weekday: weekdayNames[d.getDay()] ?? "",
@@ -208,6 +210,23 @@ export async function GET(req: Request) {
       else if (entry.type === "feiertag") typeCell.font = { color: { argb: "FF9333EA" } };
       else if (entry.type === "krank" || entry.type === "militaer") typeCell.font = { color: { argb: "FFDC2626" } };
     }
+
+    // Summenzeile
+    const sumRow = ws1.addRow({
+      date: "",
+      weekday: "",
+      von: "",
+      bis: "Total",
+      hours: Math.round(sheet1TotalHours * 100) / 100,
+      type: "",
+      projekt: "",
+      notiz: "",
+    });
+    for (let i = 1; i <= 8; i++) {
+      sumRow.getCell(i).border = { top: { style: "double", color: { argb: "FF1A56DB" } } };
+      sumRow.getCell(i).font = { bold: true };
+    }
+    sumRow.getCell(4).alignment = { horizontal: "right" };
 
     ws1.views = [{ state: "frozen", ySplit: 1 }];
 
