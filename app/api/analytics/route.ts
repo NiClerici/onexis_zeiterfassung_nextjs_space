@@ -10,7 +10,6 @@ import {
   type PensumChangeInput,
   type EintragMitDatum,
   type PayoutInput,
-  type KundeInput,
 } from "@/lib/calc";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
@@ -41,6 +40,7 @@ function mapEintraege(entries: any[]): EintragMitDatum[] {
     pauseMin: e.pauseMin,
     hours: e.hours,
     customerId: e.customerId,
+    billable: e.billable,
   }));
 }
 
@@ -86,16 +86,13 @@ export async function GET(req: Request) {
     const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
     const changes = mapChanges(pensumChangesRaw);
 
-    const kundenRaw = await prisma.customer.findMany({ where: { orgId } });
-    const kunden: KundeInput[] = kundenRaw.map((k) => ({ id: k.id, billable: k.billable }));
-
     const entriesRaw = await prisma.timeEntry.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const eintraege = mapEintraege(entriesRaw);
 
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, kunden });
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts });
 
     // Feiertagsstunden (bis heute) für die bestehende Feiertags-Karte
     const todayEnd = new Date();
@@ -132,9 +129,9 @@ export async function GET(req: Request) {
       const mStart = new Date(Date.UTC(mYear, mMonth - 1, 1));
       const mEndFull = new Date(Date.UTC(mYear, mMonth, 0));
       const mEnd = mEndFull > endDate ? endDate : mEndFull;
-      const mk = kennzahlen({ from: mStart, to: mEnd, heute, eintraege, profil, changes, payouts, kunden });
+      const mk = kennzahlen({ from: mStart, to: mEnd, heute, eintraege, profil, changes, payouts });
       // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im Verlaufs-Chart
-      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [], kunden });
+      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [] });
       monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, work: mkWork.ist, customer: mk.kundenstunden });
       currentMonth.setUTCMonth(currentMonth.getUTCMonth() + 1);
     }

@@ -30,7 +30,6 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       profil: testProfil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.soll).toBe(38.4);
   });
@@ -44,7 +43,6 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       profil: testProfil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.sollGesamt).toBe(100.8);
   });
@@ -129,7 +127,6 @@ describe("Zeitraum komplett vor startDate", () => {
       profil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.soll).toBe(0);
     expect(result.sollGesamt).toBe(0);
@@ -157,7 +154,6 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
       profil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.soll).toBe(0);
     expect(result.sollGesamt).toBe(0);
@@ -174,7 +170,6 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
       profil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.soll).toBe(40);
     expect(result.sollGesamt).toBe(40);
@@ -197,7 +192,6 @@ describe("Zeitraum komplett in der Zukunft", () => {
       profil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.soll).toBe(0);
     expect(result.sollGesamt).toBeGreaterThan(0);
@@ -215,7 +209,6 @@ describe("verrechnungsgrad", () => {
       profil,
       changes: [],
       payouts: [],
-      kunden: [],
     });
     expect(result.ist).toBe(0);
     expect(result.verrechnungsgrad).toBe(0);
@@ -229,16 +222,12 @@ describe("verrechnungsgrad", () => {
       to: "2026-08-11",
       heute: "2026-08-12",
       eintraege: [
-        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, customerId: "billable" },
-        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, customerId: "nonbillable" },
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, customerId: "billable", billable: true },
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, customerId: "nonbillable", billable: false },
       ],
       profil,
       changes: [],
       payouts: [],
-      kunden: [
-        { id: "billable", billable: true },
-        { id: "nonbillable", billable: false },
-      ],
     });
     expect(result.ist).toBe(16);
     expect(result.kundenstunden).toBe(8);
@@ -260,7 +249,6 @@ describe("ueberzeit berücksichtigt OvertimePayouts", () => {
       profil,
       changes: [],
       payouts: [{ date: "2026-08-11", hours: 3 }],
-      kunden: [],
     });
     // ist = 20h, soll = 16h (2 Tage × 8h), Auszahlung 3h → ueberzeit = 20 - 16 - 3 = 1
     expect(result.ist).toBe(20);

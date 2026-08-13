@@ -40,16 +40,15 @@ export interface EintragInput {
 export interface EintragMitDatum extends EintragInput {
   date: Date | string;
   customerId?: string | null;
+  // Verrechenbar — trägt jeder Eintrag jetzt selbst (MIGRATION.md Punkt 5),
+  // vorbelegt aus Projekt/Kunde beim Anlegen. Ersetzt die frühere
+  // Kunden-Lookup-Liste (KundeInput) für kundenstunden in kennzahlen().
+  billable?: boolean | null;
 }
 
 export interface PayoutInput {
   date: Date | string;
   hours: number;
-}
-
-export interface KundeInput {
-  id: string;
-  billable: boolean;
 }
 
 export interface KennzahlenInput {
@@ -60,7 +59,6 @@ export interface KennzahlenInput {
   profil: Profil;
   changes: PensumChangeInput[];
   payouts: PayoutInput[];
-  kunden: KundeInput[];
 }
 
 export interface KennzahlenResult {
@@ -185,8 +183,6 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   const soll = summeSollstunden(from, bisHeute, input.profil, input.changes);
   const sollGesamt = summeSollstunden(from, to, input.profil, input.changes);
 
-  const billableKundenIds = new Set(input.kunden.filter((k) => k.billable).map((k) => k.id));
-
   let ist = 0;
   let kundenstunden = 0;
   let geplantZukunft = 0;
@@ -198,7 +194,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     if (d.getTime() <= bisHeute.getTime()) {
       ist += stunden;
-      if (eintrag.typ === "arbeit" && eintrag.customerId && billableKundenIds.has(eintrag.customerId)) {
+      if (eintrag.typ === "arbeit" && eintrag.billable) {
         kundenstunden += stunden;
       }
     } else if (d.getTime() > heute.getTime()) {
