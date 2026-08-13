@@ -32,9 +32,11 @@ export const authOptions: NextAuthOptions = {
 
           // Ein Mensch kann später in mehreren Organisationen sein (MIGRATION.md
           // Punkt 3) — hier wird bewusst die zuerst beigetretene genommen, bis
-          // eine Org-Wechsel-UI existiert (nicht Teil von Punkt 3/4).
+          // eine Org-Wechsel-UI existiert (nicht Teil von Punkt 3/4). Deaktivierte
+          // Mitgliedschaften (status "inaktiv", Punkt 4c) zählen dabei nicht —
+          // sonst würde "deaktivieren" in /admin/team nichts bewirken.
           const membership = await prisma.membership.findFirst({
-            where: { userId: user.id },
+            where: { userId: user.id, status: "aktiv" },
             orderBy: { createdAt: "asc" },
           });
 

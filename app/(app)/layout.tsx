@@ -5,15 +5,16 @@ import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Calendar, BarChart3, UserCircle } from "lucide-react";
+import { Calendar, BarChart3, UserCircle, Users } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-const tabs = [
+const baseTabs = [
   { href: "/calendar", icon: Calendar, labelKey: "nav.calendar" },
   { href: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
   { href: "/profile", icon: UserCircle, labelKey: "nav.profile" },
 ];
+const teamTab = { href: "/admin/team", icon: Users, labelKey: "nav.team" };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession() || {};
@@ -25,6 +26,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // vor jedem anderen Inhalt zum Setzen eines neuen, richtlinienkonformen
   // Passworts zwingen (MIGRATION.md Punkt 2).
   const mustSetPassword = (session?.user as any)?.mustSetPassword;
+  const role = (session?.user as any)?.role;
+  const tabs = role === "owner" || role === "admin" ? [...baseTabs, teamTab] : baseTabs;
 
   // router.replace() darf nicht während des Renderns aufgerufen werden — das
   // löst eine setState-Kaskade in einer fremden Komponente (dem Router) aus

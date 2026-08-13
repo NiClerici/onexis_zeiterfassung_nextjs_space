@@ -225,7 +225,7 @@ describe("Isolation: overtime-payouts", () => {
 describe("Isolation: pensum-changes", () => {
   it("GET liefert nur eigene Org-Änderungen", async () => {
     setSession(a1, ORG_A, "owner");
-    const res = await pcGet();
+    const res = await pcGet(req("/api/pensum-changes"));
     const body = await res.json();
     const ids = body.changes.map((c: any) => c.id);
     expect(ids).toContain(pcA);
