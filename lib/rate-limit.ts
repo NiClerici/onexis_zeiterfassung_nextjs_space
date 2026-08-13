@@ -13,7 +13,7 @@ import { prisma } from "@/lib/db";
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 10;
 
-export type RateLimitAction = "login" | "forgot-password" | "reset-password";
+export type RateLimitAction = "login" | "forgot-password" | "reset-password" | "invitation-accept";
 
 // Liest die Client-IP aus den üblichen Reverse-Proxy-Headern (x-forwarded-for,
 // x-real-ip). Ohne Proxy davor (z.B. `next dev` ohne Caddy) liefern beide

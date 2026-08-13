@@ -1,16 +1,12 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { sendMail } from "@/lib/mail";
 import { getClientIp, isRateLimited, recordAttempt } from "@/lib/rate-limit";
+import { hashToken, generateToken } from "@/lib/token";
 
 const TOKEN_TTL_MS = 60 * 60 * 1000; // 60 Minuten
-
-function hashToken(rawToken: string): string {
-  return crypto.createHash("sha256").update(rawToken).digest("hex");
-}
 
 // Immer dieselbe generische Antwort, unabhängig davon, ob die E-Mail
 // existiert — sonst liesse sich über den Statuscode/Response-Inhalt
@@ -46,7 +42,7 @@ export async function POST(req: Request) {
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (user) {
-      const rawToken = crypto.randomBytes(32).toString("hex");
+      const rawToken = generateToken();
       const tokenHash = hashToken(rawToken);
       await prisma.passwordResetToken.create({
         data: { userId: user.id, tokenHash, expiresAt: new Date(Date.now() + TOKEN_TTL_MS) },

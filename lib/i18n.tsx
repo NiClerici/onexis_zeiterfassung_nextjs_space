@@ -51,6 +51,15 @@ const translations: Record<string, string> = {
   "reset.submit": "Passwort setzen",
   "reset.success": "Passwort erfolgreich gesetzt! Du kannst dich jetzt anmelden.",
   "reset.error.noToken": "Ungültiger oder fehlender Link. Bitte fordere einen neuen Link an.",
+  // Invitation (Link aus der E-Mail)
+  "invite.title": "Einladung annehmen",
+  "invite.description": "Du wurdest zu {org} eingeladen (Rolle: {role}).",
+  "invite.submit": "Konto erstellen und beitreten",
+  "invite.acceptExisting": "Organisation beitreten",
+  "invite.success": "Willkommen! Dein Konto wurde erstellt.",
+  "invite.successExisting": "Du bist der Organisation beigetreten. Melde dich mit deinem bestehenden Passwort an.",
+  "invite.accountExistsHint": "Für diese E-Mail existiert bereits ein Konto — melde dich danach mit deinem bestehenden Passwort an.",
+  "invite.error.invalid": "Diese Einladung ist ungültig, abgelaufen oder bereits verwendet.",
   // Set password (erzwungen nach Migration von Vorname+Code auf E-Mail+Passwort)
   "setPassword.title": "Neues Passwort erforderlich",
   "setPassword.description": "Aus Sicherheitsgründen wurde die Anmeldung auf E-Mail und Passwort umgestellt. Bitte setze ein neues Passwort, um fortzufahren.",

@@ -1,15 +1,11 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 import { getClientIp, isRateLimited, recordAttempt } from "@/lib/rate-limit";
-
-function hashToken(rawToken: string): string {
-  return crypto.createHash("sha256").update(rawToken).digest("hex");
-}
+import { hashToken } from "@/lib/token";
 
 export async function POST(req: Request) {
   try {
