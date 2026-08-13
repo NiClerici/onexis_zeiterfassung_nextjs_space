@@ -59,6 +59,7 @@ model Organization {
   memberships     Membership[]
   timeEntries     TimeEntry[]
   customers       Customer[]
+  projects        Project[]
   pensumChanges   PensumChange[]
   overtimePayouts OvertimePayout[]
   invitations     Invitation[]
@@ -171,15 +172,26 @@ model TimeEntry {
   von        String?
   bis        String?
   pauseMin   Int      @default(0)
+  // Wird durch projectId (MIGRATION.md Punkt 5) abgelöst — bleibt bis zur
+  // abschliessenden, destruktiven Migration bestehen (siehe Notizen des
+  // Loops), damit bereits migrierte Bestandsdaten nicht verloren gehen,
+  // bevor sichergestellt ist, dass nichts mehr darauf schreibt.
   projekt    String?
   notiz      String?
   customerId String?
+  projectId  String?
+  // Verrechenbar — beim Anlegen aus Projekt/Kunde vorbelegt (customer.billable),
+  // im Tagesdialog überschreibbar. Ersetzt die frühere Kunden-Lookup-Liste in
+  // kennzahlen() (MIGRATION.md Punkt 5).
+  billable   Boolean  @default(false)
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId, date])
   @@index([orgId, date])
+  @@index([projectId])
 }
 
 // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden
@@ -189,10 +201,34 @@ model Customer {
   orgId     String
   name      String
   billable  Boolean     @default(true)
+  // Fallback-Stundensatz, falls ein Projekt dieses Kunden keinen eigenen
+  // hourlyRate trägt (MIGRATION.md Punkt 5).
+  hourlyRate Float?
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   timeEntries TimeEntry[]
+  projects  Project[]
 
   @@unique([orgId, name])
+}
+
+// Projekte als Entität statt Freitext (MIGRATION.md Punkt 5) — erst dadurch
+// gibt es Budgets und Stundensätze pro Projekt statt nur pro Kunde.
+model Project {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  name        String
+  hourlyRate  Float?
+  budgetHours Float?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  timeEntries TimeEntry[]
+
+  @@unique([orgId, customerId, name])
+  @@index([orgId])
 }
 
 model OvertimePayout {
