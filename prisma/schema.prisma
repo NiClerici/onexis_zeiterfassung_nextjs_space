@@ -44,18 +44,86 @@ model User {
   pensumChanges    PensumChange[]
   overtimePayouts  OvertimePayout[]
   passwordResetTokens PasswordResetToken[]
+  memberships      Membership[]
 }
 
 model PensumChange {
   id          String   @id @default(cuid())
   userId      String
+  orgId       String?
   pensum      Float
   weeklyHours Float
   effectiveFrom DateTime @db.Date
   createdAt   DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org         Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([userId, effectiveFrom])
+  @@index([orgId])
+}
+
+// Mandantenfähigkeit (MIGRATION.md Punkt 3). orgId ist hier noch nullable —
+// wird von der additiven Migration (3a) für alle Bestandsdaten befüllt und
+// erst mit dem Abschluss der Routen-Umstellung (3d) required. Slug ist der
+// öffentliche, URL-taugliche Bezeichner (z.B. für künftige Einladungslinks).
+model Organization {
+  id             String    @id @default(cuid())
+  name           String
+  slug           String    @unique
+  plan           String    @default("trial") // trial | starter | pro
+  trialEndsAt    DateTime?
+  maxWeeklyHours Float     @default(45) // 45 oder 50 (Art. 12/13 ArG, Punkt 6a)
+  createdAt      DateTime  @default(now())
+
+  memberships     Membership[]
+  timeEntries     TimeEntry[]
+  customers       Customer[]
+  pensumChanges   PensumChange[]
+  overtimePayouts OvertimePayout[]
+}
+
+// Verbindet einen User mit einer Organization. Trägt auch die
+// Arbeitseinstellungen (gehören fachlich zur Anstellung, nicht zur Person —
+// derselbe Mensch kann später in zwei Organisationen unterschiedliche
+// Pensen haben). managerId ist eine Selbstreferenz auf eine andere
+// Membership derselben Organisation (der Vorgesetzte).
+model Membership {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  role      String   @default("member") // owner | admin | manager | member
+  managerId String?
+  status    String   @default("aktiv")  // aktiv | inaktiv
+  entryDate DateTime @db.Date
+  exitDate  DateTime? @db.Date
+
+  // Arbeitseinstellungen — von User hierher verschoben (MIGRATION.md Punkt 3a).
+  weeklyHours     Float     @default(42)
+  pensum          Float     @default(100)
+  // Werte, die vor der ersten Pensumsänderung galten (Basis für rückwirkende Berechnungen)
+  baseWeeklyHours Float?
+  basePensum      Float?
+  vacationDays    Float     @default(25)
+  startDate       DateTime?
+  stdHoursMon     Float     @default(0)
+  stdHoursTue     Float     @default(0)
+  stdHoursWed     Float     @default(0)
+  stdHoursThu     Float     @default(0)
+  stdHoursFri     Float     @default(0)
+  stdHoursSat     Float     @default(0)
+  stdHoursSun     Float     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org      Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manager  Membership?   @relation("MembershipManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports  Membership[]  @relation("MembershipManager")
+
+  @@unique([orgId, userId])
+  @@index([orgId])
+  @@index([managerId])
 }
 
 // Signierter, einmal verwendbarer Token für den Passwort-Reset per E-Mail.
@@ -92,6 +160,7 @@ model LoginAttempt {
 model TimeEntry {
   id         String   @id @default(cuid())
   userId     String
+  orgId      String?
   date       DateTime @db.Date
   hours      Float?
   type       String   @default("arbeit")
@@ -102,30 +171,41 @@ model TimeEntry {
   notiz      String?
   customerId String?
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@index([userId, date])
+  @@index([orgId, date])
 }
 
+// userId bleibt vorerst zusätzlich zu orgId bestehen (wird erst gedroppt,
+// sobald 3d alle Routen auf orgId umgestellt hat — siehe MIGRATION.md Punkt 3,
+// Notizen des Loops, zur Begründung der zweigeteilten Migration).
 model Customer {
   id        String      @id @default(cuid())
   userId    String
+  orgId     String?
   name      String
   billable  Boolean     @default(true)
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   timeEntries TimeEntry[]
 
   @@unique([userId, name])
+  @@index([orgId])
 }
 
 model OvertimePayout {
   id        String   @id @default(cuid())
   userId    String
+  orgId     String?
   date      DateTime @db.Date
   hours     Float
   note      String?
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([userId, date])
+  @@index([orgId, date])
 }
