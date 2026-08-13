@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
+import { checkPasswordPolicy } from "@/lib/password-policy";
 
 export async function GET() {
   try {
@@ -12,10 +13,7 @@ export async function GET() {
     if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const userId = (session.user as any)?.id;
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { securityQuestions: { select: { id: true, question: true, answer: true } } },
-    });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
 
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
@@ -38,7 +36,6 @@ export async function GET() {
         sat: user?.stdHoursSat ?? 0,
         sun: user?.stdHoursSun ?? 0,
       },
-      securityQuestions: user?.securityQuestions ?? [],
     });
   } catch (error: any) {
     console.error(error);
@@ -91,26 +88,30 @@ export async function PATCH(req: Request) {
     const userId = (session.user as any)?.id;
 
     const body = await req?.json?.().catch(() => ({}));
-    const { currentCode, newCode } = body ?? {};
+    const { currentPassword, newPassword } = body ?? {};
 
-    if (!currentCode || !newCode) {
-      return NextResponse.json({ error: "Missing codes" }, { status: 400 });
+    if (!currentPassword || !newPassword) {
+      return NextResponse.json({ error: "Missing passwords" }, { status: 400 });
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    if ((newCode?.length ?? 0) < 4 || (newCode?.length ?? 0) > 8) {
-      return NextResponse.json({ error: "Code must be 4-8 characters" }, { status: 400 });
+    const passwordCheck = checkPasswordPolicy(newPassword);
+    if (!passwordCheck.ok) {
+      return NextResponse.json({ error: passwordCheck.error }, { status: 400 });
     }
 
-    const isValid = await bcrypt.compare(currentCode, user?.code ?? "");
+    const isValid = await bcrypt.compare(currentPassword, user.password);
     if (!isValid) {
-      return NextResponse.json({ error: "Invalid current code" }, { status: 401 });
+      return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
     }
 
-    const hashedCode = await bcrypt.hash(newCode, 10);
-    await prisma.user.update({ where: { id: userId }, data: { code: hashedCode, password: hashedCode } });
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // mustSetPassword hier immer mitlöschen: dieser Endpunkt ist auch der Weg,
+    // über den set-password/page.tsx die erzwungene Passwortänderung nach der
+    // Migration abschliesst.
+    await prisma.user.update({ where: { id: userId }, data: { password: hashedPassword, mustSetPassword: false } });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

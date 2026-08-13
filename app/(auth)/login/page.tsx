@@ -5,35 +5,36 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Lock, Eye, EyeOff, User } from "lucide-react";
+import { Lock, Eye, EyeOff, Mail } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { motion } from "framer-motion";
 
 export default function LoginPage() {
   const { t } = useI18n();
   const router = useRouter();
-  const [firstName, setFirstName] = useState("");
-  const [code, setCode] = useState("");
-  const [showCode, setShowCode] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e?.preventDefault?.();
-    if (!code?.trim?.() || !firstName?.trim?.()) return;
+    if (!email?.trim?.() || !password) return;
     setError("");
     setLoading(true);
     try {
       const result = await signIn("credentials", {
         redirect: false,
-        code: code?.trim?.() ?? "",
-        firstName: firstName?.trim?.() ?? "",
-        email: "",
-        password: "",
+        email: email?.trim?.() ?? "",
+        password: password ?? "",
       });
       if (result?.ok) {
         router.replace("/calendar");
       } else {
+        // NextAuth v4 gibt bei jedem authorize()-Fehlschlag denselben generischen
+        // Code zurück (egal ob falsches Passwort oder Rate-Limit) — bewusst eine
+        // einzige Meldung statt eines Rätselratens anhand des Codes.
         setError(t("login.error"));
       }
     } catch (err: any) {
@@ -64,43 +65,43 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-muted-foreground mb-1.5 block">{t("login.firstName")}</label>
+              <label className="text-sm font-medium text-muted-foreground mb-1.5 block">{t("login.email")}</label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
-                  type="text"
-                  value={firstName}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFirstName(e?.target?.value ?? "")}
-                  placeholder={t("login.firstNamePlaceholder")}
+                  type="email"
+                  value={email}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e?.target?.value ?? "")}
+                  placeholder={t("login.emailPlaceholder")}
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-secondary text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                   autoFocus
+                  autoComplete="email"
                 />
               </div>
             </div>
             <div>
-              <label className="text-sm font-medium text-muted-foreground mb-1.5 block">{t("login.code")}</label>
+              <label className="text-sm font-medium text-muted-foreground mb-1.5 block">{t("login.password")}</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <input
-                  type={showCode ? "text" : "password"}
-                  maxLength={8}
-                  value={code}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCode(e?.target?.value ?? "")}
-                  placeholder={t("login.codePlaceholder")}
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-secondary text-foreground text-center tracking-[0.3em] font-mono text-lg placeholder:tracking-normal placeholder:text-sm placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e?.target?.value ?? "")}
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-secondary text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                  autoComplete="current-password"
                 />
-                <button type="button" onClick={() => setShowCode(!showCode)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition">
-                  {showCode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition">
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
             {error && <p className="text-sm text-destructive text-center">{error}</p>}
-            <button type="submit" disabled={loading || (code?.length ?? 0) < 4 || !firstName?.trim?.()} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:opacity-90 transition disabled:opacity-50">
+            <button type="submit" disabled={loading || !password || !email?.trim?.()} className="w-full py-2.5 rounded-xl bg-primary text-primary-foreground font-medium hover:opacity-90 transition disabled:opacity-50">
               {loading ? t("common.loading") : t("login.submit")}
             </button>
           </form>
           <div className="mt-4 text-center">
-            <Link href="/forgot-code" className="text-sm text-primary hover:underline">{t("login.forgotCode")}</Link>
+            <Link href="/forgot-password" className="text-sm text-primary hover:underline">{t("login.forgotPassword")}</Link>
           </div>
         </div>
         <p className="text-center text-sm text-muted-foreground mt-6">

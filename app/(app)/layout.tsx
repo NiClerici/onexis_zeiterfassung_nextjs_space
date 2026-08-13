@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
@@ -20,10 +21,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { t } = useI18n();
 
+  // Bestandsnutzer nach der Migration von Vorname+Code auf E-Mail+Passwort:
+  // vor jedem anderen Inhalt zum Setzen eines neuen, richtlinienkonformen
+  // Passworts zwingen (MIGRATION.md Punkt 2).
+  const mustSetPassword = (session?.user as any)?.mustSetPassword;
+
+  // router.replace() darf nicht während des Renderns aufgerufen werden — das
+  // löst eine setState-Kaskade in einer fremden Komponente (dem Router) aus
+  // (React-Warnung "Cannot update a component while rendering a different
+  // component"). Beide Redirects gehören deshalb in einen Effect, nicht in
+  // den Render-Pfad selbst.
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.replace("/login");
+    } else if (mustSetPassword && pathname !== "/set-password") {
+      router.replace("/set-password");
+    }
+  }, [status, mustSetPassword, pathname, router]);
+
   if (status === "loading") {
     return <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))]"><div className="animate-pulse text-muted-foreground text-sm">{t("common.loading")}</div></div>;
   }
-  if (status === "unauthenticated") { router.replace("/login"); return null; }
+  if (status === "unauthenticated") return null;
+  if (mustSetPassword && pathname !== "/set-password") return null;
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] flex flex-col">

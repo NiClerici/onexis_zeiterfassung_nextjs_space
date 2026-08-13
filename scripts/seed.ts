@@ -5,9 +5,8 @@ const prisma = new PrismaClient();
 
 async function main() {
   const hashedPassword = await bcrypt.hash("johndoe123", 10);
-  const hashedCode = await bcrypt.hash("1234", 10);
 
-  const user = await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: "john@doe.com" },
     update: {},
     create: {
@@ -15,7 +14,7 @@ async function main() {
       password: hashedPassword,
       firstName: "John",
       lastName: "Doe",
-      code: hashedCode,
+      mustSetPassword: false,
       weeklyHours: 42,
       pensum: 100,
       vacationDays: 25,
@@ -23,28 +22,6 @@ async function main() {
       role: "admin",
     },
   });
-
-  // Upsert security questions for test user
-  const existingQuestions = await prisma.securityQuestion.findMany({
-    where: { userId: user.id },
-  });
-
-  if ((existingQuestions?.length ?? 0) === 0) {
-    await prisma.securityQuestion.create({
-      data: {
-        userId: user.id,
-        question: "sq.pet",
-        answer: "rex",
-      },
-    });
-    await prisma.securityQuestion.create({
-      data: {
-        userId: user.id,
-        question: "sq.city",
-        answer: "zürich",
-      },
-    });
-  }
 
   console.log("Seed completed");
 }

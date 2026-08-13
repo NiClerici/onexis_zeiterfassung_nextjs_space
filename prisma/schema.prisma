@@ -14,7 +14,11 @@ model User {
   password      String
   firstName     String
   lastName      String
-  code          String
+  // Erzwingt beim nächsten Login das Setzen eines neuen Passworts, das die
+  // aktuelle Passwortrichtlinie erfüllt. Wird von der Migration für alle
+  // Bestandsnutzer auf true gesetzt (deren password-Hash aus der alten
+  // Code-Ära stammt); frische Registrierungen starten mit false.
+  mustSetPassword Boolean @default(false)
   weeklyHours   Float     @default(42)
   pensum        Float     @default(100)
   // Werte, die vor der ersten Pensumsänderung galten (Basis für rückwirkende Berechnungen)
@@ -35,11 +39,11 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  securityQuestions SecurityQuestion[]
   timeEntries      TimeEntry[]
   customers        Customer[]
   pensumChanges    PensumChange[]
   overtimePayouts  OvertimePayout[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model PensumChange {
@@ -54,14 +58,35 @@ model PensumChange {
   @@index([userId, effectiveFrom])
 }
 
-model SecurityQuestion {
-  id       String @id @default(cuid())
-  userId   String
-  question String
-  answer   String
-  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+// Signierter, einmal verwendbarer Token für den Passwort-Reset per E-Mail.
+// Nur der Hash wird gespeichert — der Klartext-Token existiert ausschliesslich
+// im Link, der per Mail verschickt wird.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// Rate-Limiting für /api/auth/* (Login, Passwort-vergessen, Passwort-Reset) in
+// der DB statt im Speicher, weil die App potenziell mehrfach läuft.
+// action unterscheidet die Endpunkte ("login" | "forgot-password" |
+// "reset-password"); email ist bei nicht-email-bezogenen Aktionen leer.
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  action    String   @default("login")
+  email     String
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([action, email, createdAt])
+  @@index([action, ip, createdAt])
 }
 
 model TimeEntry {

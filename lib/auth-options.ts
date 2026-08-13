@@ -2,6 +2,7 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
+import { getClientIp, isRateLimited, recordAttempt } from "@/lib/rate-limit";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -10,53 +11,31 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: "Email", type: "text" },
         password: { label: "Password", type: "password" },
-        code: { label: "Code", type: "text" },
-        firstName: { label: "First Name", type: "text" },
       },
-      async authorize(credentials) {
-        if (!credentials) return null;
+      async authorize(credentials, req) {
+        if (!credentials?.email || !credentials?.password) return null;
+        const email = credentials.email.trim().toLowerCase();
+        const ip = getClientIp(req);
 
         try {
-          // Code-based login with firstName (app UI)
-          if (credentials.code && credentials.code.trim() !== "" && credentials.firstName && credentials.firstName.trim() !== "") {
-            const users = await prisma.user.findMany({
-              where: {
-                firstName: {
-                  equals: credentials.firstName.trim(),
-                  mode: "insensitive",
-                },
-              },
-              take: 5,
-            });
-            for (const user of users) {
-              const isValid = await bcrypt.compare(credentials.code, user?.code ?? "");
-              if (isValid) {
-                return {
-                  id: user.id,
-                  email: user.email,
-                  name: `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim(),
-                };
-              }
-            }
+          // Max. 10 Fehlversuche pro E-Mail und IP in 15 Minuten (lib/rate-limit.ts).
+          // Bewusst KEINE weitere Zeile in LoginAttempt, solange die Sperre schon
+          // aktiv ist — sonst könnte ein andauernder Angriff die Tabelle fluten.
+          if (await isRateLimited("login", email, ip)) {
             return null;
           }
 
-          // Email+password login (test framework)
-          if (credentials.email && credentials.password) {
-            const user = await prisma.user.findUnique({
-              where: { email: credentials.email },
-            });
-            if (!user) return null;
-            const isValid = await bcrypt.compare(credentials.password, user?.password ?? "");
-            if (!isValid) return null;
-            return {
-              id: user.id,
-              email: user.email,
-              name: `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim(),
-            };
-          }
+          const user = await prisma.user.findUnique({ where: { email } });
+          const isValid = user ? await bcrypt.compare(credentials.password, user.password) : false;
+          await recordAttempt("login", email, ip, isValid);
+          if (!user || !isValid) return null;
 
-          return null;
+          return {
+            id: user.id,
+            email: user.email,
+            name: `${user.firstName} ${user.lastName}`.trim(),
+            mustSetPassword: user.mustSetPassword,
+          } as any;
         } catch (error: any) {
           console.error("Auth error:", error);
           return null;
@@ -70,15 +49,23 @@ export const authOptions: NextAuthOptions = {
     updateAge: 60 * 60,      // Token stündlich erneuern
   },
   callbacks: {
-    async jwt({ token, user }: any) {
+    async jwt({ token, user, trigger, session }: any) {
       if (user) {
         token.id = user?.id;
+        token.mustSetPassword = user?.mustSetPassword ?? false;
+      }
+      // Wird von set-password/page.tsx nach erfolgreichem Setzen des neuen
+      // Passworts über useSession().update() ausgelöst, damit die Sperre ohne
+      // Neu-Login verschwindet.
+      if (trigger === "update" && session?.mustSetPassword !== undefined) {
+        token.mustSetPassword = session.mustSetPassword;
       }
       return token;
     },
     async session({ session, token }: any) {
       if (session?.user) {
         (session.user as any).id = token?.id;
+        (session.user as any).mustSetPassword = token?.mustSetPassword ?? false;
       }
       return session;
     },

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { signOut } from "next-auth/react";
-import { useI18n, securityQuestionKeys } from "@/lib/i18n";
-import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, KeyRound, Plus, CalendarClock, Banknote, Users, Pencil, X } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
+import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 
@@ -15,7 +15,6 @@ interface ProfileData {
   vacationDays: number;
   startDate: string | null;
   language: string;
-  securityQuestions: Array<{ id: string; question: string; answer: string }>;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
 }
 
@@ -60,8 +59,9 @@ export default function ProfilePage() {
   const [pensum, setPensum] = useState("");
   const [vacationDays, setVacationDays] = useState("");
   const [startDate, setStartDate] = useState("");
-  const [currentCode, setCurrentCode] = useState("");
-  const [newCode, setNewCode] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
   // Standard week state
   const [stdMon, setStdMon] = useState("0");
@@ -95,17 +95,6 @@ export default function ProfilePage() {
   const [payoutHours, setPayoutHours] = useState("");
   const [payoutNote, setPayoutNote] = useState("");
   const [savingPayout, setSavingPayout] = useState(false);
-
-  // Security questions editing state
-  const [sqEditing, setSqEditing] = useState(false);
-  const [sqVerifyCode, setSqVerifyCode] = useState("");
-  const [sqVerified, setSqVerified] = useState(false);
-  const [sqVerifying, setSqVerifying] = useState(false);
-  // Add new question form
-  const [addSqKey, setAddSqKey] = useState("");
-  const [addSqCustom, setAddSqCustom] = useState("");
-  const [addSqAnswer, setAddSqAnswer] = useState("");
-  const [showAddSqForm, setShowAddSqForm] = useState(false);
 
   // Export state
   const [exportType, setExportType] = useState("month");
@@ -204,9 +193,9 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setSaving(false); }
   };
 
-  const changeCode = async () => {
-    if (!currentCode || !newCode || newCode.length < 4 || newCode.length > 8) {
-      toast.error(t("register.error.codeFormat"));
+  const changePassword = async () => {
+    if (newPassword !== confirmNewPassword) {
+      toast.error(t("register.error.passwordMismatch"));
       return;
     }
     setSaving(true);
@@ -214,9 +203,9 @@ export default function ProfilePage() {
       const res = await fetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentCode, newCode }),
+        body: JSON.stringify({ currentPassword, newPassword }),
       });
-      if (res?.ok) { toast.success(t("profile.saved")); setCurrentCode(""); setNewCode(""); }
+      if (res?.ok) { toast.success(t("profile.saved")); setCurrentPassword(""); setNewPassword(""); setConfirmNewPassword(""); }
       else { const data = await res?.json?.().catch(() => ({})); toast.error(data?.error ?? t("profile.error")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setSaving(false); }
   };
@@ -387,61 +376,6 @@ export default function ProfilePage() {
       if (res?.ok) { toast.success(t("profile.customerDeleted")); await fetchCustomers(); }
       else { toast.error(t("profile.customerError")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
-  };
-
-  const verifySqCode = async () => {
-    if (!sqVerifyCode || sqVerifyCode.length < 4) return;
-    setSqVerifying(true);
-    try {
-      const res = await fetch("/api/profile/verify-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: sqVerifyCode }),
-      });
-      if (res?.ok) {
-        setSqVerified(true);
-        setSqVerifyCode("");
-      } else {
-        toast.error(t("login.error"));
-      }
-    } catch (err: any) { console.error(err); toast.error(t("common.error")); } finally { setSqVerifying(false); }
-  };
-
-  const deleteSecurityQuestion = async (id: string) => {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/profile/security-questions", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      if (res?.ok) {
-        toast.success(t("profile.saved"));
-        await fetchProfile();
-      } else { toast.error(t("profile.error")); }
-    } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setSaving(false); }
-  };
-
-  const addSecurityQuestion = async () => {
-    const question = addSqKey === "sq.custom" ? addSqCustom : t(addSqKey);
-    if (!question || !addSqAnswer) {
-      toast.error(t("register.error.required"));
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await fetch("/api/profile/security-questions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, answer: addSqAnswer }),
-      });
-      if (res?.ok) {
-        toast.success(t("profile.saved"));
-        setAddSqKey(""); setAddSqCustom(""); setAddSqAnswer("");
-        setShowAddSqForm(false);
-        await fetchProfile();
-      } else { toast.error(t("profile.error")); }
-    } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setSaving(false); }
   };
 
   const handleExport = async () => {
@@ -700,82 +634,16 @@ export default function ProfilePage() {
         )}
       </motion.div>
 
-      {/* Security Questions */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-        <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><KeyRound className="w-4 h-4 text-primary" /> {t("profile.securityQuestions")}</h2>
-        
-        {/* Show current questions */}
-        {profile?.securityQuestions && profile.securityQuestions.length > 0 && (
-          <div className="space-y-1.5 mb-3">
-            {profile.securityQuestions.map((sq, i) => {
-              // Translate key like "sq.pet" to actual text, or use as-is if it's a custom question
-              const questionText = sq.question?.startsWith?.("sq.") ? t(sq.question) : sq.question;
-              return (
-                <div key={sq.id} className="flex items-center justify-between bg-secondary rounded-xl px-3 py-2 text-sm">
-                  <div className="flex-1 min-w-0">
-                    <div><span className="text-muted-foreground">{i + 1}.</span> <span className="font-medium">{questionText}</span></div>
-                    <div className="text-muted-foreground text-xs mt-0.5">{sq.answer}</div>
-                  </div>
-                  {sqVerified && (
-                    <button onClick={() => deleteSecurityQuestion(sq.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0 ml-2"><Trash2 className="w-3.5 h-3.5" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!sqEditing ? (
-          <button onClick={() => setSqEditing(true)} className="w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition">
-            {t("profile.editSecurityQuestions")}
-          </button>
-        ) : !sqVerified ? (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">{t("profile.verifyCode")}</p>
-            <input type="password" maxLength={8} value={sqVerifyCode} onChange={(e) => setSqVerifyCode(e.target.value)} placeholder={t("login.codePlaceholder")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm font-mono tracking-widest text-center focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-            <div className="flex gap-2">
-              <button onClick={() => { setSqEditing(false); setSqVerifyCode(""); }} className="flex-1 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition">{t("calendar.cancel")}</button>
-              <button onClick={verifySqCode} disabled={sqVerifying || sqVerifyCode.length < 4} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                {sqVerifying ? t("common.loading") : t("profile.verifyCode")}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {/* Add new question form */}
-            {!showAddSqForm ? (
-              <button onClick={() => setShowAddSqForm(true)} className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition flex items-center justify-center gap-1.5">
-                <Plus className="w-4 h-4" /> {t("profile.addQuestion")}
-              </button>
-            ) : (
-              <div className="bg-secondary rounded-xl p-3 space-y-2">
-                <select value={addSqKey} onChange={(e) => setAddSqKey(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
-                  <option value="">{t("register.securityQuestion")}</option>
-                  {securityQuestionKeys.map((key) => <option key={key} value={key}>{t(key)}</option>)}
-                </select>
-                {addSqKey === "sq.custom" && <input type="text" value={addSqCustom} onChange={(e) => setAddSqCustom(e.target.value)} placeholder={t("register.customQuestion")} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />}
-                <input type="text" value={addSqAnswer} onChange={(e) => setAddSqAnswer(e.target.value)} placeholder={t("register.securityAnswer")} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-                <div className="flex gap-2">
-                  <button onClick={() => { setShowAddSqForm(false); setAddSqKey(""); setAddSqCustom(""); setAddSqAnswer(""); }} className="flex-1 py-2 rounded-xl bg-card text-foreground text-sm font-medium hover:bg-accent transition">{t("calendar.cancel")}</button>
-                  <button onClick={addSecurityQuestion} disabled={saving || !addSqKey || !addSqAnswer} className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50">
-                    {saving ? t("common.loading") : t("profile.save")}
-                  </button>
-                </div>
-              </div>
-            )}
-            <button onClick={() => { setSqEditing(false); setSqVerified(false); setShowAddSqForm(false); }} className="w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition">{t("calendar.cancel")}</button>
-          </div>
-        )}
-      </motion.div>
-
-      {/* Change Code */}
+      {/* Change Password */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-        <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-primary" /> {t("profile.changeCode")}</h2>
+        <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-primary" /> {t("profile.changePassword")}</h2>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.currentCode")}</label><input type="password" maxLength={8} value={currentCode} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentCode(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
-          <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.newCode")}</label><input type="password" maxLength={8} value={newCode} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewCode(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm font-mono tracking-widest focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
+          <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.currentPassword")}</label><input type="password" value={currentPassword} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentPassword(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" autoComplete="current-password" /></div>
+          <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.newPassword")}</label><input type="password" value={newPassword} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" autoComplete="new-password" /></div>
         </div>
-        <button onClick={changeCode} disabled={saving || !currentCode || !newCode} className="mt-3 w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50">{t("profile.changeCode")}</button>
+        <div className="mt-3"><label className="text-xs text-muted-foreground mb-1 block">{t("register.confirmPassword")}</label><input type="password" value={confirmNewPassword} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmNewPassword(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" autoComplete="new-password" /></div>
+        <p className="text-xs text-muted-foreground mt-2">{t("register.passwordHint")}</p>
+        <button onClick={changePassword} disabled={saving || !currentPassword || !newPassword || !confirmNewPassword} className="mt-3 w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50">{t("profile.changePassword")}</button>
       </motion.div>
 
       {/* CSV Export */}

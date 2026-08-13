@@ -98,7 +98,7 @@ gegengeprüft.
 
 ---
 
-### - [ ] 2. Auth: E-Mail + Passwort statt Vorname + Code
+### - [x] 2. Auth: E-Mail + Passwort statt Vorname + Code
 
 `lib/auth-options.ts`, `authorize()`: der Code-Login lädt per `findMany` alle
 Nutzer mit passendem Vornamen und nimmt den ersten, dessen vierstelliger Code
@@ -122,6 +122,104 @@ Account-Takeover-Vektor — gleicher Vorname plus zufällig gleicher Code genüg
 - Bestehende Nutzer: Migration setzt ein Flag `mustSetPassword`, beim ersten
   Login wird zum Setzen gezwungen. `/(auth)/login` und `/(auth)/forgot-code`
   entsprechend umbauen.
+
+**Ergebnis:** Vollständig umgesetzt.
+
+- `lib/auth-options.ts`: Code-Zweig entfernt, nur noch `findUnique` auf
+  E-Mail + `bcrypt.compare`. Rate-Limiting (`lib/rate-limit.ts`, Tabelle
+  `LoginAttempt`, DB-basiert nicht in-memory) vor dem Passwortvergleich, 10
+  Fehlversuche pro E-Mail UND IP in einem rollierenden 15-Minuten-Fenster.
+  IP kommt aus `x-forwarded-for`/`x-real-ip` (Reverse-Proxy-Header, passend
+  zum in Punkt 11 geplanten Caddy-Setup).
+- Passwortregeln (`lib/password-policy.ts`): mindestens 10 Zeichen +
+  Blockliste häufiger Passwörter (`lib/common-passwords.ts`). Ehrlich
+  dokumentiert: keine verifizierte kanonische Top-1000-Liste (aus dieser
+  Umgebung nicht abrufbar), sondern eine kuratierte Basisliste bekannter
+  Passwörter/Muster kombiniert mit gängigen Zahlen-Suffixen, > 1000 Einträge.
+  Für den Produktivbetrieb (Punkt 12) sollte das gegen einen echten
+  Pwned-Passwords-Abgleich ersetzt werden — als Notiz im Code hinterlegt.
+- `User.code`, `SecurityQuestion`-Modell und der ganze
+  `/api/auth/forgot-code`-Flow entfernt. Ersetzt durch
+  `/api/auth/forgot-password` + `/api/auth/reset-password` mit
+  `PasswordResetToken` (SHA-256-Hash gespeichert, 60 Min gültig, einmal
+  verwendbar — bei Verwendung werden auch alle anderen offenen Tokens des
+  Nutzers entwertet). `/api/auth/forgot-password` antwortet jetzt bewusst
+  **immer identisch**, egal ob die E-Mail existiert — behebt nebenbei das
+  User-Enumeration-Leak, das der alte Flow in Schritt 1 hatte (nicht in der
+  ursprünglichen Punktbeschreibung verlangt, aber dieselbe Fehlerklasse wie
+  der in BUGS.md #4 bereits gefixte Account-Takeover-Bug in genau diesem Flow).
+- `lib/mail.ts`: SMTP über `nodemailer` (neue Abhängigkeit, `npm install
+  --legacy-peer-deps` wegen eines vorbestehenden, nicht mit dieser Änderung
+  zusammenhängenden Peer-Dependency-Konflikts zwischen
+  `eslint-config-next` und dem gepinnten `@typescript-eslint/parser`). Ohne
+  konfiguriertes SMTP (`SMTP_HOST`/`SMTP_USER`/`SMTP_PASSWORD`) wird die
+  Mail nur ins Server-Log geschrieben, nie über die API-Response
+  zurückgegeben — der Token bleibt damit auch lokal "nur per Mail" erreichbar.
+  `.env.example` um SMTP-Variablen ergänzt (Default Infomaniak, kein
+  US-Dienst).
+- `mustSetPassword` auf `User`, im JWT/Session exponiert. Neue Seite
+  `/set-password` (unter `app/(app)/`, damit sie Session-geschützt ist) und
+  ein Gate in `app/(app)/layout.tsx`: leitet dorthin um, bis das neue
+  Passwort gesetzt ist. Nutzt denselben Endpunkt wie die reguläre
+  Passwortänderung (`PATCH /api/profile`) und aktualisiert danach das JWT
+  ohne Neu-Login über `useSession().update()`.
+- UI umgebaut: `/login` (E-Mail+Passwort), `/register` (E-Mail+Passwort statt
+  Code+Sicherheitsfragen), `/forgot-password` (ersetzt `/forgot-code`, ein
+  Schritt statt drei), `/reset-password` (neu, Link aus der Mail).
+  Profilseite: Sicherheitsfragen-Block entfernt, Code-Ändern-Block zu
+  Passwort-Ändern-Block (mit Bestätigungsfeld). `lib/i18n.tsx` entsprechend
+  bereinigt (alle `sq.*`- und Code-Keys entfernt, neue Keys für Reset/
+  Set-Password ergänzt). `scripts/seed.ts` erzeugt jetzt einen Nutzer mit
+  E-Mail+Passwort, kein `code`/`SecurityQuestion` mehr.
+
+**Migration — vor destruktivem Schritt angehalten, wie mit dem Nutzer
+abgestimmt:** `prisma migrate dev --create-only` scheiterte non-interaktiv;
+stattdessen SQL per `prisma migrate diff` (non-interaktiv, rührt die DB nicht
+an) erzeugt und die Migration von Hand als Datei angelegt
+(`20260813084507_auth_email_password`). Dabei eine Lücke im reinen Schema-Diff
+korrigiert: `ADD COLUMN "mustSetPassword" ... DEFAULT false` hätte den
+Spalten-Default auch auf **bestehende** Zeilen backfillen lassen — per Hand ein
+`UPDATE "User" SET "mustSetPassword" = true;` direkt danach ergänzt, damit nur
+Bestandsnutzer (nicht künftige Neuanmeldungen) beim nächsten Login zum
+Passwort-Setzen gezwungen werden. SQL dem Nutzer vorgelegt (droppt `User.code`
+und die `SecurityQuestion`-Tabelle, damals 1 bzw. 2 Zeilen betroffen), nach
+Freigabe mit `npx prisma migrate deploy` angewendet und per SQL gegengeprüft
+(`code`-Spalte weg, `SecurityQuestion`-Tabelle weg, `mustSetPassword: true`
+für den Bestandsnutzer).
+
+**Verifiziert (Playwright, Login über die echte UI, mehrere Skripte):**
+Login mit dem alten Code als Passwort (`"1234"` — das ist tatsächlich der
+Wert im `password`-Feld des Bestandsnutzers, nicht `"johndoe123"` aus einer
+älteren Version von `scripts/seed.ts`) leitet korrekt zu `/set-password` um;
+dort gesetztes neues Passwort greift ohne erneuten Login; zweiter Login mit
+dem neuen Passwort landet direkt auf `/calendar`. Signup mit zu kurzem bzw.
+häufigem Passwort liefert `400`, mit gültigem `200` und sofortigem Login ohne
+`mustSetPassword`-Zwang. 10 Fehlversuche sperren auch ein anschliessend
+korrektes Passwort. `forgot-password` liefert für existierende und
+nicht-existierende E-Mail dieselbe Antwort; der Link aus dem Server-Log
+funktioniert, ist danach nicht wiederverwendbar, und das damit gesetzte
+Passwort loggt ein. Profilseite zeigt keinen Sicherheitsfragen-Block mehr.
+Falsches Passwort zeigt eine Fehlermeldung in der echten UI.
+
+**Zwei Bugs während der Verifikation gefunden und behoben (nicht Teil des
+ursprünglichen Punkts, aber direkt durch dessen Code verursacht):**
+1. `app/api/auth/forgot-password/route.ts`: die generische Antwort war ein
+   Modul-Singleton-`NextResponse` — deren Body ist ein Web-Streams-Body und
+   nach dem ersten Versand verbraucht. Der zweite Aufruf (egal ob dieselbe
+   oder eine andere E-Mail) lieferte einen leeren Body statt der JSON-Nachricht.
+   Fix: pro Aufruf eine frische `NextResponse.json(...)` erzeugen.
+2. `app/(app)/layout.tsx`: `router.replace(...)` wurde direkt im Render-Pfad
+   aufgerufen (bereits vor diesem Punkt so für den unauthenticated-Fall
+   vorhanden, durch das neue `mustSetPassword`-Gate aber erstmals in einem
+   echten Klickpfad ausgelöst) — React-Warnung "Cannot update a component
+   while rendering a different component". Beide Redirects (unauthenticated
+   und mustSetPassword) in einen `useEffect` verschoben, Render gibt nur noch
+   `null` zurück, bis der Effect navigiert.
+
+**Zusätzlich entfernt (in Scope, da direkt Teil der Auth-Härtung):**
+`app/api/auth/login/route.ts` — ein zweiter, unauthenticateder Credential-
+Check-Endpunkt, von der UI nirgends aufgerufen, der ohne Rate-Limiting einen
+zweiten Weg geboten hätte, Passwörter zu erraten.
 
 ---
 
@@ -384,3 +482,30 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   seither nur noch auf nachweislich leeren Tagen, bricht ab wenn der Zieltag
   belegt ist oder `bulk-vacation` nicht `created: 1` meldet, und löscht
   ausschliesslich selbst erzeugte IDs.
+- Punkt 2: Wie mit dem Nutzer abgestimmt vor der destruktiven Migration
+  angehalten (droppt `User.code` und die `SecurityQuestion`-Tabelle) und die
+  per Hand ergänzte SQL vorgelegt — nach Freigabe mit `prisma migrate deploy`
+  angewendet und verifiziert (Details unter **Ergebnis:** beim Punkt selbst).
+  Zwei echte Bugs erst durch die Browser-Verifikation gefunden, nicht durch
+  Typecheck/Tests: ein Modul-Singleton-`NextResponse` mit verbrauchtem
+  Body-Stream (`forgot-password`-Route) und ein `router.replace()` im
+  Render-Pfad statt in `useEffect` (`(app)/layout.tsx`) — beide sind
+  Beispiele dafür, dass Response-Objekte in Next.js Route Handlers und
+  Navigations-Side-Effects in React nicht wiederverwendet/während des
+  Renderns ausgeführt werden dürfen; ohne den echten Klick-Pfad (nicht nur
+  API-Calls) wären beide unentdeckt geblieben.
+- Punkt 2, Auffälligkeit: der Login-Testnutzer im `password`-Feld hielt
+  tatsächlich `bcrypt("1234")`, nicht `bcrypt("johndoe123")` wie die alte
+  Version von `scripts/seed.ts` es für einen frischen Seed vorgesehen hätte —
+  der Datensatz wurde also irgendwann über den alten Code-Ändern-Flow
+  aktualisiert (der `password` immer auf denselben Hash wie `code` setzte),
+  nicht zuletzt über `seed.ts`s `upsert` mit `update: {}` neu erzeugt. Für
+  künftige Punkte relevant: `scripts/seed.ts` verändert bestehende Zeilen nie,
+  Annahmen über den tatsächlichen DB-Zustand sollten daher immer per Query
+  geprüft werden, nicht aus dem Seed-Skript abgeleitet werden.
+- Punkt 2, kleine bewusste Erweiterung über den Wortlaut hinaus: die
+  `LoginAttempt`-Tabelle bekam ein `action`-Feld (`"login"` |
+  `"forgot-password"` | `"reset-password"`) statt drei getrennter Tabellen —
+  deckt "Rate-Limiting auf `/api/auth/*`" (nicht nur den Login) mit einer
+  Tabelle ab. `/api/auth/login/route.ts` (ungenutzter, ungedrosselter
+  Zweit-Endpunkt für denselben Credential-Check) im selben Zug entfernt.
