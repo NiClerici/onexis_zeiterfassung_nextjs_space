@@ -21,6 +21,7 @@ const translations: Record<string, string> = {
   "register.title": "Registrieren",
   "register.firstName": "Vorname",
   "register.lastName": "Nachname",
+  "register.companyName": "Firmenname",
   "register.email": "E-Mail",
   "register.password": "Passwort",
   "register.confirmPassword": "Passwort bestätigen",

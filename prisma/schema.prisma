@@ -61,6 +61,29 @@ model Organization {
   customers       Customer[]
   pensumChanges   PensumChange[]
   overtimePayouts OvertimePayout[]
+  invitations     Invitation[]
+}
+
+// Einladung eines neuen Mitglieds per E-Mail (MIGRATION.md Punkt 4). Nur der
+// Hash des Tokens wird gespeichert — analog zu PasswordResetToken. 7 Tage
+// gültig, einmal verwendbar (usedAt). invitedByUserId trägt keine Relation
+// mit onDelete: Cascade auf User, damit eine Einladung nachvollziehbar
+// bleibt, auch wenn der einladende Account später gelöscht wird.
+model Invitation {
+  id             String    @id @default(cuid())
+  orgId          String
+  email          String
+  role           String    @default("member") // admin | manager | member — owner wird nie eingeladen
+  tokenHash      String    @unique
+  invitedByUserId String
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([email])
 }
 
 // Verbindet einen User mit einer Organization. Trägt auch die

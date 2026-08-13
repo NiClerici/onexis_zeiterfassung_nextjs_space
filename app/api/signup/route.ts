@@ -5,12 +5,14 @@ import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 
+const TRIAL_DAYS = 14;
+
 export async function POST(req: Request) {
   try {
     const body = await req?.json?.().catch(() => ({}));
-    const { firstName, lastName, email, password, weeklyHours, pensum, vacationDays, startDate } = body ?? {};
+    const { firstName, lastName, email, password, companyName, weeklyHours, pensum, vacationDays, startDate } = body ?? {};
 
-    if (!firstName?.trim?.() || !lastName?.trim?.() || !email?.trim?.()) {
+    if (!firstName?.trim?.() || !lastName?.trim?.() || !email?.trim?.() || !companyName?.trim?.()) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
@@ -27,21 +29,21 @@ export async function POST(req: Request) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Vollständige Registrierung mit eigener Organisation, Einladungen und
-    // Trial-Logik ist Punkt 4 (Onboarding) — hier nur das Minimum, damit ein
-    // frischer Nutzer nach Punkt 3 überhaupt eine Organisation hat (sonst
-    // würde requireOrg() ihn aus der gesamten App aussperren).
-    const slugBase = normalizedEmail.split("@")[0].replace(/[^a-z0-9]/g, "") || "org";
+    // Slug aus dem Firmennamen, nicht mehr aus der E-Mail — der Firmenname ist
+    // das, was tatsächlich in der Organisation angezeigt wird.
+    const slugBase = companyName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "org";
     let slug = slugBase;
     let counter = 1;
     while (await prisma.organization.findUnique({ where: { slug } })) {
-      slug = `${slugBase}${counter}`;
+      slug = `${slugBase}-${counter}`;
       counter++;
     }
 
+    const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
     const { user } = await prisma.$transaction(async (tx) => {
       const org = await tx.organization.create({
-        data: { name: `${firstName.trim()} ${lastName.trim()}`.trim(), slug },
+        data: { name: companyName.trim(), slug, plan: "trial", trialEndsAt },
       });
       const user = await tx.user.create({
         data: {

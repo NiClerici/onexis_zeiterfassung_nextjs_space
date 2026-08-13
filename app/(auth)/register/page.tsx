@@ -5,7 +5,7 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Mail, Lock, Briefcase, Calendar, Info } from "lucide-react";
+import { Mail, Lock, Briefcase, Calendar, Info, Building2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { motion } from "framer-motion";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
@@ -17,6 +17,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -28,7 +29,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e?.preventDefault?.();
     setError("");
-    if (!firstName?.trim?.() || !lastName?.trim?.() || !email?.trim?.()) { setError(t("register.error.required")); return; }
+    if (!firstName?.trim?.() || !lastName?.trim?.() || !email?.trim?.() || !companyName?.trim?.()) { setError(t("register.error.required")); return; }
     if ((password?.length ?? 0) < MIN_PASSWORD_LENGTH) { setError(t("register.error.passwordFormat")); return; }
     if (password !== confirmPassword) { setError(t("register.error.passwordMismatch")); return; }
 
@@ -38,7 +39,7 @@ export default function RegisterPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          firstName: firstName?.trim?.(), lastName: lastName?.trim?.(), email: email?.trim?.(), password,
+          firstName: firstName?.trim?.(), lastName: lastName?.trim?.(), companyName: companyName?.trim?.(), email: email?.trim?.(), password,
           weeklyHours: weeklyHours ? parseFloat(weeklyHours) : undefined,
           pensum: pensum ? parseFloat(pensum) : undefined,
           vacationDays: vacationDays ? parseFloat(vacationDays) : undefined,
@@ -74,6 +75,13 @@ export default function RegisterPage() {
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("register.lastName")} *</label>
                 <input type="text" value={lastName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLastName(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" required />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("register.companyName")} *</label>
+              <div className="relative">
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input type="text" value={companyName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompanyName(e?.target?.value ?? "")} className="w-full pl-10 pr-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" required />
               </div>
             </div>
             <div>
