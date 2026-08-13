@@ -48,7 +48,7 @@ export default function ForgotCodePage() {
     if ((newCode?.length ?? 0) < 4 || (newCode?.length ?? 0) > 8) { setError(t("register.error.codeFormat")); return; }
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/forgot-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ step: 3, userId, newCode }) });
+      const res = await fetch("/api/auth/forgot-code", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ step: 3, userId, answers: answers?.map?.((a: string) => a?.trim?.() ?? "") ?? [], newCode }) });
       if (!res?.ok) { const data = await res?.json?.().catch(() => ({})); setError(data?.error ?? t("common.error")); } else { setSuccess(true); }
     } catch (err: any) { console.error(err); setError(t("common.error")); } finally { setLoading(false); }
   };

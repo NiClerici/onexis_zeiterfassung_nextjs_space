@@ -83,13 +83,42 @@ nur die Konstruktion UTC-sicher machen).
 
 ---
 
-### - [ ] 4. Sweep: Ownership-Check-Konsistenz über alle Routen
+### - [x] 4. Sweep: Ownership-Check-Konsistenz über alle Routen
 
 Grep über `app/api/**/route.ts` (customers, pensum-changes, overtime-payouts,
 profile, profile/security-questions): für jede `update`/`delete`-Operation
 prüfen, ob ein `findFirst`-Ownership-Check vorausgeht (wie in Punkt 2 gefixt).
 Nur fixen, wo tatsächlich eine Lücke gefunden wird — kein Rewrite ohne Befund.
 Funde als Unterpunkte hier ergänzen, bevor sie abgehakt werden.
+
+**Ergebnis:** `customers`, `pensum-changes`, `overtime-payouts`,
+`profile/security-questions`, `profile`, `profile/verify-code` — alle bereits
+korrekt (Ownership-Check vorhanden bzw. Operation ist inhärent auf die eigene
+`userId` aus der Session beschränkt, kein Client-Input-Trust).
+
+**Aber gefunden — echter Account-Takeover-Bug (nicht nur Ownership-Konsistenz,
+sondern eine fehlende Authentifizierung):** `app/api/auth/forgot-code/route.ts`,
+Schritt 3 (Passwort zurücksetzen) rief `prisma.user.update({ where: { id: userId },
+... })` auf, wobei `userId` roh aus dem Client-Body übernommen wurde — **ohne
+erneute Prüfung**, dass die Sicherheitsfrage aus Schritt 2 tatsächlich korrekt
+beantwortet wurde. Schritt 2 hinterlässt keinen serverseitigen Zustand; ein
+Angreifer, der nur Vor-/Nachname eines Kontos kennt (Schritt 1 liefert die
+`userId` dafür ohne jede Hürde), konnte Schritt 3 direkt aufrufen und das
+Passwort ohne jede Sicherheitsfrage zurücksetzen.
+
+**Fix:** Sicherheitsfragen-Prüfung in eine gemeinsame Helper-Funktion
+(`hasCorrectAnswer`) extrahiert und in Schritt 3 **erneut** ausgeführt, bevor
+das Passwort geändert wird (Schritt 3 verlangt jetzt `answers` im Body).
+Frontend (`app/(auth)/forgot-code/page.tsx`) sendet die bereits im State
+gehaltenen Antworten jetzt auch in Schritt 3 mit — keine UX-Änderung, der
+Nutzer beantwortet die Frage weiterhin nur einmal in Schritt 2.
+
+Verifiziert (Playwright): direkter Aufruf von Schritt 3 mit falschen/fehlenden
+Antworten (Schritt 2 übersprungen) liefert jetzt `401`, Original-Passwort
+bleibt unverändert; legitimer 3-Schritt-Flow über die echte UI funktioniert
+weiterhin unverändert (Passwort wird geändert, neuer Code funktioniert, alter
+nicht mehr); Zustand danach über denselben Flow wieder auf `1234` zurückgesetzt
+und Login damit bestätigt.
 
 ---
 

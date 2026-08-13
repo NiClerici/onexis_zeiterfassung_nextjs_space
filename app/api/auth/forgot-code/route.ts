@@ -4,6 +4,18 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
+// Case-sensitive Vergleich. Ein korrekt beantwortetes Frage genügt.
+async function hasCorrectAnswer(userId: string, answers: unknown): Promise<boolean> {
+  const questions = await prisma.securityQuestion.findMany({ where: { userId }, orderBy: { id: "asc" } });
+  if ((questions?.length ?? 0) === 0) return false;
+  for (let i = 0; i < questions.length; i++) {
+    const expected = questions[i]?.answer?.trim?.() ?? "";
+    const given = (answers as any)?.[i]?.trim?.() ?? "";
+    if (given !== "" && expected === given) return true;
+  }
+  return false;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req?.json?.().catch(() => ({}));
@@ -26,30 +38,22 @@ export async function POST(req: Request) {
 
     if (step === 2) {
       const { userId, answers } = body ?? {};
-      const questions = await prisma.securityQuestion.findMany({ where: { userId }, orderBy: { id: "asc" } });
-      if ((questions?.length ?? 0) === 0) {
-        return NextResponse.json({ error: "No security questions" }, { status: 400 });
-      }
-      // Case-sensitive comparison. User only needs to answer one question correctly.
-      let anyCorrect = false;
-      for (let i = 0; i < (questions?.length ?? 0); i++) {
-        const expected = questions?.[i]?.answer?.trim?.() ?? "";
-        const given = answers?.[i]?.trim?.() ?? "";
-        if (given !== "" && expected === given) {
-          anyCorrect = true;
-          break;
-        }
-      }
-      if (!anyCorrect) {
+      if (!(await hasCorrectAnswer(userId, answers))) {
         return NextResponse.json({ error: "Wrong answers" }, { status: 401 });
       }
       return NextResponse.json({ success: true });
     }
 
     if (step === 3) {
-      const { userId, newCode } = body ?? {};
+      const { userId, answers, newCode } = body ?? {};
       if ((newCode?.length ?? 0) < 4 || (newCode?.length ?? 0) > 8) {
         return NextResponse.json({ error: "Invalid code format" }, { status: 400 });
+      }
+      // Sicherheitsfrage hier erneut prüfen — Schritt 2 hinterlässt keinen Server-seitigen
+      // Zustand, ein Client könnte Schritt 3 sonst direkt mit einer erratenen/bekannten
+      // userId aufrufen und die Frage komplett umgehen (userId ist aus Schritt 1 kein Geheimnis).
+      if (!(await hasCorrectAnswer(userId, answers))) {
+        return NextResponse.json({ error: "Wrong answers" }, { status: 401 });
       }
       const hashedCode = await bcrypt.hash(newCode, 10);
       await prisma.user.update({ where: { id: userId }, data: { code: hashedCode, password: hashedCode } });
