@@ -122,7 +122,7 @@ und Login damit bestätigt.
 
 ---
 
-### - [ ] 5. Abschluss: Browser-Regressionspass
+### - [x] 5. Abschluss: Browser-Regressionspass
 
 Einmaliger Playwright-Durchlauf über die von Punkt 1–4 betroffenen Flows:
 Kalender → Standardwoche anwenden, Ferien eintragen (je über einen Jahreswechsel),
@@ -130,6 +130,15 @@ Tageseintrag löschen (eigene und — über die API direkt — fremde ID prüfen
 Sicherstellen, dass keine Regression entstanden ist. Kein Aufbau einer
 Dauer-Testsuite (dafür gibt es keinen Auftrag) — punktuelle Verifikation wie in
 BUILD.md Schritt 4–6.
+
+**Ergebnis:** `npm run typecheck` und `npm test` grün. Playwright-Durchlauf
+über die echte UI: Login; "Standardwoche anwenden" über einen Jahreswechsel
+(28.12.2026–03.01.2027) erzeugt exakt die 5 korrekten Werktage, Wochenende
+richtig übersprungen; "Ferien eintragen" (01.–05.02.2027) erzeugt alle 5
+Werktage korrekt; Löschen des eigenen Eintrags über den Tagesdialog
+funktioniert; Löschen einer ungültigen ID liefert weiterhin sauber `404`.
+Keine Konsolen-/Serverfehler, keine Wechselwirkungen zwischen den vier Fixes
+festgestellt. Testdaten aufgeräumt.
 
 ---
 
