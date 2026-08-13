@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { requireOrg, AccessError } from "@/lib/access";
 import type { Prisma } from "@prisma/client";
 
 // Start 08:00, 30min Pause ab 6h Tagesstunden — liefert von/bis für "arbeit"-Einträge
@@ -52,9 +51,7 @@ function parseDateYMD(s: string): Date | null {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const fromStr = body?.fromDate ?? "";
@@ -76,17 +73,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Zeitraum zu gross (max. 366 Tage)" }, { status: 400 });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+    if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
 
     const tpl = {
-      mon: user.stdHoursMon ?? 0,
-      tue: user.stdHoursTue ?? 0,
-      wed: user.stdHoursWed ?? 0,
-      thu: user.stdHoursThu ?? 0,
-      fri: user.stdHoursFri ?? 0,
-      sat: user.stdHoursSat ?? 0,
-      sun: user.stdHoursSun ?? 0,
+      mon: membership.stdHoursMon ?? 0,
+      tue: membership.stdHoursTue ?? 0,
+      wed: membership.stdHoursWed ?? 0,
+      thu: membership.stdHoursThu ?? 0,
+      fri: membership.stdHoursFri ?? 0,
+      sat: membership.stdHoursSat ?? 0,
+      sun: membership.stdHoursSun ?? 0,
     };
 
     // Prüfen, ob das Template überhaupt Stunden enthält
@@ -97,7 +94,7 @@ export async function POST(req: Request) {
 
     // Bestehende Einträge im Zielzeitraum laden
     const existing = await prisma.timeEntry.findMany({
-      where: { userId, date: { gte: fromDate, lte: toDate } },
+      where: { userId, orgId, date: { gte: fromDate, lte: toDate } },
       select: { id: true, date: true, type: true },
     });
     const existingMap = new Map<string, { id: string; type: string }>();
@@ -146,7 +143,7 @@ export async function POST(req: Request) {
           const { von, bis, pauseMin } = buildArbeitszeit(hours);
           operations.push(
             prisma.timeEntry.create({
-              data: { userId, date: dbDate, type: "arbeit", von, bis, pauseMin, hours: null },
+              data: { userId, orgId, date: dbDate, type: "arbeit", von, bis, pauseMin, hours: null },
             })
           );
           created++;
@@ -170,6 +167,7 @@ export async function POST(req: Request) {
       totalDays: diffDays,
     });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("bulk-apply error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

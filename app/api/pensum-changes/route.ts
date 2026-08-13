@@ -1,23 +1,21 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { requireOrg, AccessError } from "@/lib/access";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const changes = await prisma.pensumChange.findMany({
-      where: { userId },
+      where: { userId, orgId },
       orderBy: { effectiveFrom: "asc" },
     });
 
     return NextResponse.json({ changes: changes ?? [] });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -25,9 +23,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { pensum, weeklyHours, effectiveFrom } = body ?? {};
@@ -50,16 +46,16 @@ export async function POST(req: Request) {
 
     // Alle DB-Operationen atomar ausführen, um Race Conditions zu vermeiden
     const change = await prisma.$transaction(async (tx) => {
-      // Vor der ersten Pensumsänderung: aktuelle Profilwerte als historische Basis sichern.
-      // Sonst würde die spätere Überschreibung von user.pensum rückwirkend auf alle
-      // Tage vor dem "Gültig ab"-Datum wirken.
-      const currentUser = await tx.user.findUnique({ where: { id: userId } });
-      if (currentUser && (currentUser.basePensum === null || currentUser.baseWeeklyHours === null)) {
-        await tx.user.update({
-          where: { id: userId },
+      // Vor der ersten Pensumsänderung: aktuelle Membership-Werte als historische
+      // Basis sichern. Sonst würde die spätere Überschreibung von
+      // membership.pensum rückwirkend auf alle Tage vor dem "Gültig ab"-Datum wirken.
+      const membership = await tx.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+      if (membership && (membership.basePensum === null || membership.baseWeeklyHours === null)) {
+        await tx.membership.update({
+          where: { id: membership.id },
           data: {
-            basePensum: currentUser.basePensum ?? currentUser.pensum,
-            baseWeeklyHours: currentUser.baseWeeklyHours ?? currentUser.weeklyHours,
+            basePensum: membership.basePensum ?? membership.pensum,
+            baseWeeklyHours: membership.baseWeeklyHours ?? membership.weeklyHours,
           },
         });
       }
@@ -67,20 +63,21 @@ export async function POST(req: Request) {
       const newChange = await tx.pensumChange.create({
         data: {
           userId,
+          orgId,
           pensum: parsedPensum,
           weeklyHours: parsedWeeklyHours,
           effectiveFrom: new Date(effectiveFrom),
         },
       });
 
-      // Aktuelles Profil auf den neusten Pensum-Wert setzen
+      // Aktuelles Pensum auf den neusten Wert setzen
       const latestChange = await tx.pensumChange.findFirst({
-        where: { userId },
+        where: { userId, orgId },
         orderBy: { effectiveFrom: "desc" },
       });
       if (latestChange) {
-        await tx.user.update({
-          where: { id: userId },
+        await tx.membership.update({
+          where: { orgId_userId: { orgId, userId } },
           data: { pensum: latestChange.pensum, weeklyHours: latestChange.weeklyHours },
         });
       }
@@ -90,6 +87,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ change });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -97,39 +95,37 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const existing = await prisma.pensumChange.findFirst({ where: { id, userId } });
+    const existing = await prisma.pensumChange.findFirst({ where: { id, userId, orgId } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     await prisma.pensumChange.delete({ where: { id } });
 
-    // Update user's current pensum to latest remaining change
+    // Membership auf das neuste verbleibende Pensum setzen
     const latestChange = await prisma.pensumChange.findFirst({
-      where: { userId },
+      where: { userId, orgId },
       orderBy: { effectiveFrom: "desc" },
     });
     if (latestChange) {
-      await prisma.user.update({
-        where: { id: userId },
+      await prisma.membership.update({
+        where: { orgId_userId: { orgId, userId } },
         data: { pensum: latestChange.pensum, weeklyHours: latestChange.weeklyHours },
       });
     } else {
       // Keine Änderungen mehr vorhanden: ursprüngliche Werte wiederherstellen
-      const u = await prisma.user.findUnique({ where: { id: userId } });
-      if (u && (u.basePensum !== null || u.baseWeeklyHours !== null)) {
-        await prisma.user.update({
-          where: { id: userId },
+      const m = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+      if (m && (m.basePensum !== null || m.baseWeeklyHours !== null)) {
+        await prisma.membership.update({
+          where: { id: m.id },
           data: {
-            pensum: u.basePensum ?? u.pensum,
-            weeklyHours: u.baseWeeklyHours ?? u.weeklyHours,
+            pensum: m.basePensum ?? m.pensum,
+            weeklyHours: m.baseWeeklyHours ?? m.weeklyHours,
             basePensum: null,
             baseWeeklyHours: null,
           },
@@ -139,6 +135,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

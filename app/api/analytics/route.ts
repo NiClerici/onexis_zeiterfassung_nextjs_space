@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { requireOrg, AccessError } from "@/lib/access";
 import {
   kennzahlen,
   feriensaldo,
@@ -16,15 +15,15 @@ import {
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
 // für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
-// aktuelle Wert. user.pensum/weeklyHours werden von /api/pensum-changes bei
-// jeder Änderung auf den neuesten Stand überschrieben; die Basis liegt in
+// aktuelle Wert. membership.pensum/weeklyHours werden von /api/pensum-changes
+// bei jeder Änderung auf den neuesten Stand überschrieben; die Basis liegt in
 // basePensum/baseWeeklyHours. Gleiches Muster wie in bulk-vacation/route.ts.
-function buildProfil(user: any): Profil {
+function buildProfil(membership: any): Profil {
   return {
-    pensum: user?.basePensum ?? user?.pensum ?? 100,
-    wochenstunden: user?.baseWeeklyHours ?? user?.weeklyHours ?? 42,
-    startDate: user?.startDate ?? null,
-    ferientage: user?.vacationDays ?? 25,
+    pensum: membership?.basePensum ?? membership?.pensum ?? 100,
+    wochenstunden: membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42,
+    startDate: membership?.startDate ?? null,
+    ferientage: membership?.vacationDays ?? 25,
   };
 }
 
@@ -46,12 +45,10 @@ function mapEintraege(entries: any[]): EintragMitDatum[] {
 
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+    if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
 
     const url = new URL(req.url);
     const type = url?.searchParams?.get?.("type") ?? "month";
@@ -82,19 +79,19 @@ export async function GET(req: Request) {
       endDate = toStr ? new Date(toStr) : new Date(Date.UTC(year, 11, 31));
     }
 
-    const profil = buildProfil(user);
+    const profil = buildProfil(membership);
     const heute = new Date();
 
-    const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId }, orderBy: { effectiveFrom: "asc" } });
+    const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
     const changes = mapChanges(pensumChangesRaw);
 
-    const kundenRaw = await prisma.customer.findMany({ where: { userId } });
+    const kundenRaw = await prisma.customer.findMany({ where: { orgId } });
     const kunden: KundeInput[] = kundenRaw.map((k) => ({ id: k.id, billable: k.billable }));
 
-    const entriesRaw = await prisma.timeEntry.findMany({ where: { userId, date: { gte: startDate, lte: endDate } } });
+    const entriesRaw = await prisma.timeEntry.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const eintraege = mapEintraege(entriesRaw);
 
-    const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, date: { gte: startDate, lte: endDate } } });
+    const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, kunden });
@@ -104,7 +101,7 @@ export async function GET(req: Request) {
     todayEnd.setHours(23, 59, 59, 999);
     // Bewusst der AKTUELLE Tarif, nicht die Basis aus profil — diese Karte zeigt
     // Feiertagsstunden zum heute gültigen Pensum.
-    const currentDailyRate = ((user?.weeklyHours ?? 42) * (user?.pensum ?? 100)) / 100 / 5;
+    const currentDailyRate = ((membership?.weeklyHours ?? 42) * (membership?.pensum ?? 100)) / 100 / 5;
     const holidayHours = entriesRaw
       .filter((e) => e.type === "feiertag" && new Date(e.date) <= todayEnd)
       .reduce((s, e) => s + (e.hours ?? currentDailyRate), 0);
@@ -114,12 +111,12 @@ export async function GET(req: Request) {
     const yearStart = new Date(Date.UTC(displayYear, 0, 1));
     const yearEnd = new Date(Date.UTC(displayYear, 11, 31));
     const yearFerienRaw = await prisma.timeEntry.findMany({
-      where: { userId, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
+      where: { userId, orgId, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
     });
     const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, eintraege: mapEintraege(yearFerienRaw) });
 
     // Ausbezahlte Überstunden: kumulierte Gesamtsumme (informativ), unabhängig vom Zeitraum
-    const allPayouts = await prisma.overtimePayout.findMany({ where: { userId } });
+    const allPayouts = await prisma.overtimePayout.findMany({ where: { userId, orgId } });
     const totalPaidOutHours = allPayouts.reduce((s, p) => s + p.hours, 0);
     const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
 
@@ -166,6 +163,7 @@ export async function GET(req: Request) {
       monthlyData,
     });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Analytics error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

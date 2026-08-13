@@ -1,9 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
+import { requireOrg, AccessError } from "@/lib/access";
 import type { Prisma } from "@prisma/client";
 
 function parseDateYMD(s: string): Date | null {
@@ -21,9 +20,7 @@ function parseDateYMD(s: string): Date | null {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const fromStr = body?.fromDate ?? "";
@@ -44,18 +41,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Zeitraum zu gross (max. 366 Tage)" }, { status: 400 });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+    if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
 
     // Fetch pensum changes for accurate daily rate
     const pensumChanges = await prisma.pensumChange.findMany({
-      where: { userId },
+      where: { userId, orgId },
       orderBy: { effectiveFrom: "asc" },
     });
 
     function getDailyRateForDate(date: Date): number {
-      let effectivePensum = user?.basePensum ?? user?.pensum ?? 100;
-      let effectiveWeeklyHours = user?.baseWeeklyHours ?? user?.weeklyHours ?? 42;
+      let effectivePensum = membership?.basePensum ?? membership?.pensum ?? 100;
+      let effectiveWeeklyHours = membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42;
       for (const change of pensumChanges) {
         const changeDate = new Date(change.effectiveFrom);
         if (changeDate <= date) {
@@ -68,7 +65,7 @@ export async function POST(req: Request) {
 
     // Load existing entries in the range
     const existing = await prisma.timeEntry.findMany({
-      where: { userId, date: { gte: fromDate, lte: toDate } },
+      where: { userId, orgId, date: { gte: fromDate, lte: toDate } },
       select: { id: true, date: true, type: true },
     });
     const existingMap = new Map<string, { id: string; type: string }>();
@@ -121,7 +118,7 @@ export async function POST(req: Request) {
       } else {
         operations.push(
           prisma.timeEntry.create({
-            data: { userId, date: dbDate, hours, type: "ferien" },
+            data: { userId, orgId, date: dbDate, hours, type: "ferien" },
           })
         );
         created++;
@@ -143,6 +140,7 @@ export async function POST(req: Request) {
       totalDays: diffDays,
     });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("bulk-vacation error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

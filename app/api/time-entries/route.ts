@@ -1,10 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
+import { requireOrg, AccessError } from "@/lib/access";
 
 function isValidType(type: unknown): type is EintragTyp {
   return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
@@ -27,9 +26,7 @@ function parseDateYMD(s: unknown): Date | null {
 
 export async function GET(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const url = new URL(req.url);
     const year = parseInt(url?.searchParams?.get?.("year") ?? "0");
@@ -43,7 +40,7 @@ export async function GET(req: Request) {
     const endDate = new Date(Date.UTC(year, month, 0));
 
     const entries = await prisma.timeEntry.findMany({
-      where: { userId, date: { gte: startDate, lte: endDate } },
+      where: { userId, orgId, date: { gte: startDate, lte: endDate } },
       orderBy: [{ date: "asc" }, { von: "asc" }],
     });
 
@@ -62,6 +59,7 @@ export async function GET(req: Request) {
       })) ?? [],
     });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -69,9 +67,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
@@ -84,7 +80,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
     if (customerId) {
-      const customer = await prisma.customer.findFirst({ where: { id: customerId, userId } });
+      // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden —
+      // jedes Mitglied darf jedem Org-Kunden Stunden zuordnen.
+      const customer = await prisma.customer.findFirst({ where: { id: customerId, orgId } });
       if (!customer) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
     }
 
@@ -95,6 +93,7 @@ export async function POST(req: Request) {
     const entry = await prisma.timeEntry.create({
       data: {
         userId,
+        orgId,
         date: parsedDate,
         type,
         von: isArbeit ? (von || null) : null,
@@ -109,6 +108,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ entry });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -116,16 +116,14 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id, date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const existing = await prisma.timeEntry.findFirst({ where: { id, userId } });
+    const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     let parsedDate: Date | undefined;
@@ -138,7 +136,7 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
     if (customerId) {
-      const customer = await prisma.customer.findFirst({ where: { id: customerId, userId } });
+      const customer = await prisma.customer.findFirst({ where: { id: customerId, orgId } });
       if (!customer) return NextResponse.json({ error: "Invalid customer" }, { status: 400 });
     }
 
@@ -168,6 +166,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({ entry });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -175,21 +174,20 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const existing = await prisma.timeEntry.findFirst({ where: { id, userId } });
+    const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     await prisma.timeEntry.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

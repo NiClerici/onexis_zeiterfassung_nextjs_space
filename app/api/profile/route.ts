@@ -1,43 +1,44 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth-options";
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { checkPasswordPolicy } from "@/lib/password-policy";
+import { requireOrg, AccessError } from "@/lib/access";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const [user, membership] = await Promise.all([
+      prisma.user.findUnique({ where: { id: userId } }),
+      prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } }),
+    ]);
 
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     return NextResponse.json({
       firstName: user?.firstName ?? "",
       lastName: user?.lastName ?? "",
-      weeklyHours: user?.weeklyHours ?? 42,
-      pensum: user?.pensum ?? 100,
-      baseWeeklyHours: user?.baseWeeklyHours ?? null,
-      basePensum: user?.basePensum ?? null,
-      vacationDays: user?.vacationDays ?? 25,
-      startDate: user?.startDate?.toISOString?.() ?? null,
+      weeklyHours: membership?.weeklyHours ?? 42,
+      pensum: membership?.pensum ?? 100,
+      baseWeeklyHours: membership?.baseWeeklyHours ?? null,
+      basePensum: membership?.basePensum ?? null,
+      vacationDays: membership?.vacationDays ?? 25,
+      startDate: membership?.startDate?.toISOString?.() ?? null,
       language: user?.language ?? "de",
       standardWeek: {
-        mon: user?.stdHoursMon ?? 0,
-        tue: user?.stdHoursTue ?? 0,
-        wed: user?.stdHoursWed ?? 0,
-        thu: user?.stdHoursThu ?? 0,
-        fri: user?.stdHoursFri ?? 0,
-        sat: user?.stdHoursSat ?? 0,
-        sun: user?.stdHoursSun ?? 0,
+        mon: membership?.stdHoursMon ?? 0,
+        tue: membership?.stdHoursTue ?? 0,
+        wed: membership?.stdHoursWed ?? 0,
+        thu: membership?.stdHoursThu ?? 0,
+        fri: membership?.stdHoursFri ?? 0,
+        sat: membership?.stdHoursSat ?? 0,
+        sun: membership?.stdHoursSun ?? 0,
       },
     });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -45,37 +46,48 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const updateData: any = {};
+    const userUpdateData: any = {};
+    const membershipUpdateData: any = {};
 
-    if (body?.firstName !== undefined) updateData.firstName = body.firstName;
-    if (body?.lastName !== undefined) updateData.lastName = body.lastName;
-    if (body?.weeklyHours !== undefined) updateData.weeklyHours = body.weeklyHours;
-    if (body?.pensum !== undefined) updateData.pensum = body.pensum;
-    if (body?.vacationDays !== undefined) updateData.vacationDays = body.vacationDays;
-    if (body?.startDate !== undefined) updateData.startDate = body.startDate ? new Date(body.startDate) : null;
-    if (body?.language !== undefined) updateData.language = body.language;
+    // Identität bleibt auf User, Arbeitseinstellungen wandern auf Membership
+    // (MIGRATION.md Punkt 3a).
+    if (body?.firstName !== undefined) userUpdateData.firstName = body.firstName;
+    if (body?.lastName !== undefined) userUpdateData.lastName = body.lastName;
+    if (body?.language !== undefined) userUpdateData.language = body.language;
+
+    if (body?.weeklyHours !== undefined) membershipUpdateData.weeklyHours = body.weeklyHours;
+    if (body?.pensum !== undefined) membershipUpdateData.pensum = body.pensum;
+    if (body?.vacationDays !== undefined) membershipUpdateData.vacationDays = body.vacationDays;
+    if (body?.startDate !== undefined) membershipUpdateData.startDate = body.startDate ? new Date(body.startDate) : null;
 
     // Standard week (Stunden pro Wochentag, 0-24 clamped)
     const clampDay = (v: any) => Math.max(0, Math.min(24, Number(v) || 0));
     if (body?.standardWeek && typeof body.standardWeek === "object") {
       const sw = body.standardWeek;
-      if (sw.mon !== undefined) updateData.stdHoursMon = clampDay(sw.mon);
-      if (sw.tue !== undefined) updateData.stdHoursTue = clampDay(sw.tue);
-      if (sw.wed !== undefined) updateData.stdHoursWed = clampDay(sw.wed);
-      if (sw.thu !== undefined) updateData.stdHoursThu = clampDay(sw.thu);
-      if (sw.fri !== undefined) updateData.stdHoursFri = clampDay(sw.fri);
-      if (sw.sat !== undefined) updateData.stdHoursSat = clampDay(sw.sat);
-      if (sw.sun !== undefined) updateData.stdHoursSun = clampDay(sw.sun);
+      if (sw.mon !== undefined) membershipUpdateData.stdHoursMon = clampDay(sw.mon);
+      if (sw.tue !== undefined) membershipUpdateData.stdHoursTue = clampDay(sw.tue);
+      if (sw.wed !== undefined) membershipUpdateData.stdHoursWed = clampDay(sw.wed);
+      if (sw.thu !== undefined) membershipUpdateData.stdHoursThu = clampDay(sw.thu);
+      if (sw.fri !== undefined) membershipUpdateData.stdHoursFri = clampDay(sw.fri);
+      if (sw.sat !== undefined) membershipUpdateData.stdHoursSat = clampDay(sw.sat);
+      if (sw.sun !== undefined) membershipUpdateData.stdHoursSun = clampDay(sw.sun);
     }
 
-    const user = await prisma.user.update({ where: { id: userId }, data: updateData });
+    const [user] = await Promise.all([
+      Object.keys(userUpdateData).length > 0
+        ? prisma.user.update({ where: { id: userId }, data: userUpdateData })
+        : prisma.user.findUnique({ where: { id: userId } }),
+      Object.keys(membershipUpdateData).length > 0
+        ? prisma.membership.update({ where: { orgId_userId: { orgId, userId } }, data: membershipUpdateData })
+        : Promise.resolve(null),
+    ]);
+
     return NextResponse.json({ success: true, user: { firstName: user?.firstName, lastName: user?.lastName } });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
@@ -83,9 +95,7 @@ export async function PUT(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = (session.user as any)?.id;
+    const { userId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { currentPassword, newPassword } = body ?? {};
@@ -115,6 +125,7 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
