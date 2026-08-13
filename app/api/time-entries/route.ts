@@ -10,6 +10,21 @@ function isValidType(type: unknown): type is EintragTyp {
   return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
 }
 
+// Nimmt nur "YYYY-MM-DD" (führender Teil, Rest wird ignoriert) und baut UTC-Mitternacht.
+// new Date(date) auf einem vollen ISO-Datetime ohne Offset würde lokal statt UTC
+// interpretiert und könnte auf einem Server mit TZ≠UTC den Tag verschieben.
+function parseDateYMD(s: unknown): Date | null {
+  if (!s || typeof s !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const d = parseInt(m[3], 10);
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
+  return date;
+}
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -61,7 +76,8 @@ export async function POST(req: Request) {
     const body = await req?.json?.().catch(() => ({}));
     const { date, type, von, bis, pauseMin, projekt, notiz, customerId, hours } = body ?? {};
 
-    if (!date || isNaN(new Date(date).getTime())) {
+    const parsedDate = parseDateYMD(date);
+    if (!parsedDate) {
       return NextResponse.json({ error: "Invalid date" }, { status: 400 });
     }
     if (!isValidType(type)) {
@@ -79,7 +95,7 @@ export async function POST(req: Request) {
     const entry = await prisma.timeEntry.create({
       data: {
         userId,
-        date: new Date(date),
+        date: parsedDate,
         type,
         von: isArbeit ? (von || null) : null,
         bis: isArbeit ? (bis || null) : null,
@@ -112,8 +128,11 @@ export async function PUT(req: Request) {
     const existing = await prisma.timeEntry.findFirst({ where: { id, userId } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    if (date && isNaN(new Date(date).getTime())) {
-      return NextResponse.json({ error: "Invalid date" }, { status: 400 });
+    let parsedDate: Date | undefined;
+    if (date) {
+      const p = parseDateYMD(date);
+      if (!p) return NextResponse.json({ error: "Invalid date" }, { status: 400 });
+      parsedDate = p;
     }
     if (type !== undefined && !isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
@@ -131,7 +150,7 @@ export async function PUT(req: Request) {
     const entry = await prisma.timeEntry.update({
       where: { id },
       data: {
-        date: date ? new Date(date) : undefined,
+        date: parsedDate,
         type: nextType,
         von: isArbeit ? (von !== undefined ? von || null : existing.von) : null,
         bis: isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null,

@@ -68,7 +68,7 @@ Fehlschlag `404` zurückgeben — Muster aus `customers/route.ts` DELETE überne
 
 ---
 
-### - [ ] 3. Datums-Validierung in time-entries POST/PUT härten
+### - [x] 3. Datums-Validierung in time-entries POST/PUT härten
 
 `app/api/time-entries/route.ts`, POST und PUT: `date: new Date(date)` ohne
 Formatvalidierung. Aktuell sendet nur der Tagesdialog reine `"YYYY-MM-DD"`-Strings,
@@ -132,3 +132,11 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   (echter UI-Klickpfad) funktioniert weiterhin wie zuvor; DELETE mit ungültiger
   ID liefert jetzt sauber `404 {"error":"Not found"}` statt vorher generischem
   `500` (Prisma P2025). Testdaten aufgeräumt.
+- Punkt 3: `parseDateYMD`-Helper ergänzt (extrahiert nur den "YYYY-MM-DD"-Teil,
+  baut via `Date.UTC(...)`, plus Kalender-Gültigkeitsprüfung z.B. gegen
+  30. Februar) und in POST/PUT statt `new Date(date)` verwendet. Verifiziert
+  per Playwright: normales Erstellen über den Tagesdialog funktioniert
+  weiterhin; ein volles ISO-Datetime ("2026-08-11T23:30:00") landet jetzt
+  korrekt auf dem 11.08. statt potenziell verschoben zu werden; malformte und
+  kalendarisch ungültige Daten liefern sauber `400` (POST und PUT). Testdaten
+  aufgeräumt.
