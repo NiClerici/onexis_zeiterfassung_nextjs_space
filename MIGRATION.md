@@ -337,7 +337,7 @@ in zwei Migrationen aufgeteilt statt einer.
 
 ---
 
-### - [ ] 4. Onboarding: Registrierung, Einladungen, Rollen-UI
+### - [x] 4. Onboarding: Registrierung, Einladungen, Rollen-UI
 
 - `/register` legt Nutzer **und** Organisation an, Registrierender wird `owner`,
   `trialEndsAt` = heute + 14 Tage.
@@ -348,6 +348,59 @@ in zwei Migrationen aufgeteilt statt einer.
   Austrittsdatum, Arbeitseinstellungen und Pensumsänderungen pro Person.
 - Austrittsdatum muss in `sollStundenTag` wirken: nach `exitDate` ist das
   Tagessoll 0 (analog zum bestehenden Verhalten vor `startDate`). Test dazu.
+
+**Ergebnis:** Vollständig umgesetzt, in vier Commits (4a–4d, je einer pro
+Bullet-Punkt oben).
+
+- **4a — Registrierung:** `/register` verlangt jetzt einen Firmennamen
+  (Pflichtfeld, vorher fehlte er ganz — der registrierende Mensch selbst
+  wurde fälschlich als Organisationsname verwendet) und leitet daraus den
+  Slug ab. `trialEndsAt` (heute + 14 Tage) und `plan: "trial"` werden bei
+  der Registrierung gesetzt — beide Felder lagen im Schema seit Punkt 3
+  bereit, wurden aber nirgends befüllt. Neue Tabelle `Invitation`
+  (additive Migration).
+- **4b — Einladungen:** `/api/invitations` (GET/POST/DELETE, nur owner/
+  admin) plus öffentliche Annahmeseite `/invite`. Token nur als SHA-256-
+  Hash gespeichert (analog `PasswordResetToken`), 7 Tage gültig, einmal
+  verwendbar; alte offene Einladungen an dieselbe E-Mail werden beim
+  erneuten Einladen automatisch entwertet. Die Annahme behandelt zwei
+  Fälle: eine neue Person setzt ein Passwort und wird direkt eingeloggt;
+  eine Person mit bereits bestehendem Konto (das Datenmodell aus Punkt 3
+  sieht das ausdrücklich vor) bekommt nur eine zusätzliche Membership ohne
+  neues Passwort. `hashToken()`/`generateToken()` nach `lib/token.ts`
+  extrahiert (dritter Verbraucher nach forgot-password/reset-password).
+- **4c — `/admin/team`:** Mitgliederliste mit Rolle, Status, Vorgesetzte
+  Person, Ein-/Austrittsdatum, aufklappbares Panel für Arbeitseinstellungen
+  und Pensumsänderungs-Historie, plus das Einladungsformular aus 4b. Drei
+  Schutzregeln gegen Rechteausweitung/Selbstsabotage: nur owner darf die
+  owner-Rolle vergeben, der letzte owner kann nicht degradiert werden,
+  niemand kann sich selbst deaktivieren und der letzte aktive owner nicht
+  deaktiviert werden. "Deaktivieren" wirkt jetzt echt — `lib/auth-options.ts`
+  wählt beim Login nur noch Memberships mit `status: "aktiv"`, ein
+  deaktiviertes Mitglied bekommt beim nächsten Login keine `orgId` mehr und
+  wird von `requireOrg()` aus der App ausgesperrt (bestehende Sessions
+  bleiben bis zum JWT-Ablauf gültig — dokumentierte Grenze von
+  JWT-Sessions, keine Server-seitige Invalidierung gebaut).
+- **4d — exitDate:** `Profil.exitDate` bewusst als **required** Feld
+  ergänzt (wie `changes` in Punkt 1) — der Typecheck fand dadurch alle drei
+  Produktionsstellen und 17 Test-Fixtures automatisch. `sollStundenTag`
+  liefert 0 für Tage nach `exitDate` (der Austrittstag selbst zählt noch,
+  symmetrisch zu `startDate`). `feriensaldo()`s Anspruchsberechnung bewusst
+  nicht angefasst — nicht Teil dieses Punktes, hätte mit den verifizierten
+  Referenzwerten interagieren können.
+
+**Verifiziert:** 53 Tests grün (28 in `calc.test.ts`, 5 davon neu für
+`exitDate`; vor dem Fix wurden diese testweise rot verifiziert). Playwright
+über echte Logins: Registrierung mit Firmenname erzeugt korrekte
+Organisation mit `trialEndsAt` ~14 Tage in der Zukunft; kompletter
+Einladungs-Flow (einladen → Vorschau → annehmen → Token nicht wiederverwendbar
+→ widerrufen); alle drei Team-Schutzregeln lösen korrekt 400/403 aus;
+Deaktivieren verhindert nachweislich den nächsten Login in der Organisation;
+eine Pensumsänderung für ein anderes Mitglied über die Team-UI wirkt korrekt
+auf dessen Membership; `exitDate`, über `/admin/team` gesetzt, senkt das
+Soll eines Mitglieds für einen den Austritt umspannenden Zeitraum
+nachweislich von 64h auf 32h — bei ausschliesslich über echte API-Aufrufe
+verifizierten Werten, nicht nur in der reinen Funktion.
 
 ---
 
@@ -578,3 +631,33 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   (wovon Punkt 3 im Datenmodell bereits ausgeht), braucht es einen
   bewussten Wechsel-Mechanismus, nicht nur die implizite Auswahl der
   ältesten Mitgliedschaft.
+- Punkt 4: in vier Commits abgearbeitet (4a–4d, je einer pro Bullet-Punkt).
+  Die Org-Wechsel-Lücke aus der vorigen Notiz wurde dabei genutzt statt
+  gelöst: `lib/auth-options.ts` filtert beim Login jetzt zusätzlich auf
+  `status: "aktiv"`, damit "deaktivieren" aus 4c echte Wirkung hat — aber
+  wählt weiterhin nur die älteste (jetzt: älteste aktive) Membership. Bleibt
+  eine offene Lücke für später: eine Person mit mehreren aktiven
+  Organisationen kann sich nicht bewusst für eine entscheiden.
+  `/api/invitations/accept` behandelt diesen Fall für eine bereits
+  bestehende Person zwar korrekt (fügt nur eine Membership hinzu), aber
+  ohne UI, um danach zwischen Organisationen zu wechseln.
+  > BLOCKER: keiner — nur eine bewusst offen gelassene, dokumentierte
+  > Lücke, kein Show-Stopper für die folgenden Punkte.
+- Punkt 4a, methodische Wiederholung aus Punkt 1/3: `Profil.exitDate`
+  wurde bewusst REQUIRED statt optional gemacht (4d) — der Typecheck fand
+  dadurch alle drei Produktionsstellen und 17 Test-Fixtures automatisch,
+  ohne dass grep danach suchen musste. Dieselbe Technik wie `changes` in
+  Punkt 1 und `exitDate`/`orgId` in Punkt 3 — inzwischen ein verlässliches
+  Muster für diesen Loop: neue Pflichtfelder auf zentralen, oft
+  konstruierten Typen lieber required machen als optional mit Default,
+  wenn ein vergessener Aufrufer sonst still falsches Verhalten zeigen würde
+  statt eines Compile-Fehlers.
+- Punkt 4c, Sicherheitsdesign-Entscheidung: drei separate Schutzregeln
+  (nur owner vergibt owner-Rolle; letzter owner nicht degradierbar; niemand
+  deaktiviert sich selbst; letzter aktiver owner nicht deaktivierbar) statt
+  einer einzigen groben Regel ("owner kann sich nicht selbst schaden"). Der
+  Grund: die vier Fälle sind unabhängig voneinander verletzbar (z.B. könnte
+  ein admin theoretisch versuchen, sich selbst zum owner zu machen, ohne
+  dass der aktuelle owner betroffen wäre) — eine einzige Regel hätte
+  mindestens einen der vier Fälle übersehen. Alle vier einzeln
+  Playwright-verifiziert.
