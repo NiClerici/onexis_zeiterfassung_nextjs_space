@@ -56,7 +56,7 @@ bulk-vacation wählt weiterhin den richtigen Tarif.
 
 ---
 
-### - [ ] 2. Fehlende Ownership-Prüfung bei DELETE in time-entries/route.ts
+### - [x] 2. Fehlende Ownership-Prüfung bei DELETE in time-entries/route.ts
 
 `app/api/time-entries/route.ts`, `DELETE`-Handler: ruft `prisma.timeEntry.delete()`
 direkt auf, ohne vorherigen `findFirst`-Ownership-Check (anders als der `PUT`-
@@ -127,3 +127,8 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   (effectiveFrom-Tag selbst) wählt korrekt den neuen Tarif. Zusätzlich ein
   echter UI-Klickpfad ("Standardwoche anwenden" im Kalender) bestätigt.
   Keine Konsolen-/Serverfehler. Testdaten aufgeräumt.
+- Punkt 2: `findFirst({ where: { id, userId } })` vor dem `delete` ergänzt, bei
+  Fehlschlag `404`. Verifiziert per Playwright: Löschen über den Tagesdialog
+  (echter UI-Klickpfad) funktioniert weiterhin wie zuvor; DELETE mit ungültiger
+  ID liefert jetzt sauber `404 {"error":"Not found"}` statt vorher generischem
+  `500` (Prisma P2025). Testdaten aufgeräumt.

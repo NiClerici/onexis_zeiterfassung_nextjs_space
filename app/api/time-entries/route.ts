@@ -165,7 +165,10 @@ export async function DELETE(req: Request) {
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    await prisma.timeEntry.delete({ where: { id, userId } });
+    const existing = await prisma.timeEntry.findFirst({ where: { id, userId } });
+    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    await prisma.timeEntry.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error(error);
