@@ -404,7 +404,7 @@ verifizierten Werten, nicht nur in der reinen Funktion.
 
 ---
 
-### - [ ] 5. Projekte als Entität statt Freitext
+### - [x] 5. Projekte als Entität statt Freitext
 
 `TimeEntry.projekt` ist ein String — damit gibt es keine Budgets und keine
 Stundensätze, und genau das ist das Verkaufsargument.
@@ -424,6 +424,63 @@ zusammenfassen und verknüpfen, Spalte danach droppen.
 `lib/calc.ts`: `kennzahlen()` nutzt für `kundenstunden` künftig
 `eintrag.billable` statt der Kunden-Lookup-Liste. Bestehende Tests anpassen,
 Referenzwerte müssen gleich bleiben.
+
+**Ergebnis:** Vollständig umgesetzt, in fünf Commits (5a–5d, plus ein
+fünfter für den abschliessenden Drop) — dieselbe zweigeteilte
+Migrationsstrategie wie bei Punkt 3.
+
+- **5a — Schema (additiv):** `Project` (customerId required, hourlyRate/
+  budgetHours nullable, `@@unique([orgId,customerId,name])`),
+  `Customer.hourlyRate` als Fallback, `TimeEntry.projectId`/`billable`
+  ergänzt. Echte Datenmigration: bestehende `projekt`-Freitextwerte je
+  (orgId, customerId, projekt) zu einem Project zusammengefasst und
+  verknüpft, `billable` auf allen Zeilen aus dem bisher für kundenstunden
+  verwendeten `Customer.billable`-Flag zurückgerechnet — Zeilen mit
+  Freitext aber ohne customerId (generisch möglich, hier 0 Zeilen) können
+  mangels der auf Project required customerId nicht automatisch migriert
+  werden.
+- **5b — `lib/calc.ts`:** `kennzahlen()` nutzt `eintrag.billable` direkt.
+  `KundeInput`/`kunden` komplett aus `KennzahlenInput` entfernt statt nur
+  ungenutzt liegen zu lassen — danach gab es dafür keinen
+  Verwendungszweck mehr. `analytics/route.ts` verlor dadurch den
+  kompletten Customer-Fetch, der nur für die jetzt überflüssige
+  kunden-Liste existierte.
+- **5c — API:** neue Route `/api/projects` (kein Rollen-Gate, analog zu
+  `customers`). `time-entries` POST/PUT lösen `projectId`/`customerId`
+  über einen gemeinsamen Helfer auf — ist `projectId` gesetzt, gewinnt
+  dessen `customerId`, da `Project.customerId` required ist und die
+  beiden Felder nie auseinanderlaufen dürfen; `billable` wird aus dem
+  Kunden vorbelegt, bleibt aber überschreibbar.
+- **5d — UI:** Freitext-„Projekt"-Feld im Tagesdialog durch eine Auswahl
+  ersetzt (gefiltert auf aktive Projekte des gewählten Kunden) plus
+  `billable`-Checkbox; Kunden-/Projektwechsel belegen `billable`
+  automatisch vor. Profilseite: Kundenverwaltung um Stundensatz erweitert,
+  neue Projektverwaltung-Karte strukturell analog zur Kundenverwaltung.
+- **Abschliessende Migration:** `TimeEntry.projekt` gedroppt — vorher per
+  grep verifiziert, dass keine Code-Stelle mehr darauf zugreift, und per
+  SQL, dass 0 Zeilen Freitext ohne `projectId` hatten (kein Datenverlust).
+  Wie mit dem Nutzer abgestimmt als Datei vorgelegt, erst nach expliziter
+  Freigabe angewendet.
+- **Bug bei der eigenen Verifikation gefunden und behoben:** ein erster,
+  fehlgeschlagener Browser-Testlauf für 5c/5d navigierte wegen eines
+  Off-by-one-Fehlers in der eigenen Testskript-Monatsnavigation nach
+  Oktober statt September und legte dort einen Testeintrag an; die
+  Aufräum-Logik dieses Laufs suchte gezielt nach dem September-Datum und
+  fand den Oktober-Eintrag deshalb nicht — blieb bis zur Nachkontrolle vor
+  der abschliessenden Migration als Karteileiche stehen. Per SQL
+  identifiziert (Datum in der Zukunft, keine Kunden-/Projektzuordnung mehr
+  durch `onDelete: SetNull`, nachdem der zugehörige Test-Kunde in einem
+  späteren, erfolgreichen Lauf gelöscht wurde) und manuell entfernt.
+- **Verifiziert:** 53 Tests grün (28 in `calc.test.ts`, inkl. des
+  `billable`-basierten Verrechnungsgrad-Tests). Playwright über die echte
+  UI, nicht nur API: Kunde mit Stundensatz und Projekt mit Stundensatz+
+  Budget über die Profilseite angelegt, Tageseintrag über den echten
+  Tagesdialog mit Kunde+Projekt-Auswahl erstellt — `billable` war danach
+  nachweislich automatisch aktiviert, der gespeicherte Eintrag trägt in
+  DB und API korrekt `projectId`, die aus dem Projekt abgeleitete
+  `customerId` und `billable=true`. Nach der abschliessenden Migration:
+  Kundenstunden/Verrechnungsgrad für den Bestandsnutzer unverändert,
+  Export weiterhin gültig, Kalenderseite fehlerfrei.
 
 ---
 
@@ -661,3 +718,27 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   dass der aktuelle owner betroffen wäre) — eine einzige Regel hätte
   mindestens einen der vier Fälle übersehen. Alle vier einzeln
   Playwright-verifiziert.
+- Punkt 5: in fünf Commits abgearbeitet (5a–5d je einzeln, plus die
+  abschliessende, destruktive Migration nach Freigabe) — dieselbe
+  zweigeteilte Strategie wie Punkt 3. Ausführliche Begründung unter
+  **Ergebnis:** beim Punkt selbst.
+- Punkt 5, methodischer Fund beim eigenen Nachverifizieren (wieder,
+  ähnlich wie schon in Punkt 3e): ein Browser-Testskript mit einer
+  fehlerhaften Monatsnavigation (Off-by-one — zwei Klicks statt einem, um
+  von August nach September zu kommen) erzeugte einen Testeintrag am
+  falschen Datum; die Aufräum-Logik desselben Laufs suchte gezielt nach
+  dem beabsichtigten Datum und übersah die Karteileiche deshalb. Erst der
+  SQL-Check unmittelbar vor der abschliessenden Migration deckte die
+  überzählige Zeile auf. Für künftige Punkte relevant: Testskripte, die
+  Kalendernavigation über Klicks simulieren, sollten die tatsächlich
+  erreichte Seite (z.B. den Monats-Header-Text) verifizieren, BEVOR sie
+  einen Tag anklicken — nicht erst am Ende prüfen, ob die erwarteten
+  Werte am erwarteten Datum stehen. Ein "Erfolg" beim Speichern beweist
+  nicht, dass am richtigen Tag gespeichert wurde.
+- Punkt 5, Auffälligkeit für Punkt 8 ("Kunden- und Projektsicht: Stunden
+  je Kunde und Projekt, Budget gegen verbraucht"): `Project.hourlyRate`
+  und `budgetHours` werden seit diesem Punkt zwar gespeichert und in der
+  Profilseite verwaltet, aber nirgends berechnet oder angezeigt (kein
+  Soll/Ist gegen das Budget, kein aus dem Stundensatz abgeleiteter
+  Umsatz) — das ist bewusst ausserhalb des Scopes von Punkt 5 geblieben
+  und wird der eigentliche Inhalt von Punkt 8.
