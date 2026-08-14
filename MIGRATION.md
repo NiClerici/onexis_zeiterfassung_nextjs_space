@@ -1245,7 +1245,7 @@ keine Datenmodelländerung.
 
 ---
 
-### - [ ] 11. Deployment auf Schweizer Infrastruktur
+### - [x] 11. Deployment auf Schweizer Infrastruktur
 
 - `Dockerfile` (Next.js standalone output) und `docker-compose.yml` mit App,
   PostgreSQL und Caddy als Reverse Proxy mit automatischem TLS.
@@ -1254,6 +1254,78 @@ keine Datenmodelländerung.
   in S3-kompatiblen Schweizer Objektspeicher und getesteter Restore-Anleitung.
 - ENV-Dokumentation vollständig in `.env.example`.
 - Healthcheck-Endpunkt `/api/health` (DB-Verbindung prüfen).
+
+**Ergebnis:** Alle vier Bullets umgesetzt, in zwei Commits (11a
+Healthcheck, 11b–d Docker/Compose/Caddy/ENV/Backup gebündelt, da alle vier
+zusammen getestet wurden und eng zusammenhängen).
+
+- **Healthcheck (`app/api/health/route.ts`):** minimale `SELECT 1`-Query
+  gegen Postgres statt eines echten Modellzugriffs, damit der Check auch
+  nach einer fehlgeschlagenen Migration noch aussagekräftig bleibt.
+  Bewusst ohne `requireOrg()`/Session-Prüfung — ein Healthcheck muss auch
+  antworten, wenn NextAuth selbst kaputt ist. 200 bei erreichbarer DB, 503
+  sonst. Dient sowohl als Docker-`HEALTHCHECK` als auch als Ziel für
+  externes Uptime-Monitoring.
+- **`Dockerfile` — ein wichtiger Fund beim Bauen:** `next.config.js` setzt
+  `experimental.outputFileTracingRoot` bewusst auf das Elternverzeichnis
+  des Projekts (Erbe des ursprünglichen Monorepo-Scaffolds der
+  Hosting-Plattform, siehe Punkt 10). Dadurch landet der Standalone-Output
+  NICHT direkt unter `.next/standalone/server.js`, wie es die meisten
+  Next.js-Docker-Anleitungen annehmen, sondern eine Ebene tiefer unter
+  einem vom `WORKDIR`-Namen abhängigen Ordner — per echtem
+  `NEXT_OUTPUT_MODE=standalone npm run build` lokal verifiziert (nicht nur
+  aus der Next.js-Dokumentation angenommen). Ein hartverdrahteter Pfad
+  wäre fragil bei jeder künftigen `next.config.js`- oder
+  `WORKDIR`-Änderung gewesen — stattdessen sucht ein `find`/`cp`-Schritt
+  `server.js` dynamisch (unter Ausschluss verschachtelter `server.js`-
+  Dateien aus `node_modules`, z.B. aus `next/dist` selbst) und kopiert den
+  eigentlichen Standalone-Baum an eine feste Stelle. `.next/static` und
+  `public/` werden wie von Next.js dokumentiert separat kopiert (nicht Teil
+  des Standalone-Outputs). Mehrstufig (deps/builder/runner), non-root
+  Nutzer im Runner, Docker-`HEALTHCHECK` gegen `/api/health`.
+- **`docker-compose.yml`:** drei Services (`app`/`db`/`caddy`). `db` und
+  `app` bewusst OHNE `ports:` — nur `caddy` ist von aussen erreichbar,
+  beide anderen nur im internen Compose-Netzwerk. `caddy` erhält `DOMAIN`
+  als Umgebungsvariable für automatisches Let's-Encrypt-TLS (`deploy/
+  Caddyfile`, Security-Header dupliziert Caddy bewusst NICHT — die setzt
+  bereits die App selbst, Punkt 10). Mit `docker compose config`
+  syntaktisch validiert (Variablen-Interpolation, Pflichtvariablen,
+  Service-Graph mit `depends_on`/Healthcheck-Bedingung) — ein echter
+  `docker build`/`docker compose up` gegen eine laufende Docker-Engine war
+  in dieser Sandbox nicht möglich (Docker Desktop verlangt einen
+  interaktiven Erststart-Dialog, den ein autonomer Loop nicht bedienen
+  kann). Transparent so im `deploy/README.md` vermerkt, inkl. Empfehlung
+  für einen einmaligen echten Testlauf vor dem ersten produktiven Einsatz.
+- **ENV-Dokumentation:** `.env.example` war bei einem grep über sämtliche
+  `process.env`-Zugriffe im Code bereits vollständig für den App-Betrieb
+  selbst (keine fehlenden Variablen gefunden) — ergänzt um Kommentar-
+  Struktur, einen `openssl rand -base64 32`-Hinweis für `NEXTAUTH_SECRET`,
+  und die vier NUR für Docker Compose gebrauchten Variablen (`POSTGRES_DB`/
+  `POSTGRES_USER`/`POSTGRES_PASSWORD`/`DOMAIN`) mit klarer Kennzeichnung,
+  dass `next dev`/`next start` sie nicht liest.
+- **`deploy/README.md`, `deploy/backup.sh`, `deploy/restore.sh`:**
+  vollständige Anleitung (Voraussetzungen, erster Rollout, Updates,
+  Backup, Restore, Logs, Troubleshooting). Backup/Restore als ausführbare
+  Skripte statt nur Prosa-Anleitung — automatisieren `pg_dump`→S3 bzw.
+  S3→`pg_restore` über die konfigurierte VM. **Die Dump/Restore-MECHANIK
+  wurde echt verifiziert, nicht nur dokumentiert:** `pg_dump -Fc` gegen die
+  reale lokale Entwicklungsdatenbank, Restore in eine frische Test-
+  Datenbank, danach alle 16 Tabellen (`User`, `Organization`,
+  `Membership`, `TimeEntry`, `TimeEntryAudit`, `Customer`, `Project`,
+  `Holiday`, `MonthLock`, `MonthLockAudit`, `AbsenceRequest`,
+  `Invitation`, `PasswordResetToken`, `LoginAttempt`, `PensumChange`,
+  `OvertimePayout`) per Zeilenzahl-Vergleich exakt übereinstimmend
+  bestätigt — Testartefakte (Dump-Datei, Test-Datenbank) danach vollständig
+  entfernt. Die S3-Anbindung selbst (Hochladen/Herunterladen gegen einen
+  echten cloudscale.ch-/Infomaniak-Bucket) war ohne echte Zugangsdaten in
+  dieser Sandbox nicht testbar — im README transparent als offener
+  Prüfschritt vor dem ersten produktiven Einsatz vermerkt, keine
+  unbegründete Erfolgsbehauptung.
+
+`npm run typecheck` sauber, alle 172 Tests grün, `npm run build`
+erfolgreich (sowohl im normalen als auch im `NEXT_OUTPUT_MODE=standalone`-
+Modus getestet). Keine Prisma-Migration nötig — reine Deployment-
+Konfiguration, keine Datenmodelländerung.
 
 ---
 
@@ -1596,3 +1668,30 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   das der richtige Ort, diesen toten Code (und die zugehörigen
   `@radix-ui/*`-Pakete) ebenfalls zu entfernen — bisher bewusst
   unangetastet gelassen, nicht übersehen.
+- Punkt 11, wichtigster technischer Fund: `next.config.js`s
+  `experimental.outputFileTracingRoot: path.join(__dirname, '../')`
+  (Erbe des ursprünglichen Monorepo-Scaffolds, siehe Notiz zu Punkt 10)
+  verschiebt den Next.js-Standalone-Output eine Ebene tiefer als in
+  praktisch jeder Standard-Docker-Anleitung für Next.js angenommen. Wer
+  diese next.config.js künftig kopiert/als Vorlage nutzt (z.B. für ein
+  zweites Produkt auf derselben Plattform), sollte diesen Stolperstein
+  kennen — entweder die dynamische `find`/`cp`-Lösung aus dem `Dockerfile`
+  übernehmen, oder `outputFileTracingRoot` für einen eigenständigen
+  Docker-Build gezielt entfernen/überschreiben, statt den Pfad zu erraten.
+- Punkt 11, Grenzen der eigenen Verifikation — bewusst transparent
+  festgehalten statt stillschweigend als "erledigt" markiert: ein echter
+  `docker build`/`docker compose up` gegen eine laufende Docker-Engine war
+  in der Entwicklungs-Sandbox dieses Punktes nicht möglich (Docker Desktop
+  verlangt einen interaktiven Erststart-Dialog, den ein autonomer Loop
+  nicht bedienen kann), ebenso wenig ein echter Upload/Download gegen einen
+  cloudscale.ch-/Infomaniak-S3-Bucket (keine echten Zugangsdaten in dieser
+  Sandbox). Was tatsächlich verifiziert wurde: `docker-compose.yml` per
+  `docker compose config` (Syntax, Variablen-Interpolation, Pflicht-
+  variablen, Service-Graph — braucht keinen laufenden Daemon), die
+  Next.js-Standalone-Output-Struktur per echtem lokalem Build, und die
+  komplette `pg_dump`/`pg_restore`-Mechanik gegen die reale
+  Entwicklungsdatenbank. Für einen späteren Punkt oder eine manuelle
+  Kontrolle vor dem ersten produktiven Deployment: ein echter End-to-End-
+  Testlauf auf einer echten VM (oder lokal mit laufendem Docker Desktop)
+  bleibt ein sinnvoller, noch offener Schritt — im `deploy/README.md`
+  bereits als Empfehlung vermerkt.
