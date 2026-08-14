@@ -11,6 +11,7 @@ import {
   type Profil,
   type EintragMitDatum,
   type HolidayInput,
+  type PensumChangeInput,
 } from "@/lib/calc";
 import { pruefeCompliance } from "@/lib/compliance";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange, styleHeaderRow, styleDataRow } from "@/lib/export-helpers";
@@ -40,7 +41,9 @@ function addKontrollSheet(
   startDate: Date,
   endDate: Date,
   eintraege: EintragMitDatum[],
-  profil: Profil
+  profil: Profil,
+  changes: PensumChangeInput[],
+  holidays: HolidayInput[]
 ) {
   const ws = workbook.addWorksheet(sheetName.slice(0, 31)); // Excel-Limit: max. 31 Zeichen je Sheetname
   ws.columns = [
@@ -65,7 +68,7 @@ function addKontrollSheet(
     byDay.get(key)!.push(e);
   }
 
-  const wochen = wochenUebersicht(eintraege, profil, startDate, endDate);
+  const wochen = wochenUebersicht(eintraege, profil, changes, holidays, startDate, endDate);
   const wochenMap = new Map(wochen.map((w) => [w.montag, w]));
 
   const current = new Date(startDate);
@@ -185,7 +188,7 @@ export async function GET(req: Request) {
           suffix++;
         }
         usedSheetNames.add(sheetName);
-        addKontrollSheet(workbook, sheetName, startDate, endDate, data.eintraege, data.profil);
+        addKontrollSheet(workbook, sheetName, startDate, endDate, data.eintraege, data.profil, data.changes, data.holidays);
       }
       filename = "arg_kontrollexport_organisation.xlsx";
     } else {
@@ -198,7 +201,7 @@ export async function GET(req: Request) {
       }
       const data = await loadPersonData(orgId, userId, startDate, endDate);
       if (!data) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
-      addKontrollSheet(workbook, data.name, startDate, endDate, data.eintraege, data.profil);
+      addKontrollSheet(workbook, data.name, startDate, endDate, data.eintraege, data.profil, data.changes, data.holidays);
       filename = `arg_kontrollexport_${data.name.replace(/\s+/g, "_")}.xlsx`;
     }
 

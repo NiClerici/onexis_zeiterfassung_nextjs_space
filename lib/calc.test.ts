@@ -6,6 +6,7 @@ import {
   sollStundenTag,
   stundenAusEintrag,
   wochenUebersicht,
+  teamKennzahlen,
   type Profil,
   type HolidayInput,
 } from "./calc";
@@ -541,9 +542,11 @@ describe("Feiertage (MIGRATION.md Punkt 6c)", () => {
   });
 });
 
-// MIGRATION.md Punkt 7 — ArG-Kontrollexport braucht die wöchentliche
-// Arbeitszeit und Überzeit separat je Woche, nicht nur als Summe.
-describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
+// MIGRATION.md Punkt 7/8 — ArG-Kontrollexport braucht die wöchentliche
+// Arbeitszeit und Überzeit separat je Woche; die Teamsicht (Punkt 8) braucht
+// zusätzlich verrechnungsgrad (Heatmap) und auslastung (Prognose) je Woche —
+// dieselbe Funktion deckt beides ab (siehe Kommentar bei wochenUebersicht).
+describe("wochenUebersicht (MIGRATION.md Punkt 7/8)", () => {
   const profil: Profil = {
     wochenstunden: 40,
     pensum: 100,
@@ -562,7 +565,7 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
       bis: "17:00",
       pauseMin: 0,
     }));
-    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
     expect(result).toHaveLength(1);
     expect(result[0].montag).toBe("2026-08-03");
     expect(result[0].arbeitsstunden).toBe(45);
@@ -578,7 +581,7 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
       bis: "18:00",
       pauseMin: 0,
     }));
-    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
     expect(result[0].arbeitsstunden).toBe(50);
     expect(result[0].ueberzeit).toBe(5);
   });
@@ -588,19 +591,112 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
       { date: "2026-08-10", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }, // KW2
       { date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }, // KW1
     ];
-    const result = wochenUebersicht(eintraege, profil, "2026-08-01", "2026-08-14");
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-14");
     expect(result.map((w) => w.montag)).toEqual(["2026-08-03", "2026-08-10"]);
+  });
+
+  it("liefert auch Wochen ganz ohne Einträge mit 0-Werten (dichte Wochenliste für Heatmap/Prognose)", () => {
+    const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }];
+    // Zeitraum über zwei Wochen (KW1 mit Eintrag, KW2 ganz leer).
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-14");
+    expect(result.map((w) => w.montag)).toEqual(["2026-08-03", "2026-08-10"]);
+    expect(result[1].arbeitsstunden).toBe(0);
+    expect(result[1].verrechnungsgrad).toBe(0);
+    expect(result[1].auslastung).toBe(0);
   });
 
   it("ignoriert Einträge ausserhalb von [from, to]", () => {
     const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }];
-    const result = wochenUebersicht(eintraege, profil, "2026-08-10", "2026-08-14");
-    expect(result).toHaveLength(0);
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-10", "2026-08-14");
+    expect(result).toHaveLength(1);
+    expect(result[0].arbeitsstunden).toBe(0);
   });
 
   it("zählt Absenzen nicht als Arbeitszeit", () => {
     const eintraege = [{ date: "2026-08-03", typ: "ferien" as const, hours: 8 }];
-    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
-    expect(result).toHaveLength(0);
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
+    expect(result[0].arbeitsstunden).toBe(0);
+  });
+
+  it("verrechnungsgrad: nur billable Arbeitsstunden zählen als kundenstunden", () => {
+    const eintraege = [
+      { date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0, billable: true }, // 4h billable
+      { date: "2026-08-04", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0, billable: false }, // 4h nicht billable
+    ];
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
+    expect(result[0].arbeitsstunden).toBe(8);
+    expect(result[0].kundenstunden).toBe(4);
+    expect(result[0].verrechnungsgrad).toBe(50);
+  });
+
+  it("sollStunden/auslastung: volles Wochensoll (Mo–So) unabhängig vom Periodenrand", () => {
+    // Profil 40h/100% → Tagessoll 8h, Wochensoll Mo-Fr = 40h.
+    const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0 }]; // 8h
+    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
+    expect(result[0].sollStunden).toBe(40);
+    expect(result[0].auslastung).toBe(20); // 8h von 40h Soll
+  });
+});
+
+// MIGRATION.md Punkt 8 — Teamsicht: Aggregation über mehrere Personen.
+describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
+  const profilA: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: null, exitDate: null, maxWeeklyHours: 45 };
+  const profilB: Profil = { wochenstunden: 40, pensum: 50, ferientage: 25, startDate: null, exitDate: null, maxWeeklyHours: 45 };
+
+  it("liefert pro Mitglied dieselben Werte wie ein direkter kennzahlen()-Aufruf", () => {
+    const eintraegeA = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0, billable: true }];
+    const direkt = kennzahlen({ from: "2026-08-03", to: "2026-08-07", heute: "2026-08-07", eintraege: eintraegeA, profil: profilA, changes: [], payouts: [], holidays: [] });
+
+    const result = teamKennzahlen({
+      from: "2026-08-03",
+      to: "2026-08-07",
+      heute: "2026-08-07",
+      holidays: [],
+      members: [{ userId: "u1", name: "A", profil: profilA, changes: [], eintraege: eintraegeA, payouts: [] }],
+    });
+
+    expect(result.members).toHaveLength(1);
+    expect(result.members[0].soll).toBe(direkt.soll);
+    expect(result.members[0].ist).toBe(direkt.ist);
+    expect(result.members[0].ueberstunden).toBe(direkt.ueberstunden);
+    expect(result.members[0].kundenstunden).toBe(direkt.kundenstunden);
+  });
+
+  it("totals summieren soll/ist/ueberstunden/kundenstunden über alle Mitglieder", () => {
+    const eintraegeA = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0, billable: true }]; // 8h, alle billable
+    const eintraegeB = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0, billable: false }]; // 4h, nicht billable
+
+    const result = teamKennzahlen({
+      from: "2026-08-03",
+      to: "2026-08-03",
+      heute: "2026-08-03",
+      holidays: [],
+      members: [
+        { userId: "u1", name: "A", profil: profilA, changes: [], eintraege: eintraegeA, payouts: [] },
+        { userId: "u2", name: "B", profil: profilB, changes: [], eintraege: eintraegeB, payouts: [] },
+      ],
+    });
+
+    expect(result.totals.ist).toBe(12); // 8h + 4h
+    expect(result.totals.kundenstunden).toBe(8); // nur A's Stunden sind billable
+    expect(result.totals.verrechnungsgrad).toBe(66.7); // 8/12*100, gerundet
+  });
+
+  it("verrechnungsgrad ist 0 bei totals.ist = 0 (keine Division durch 0)", () => {
+    const result = teamKennzahlen({
+      from: "2026-08-03",
+      to: "2026-08-03",
+      heute: "2026-08-03",
+      holidays: [],
+      members: [{ userId: "u1", name: "A", profil: profilA, changes: [], eintraege: [], payouts: [] }],
+    });
+    expect(result.totals.ist).toBe(0);
+    expect(result.totals.verrechnungsgrad).toBe(0);
+  });
+
+  it("liefert eine leere Mitgliederliste und Null-Totals ohne Mitglieder", () => {
+    const result = teamKennzahlen({ from: "2026-08-03", to: "2026-08-03", heute: "2026-08-03", holidays: [], members: [] });
+    expect(result.members).toEqual([]);
+    expect(result.totals).toEqual({ soll: 0, ist: 0, ueberstunden: 0, kundenstunden: 0, verrechnungsgrad: 0 });
   });
 });

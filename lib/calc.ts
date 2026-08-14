@@ -203,7 +203,10 @@ export function montagDerWoche(datum: Date): Date {
   return montag;
 }
 
-function summeSollstunden(
+// Exportiert (analog zu montagDerWoche), damit wochenUebersicht() und die
+// Teamsicht (MIGRATION.md Punkt 8) dieselbe Tag-für-Tag-Sollstunden-Summe
+// verwenden statt sie zweimal zu implementieren.
+export function summeSollstunden(
   from: Date,
   to: Date,
   profil: Profil,
@@ -293,29 +296,52 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
 export interface WochenSummary {
   // Montag der Kalenderwoche, "YYYY-MM-DD".
   montag: string;
-  // Tatsächliche Arbeitszeit (nur typ="arbeit") in dieser Woche, innerhalb [from, to].
+  // Tatsächliche/vorerfasste Arbeitszeit (nur typ="arbeit") in dieser Woche,
+  // innerhalb [from, to] — unabhängig davon, ob das Datum in der
+  // Vergangenheit oder Zukunft liegt (Punkt 8 braucht auch vorerfasste
+  // ZUKÜNFTIGE Wochen für die Auslastungsprognose).
   arbeitsstunden: number;
   // Anteil von arbeitsstunden über profil.maxWeeklyHours (Art. 12/13 ArG) — 0, wenn keine.
   ueberzeit: number;
+  // Davon verrechenbare Arbeitszeit (typ="arbeit" && billable).
+  kundenstunden: number;
+  // kundenstunden / arbeitsstunden * 100 — 0 bei arbeitsstunden = 0.
+  verrechnungsgrad: number;
+  // Volles Wochensoll (Mo–So laut sollStundenTag), unabhängig davon, ob
+  // [from, to] mitten in der Woche endet — Vereinfachung für eine
+  // konsistente Wochenkachel in Heatmap/Prognose statt eines an den
+  // Periodenrand angeschnittenen Teilsolls.
+  sollStunden: number;
+  // arbeitsstunden / sollStunden * 100 — 0 bei sollStunden = 0.
+  auslastung: number;
 }
 
-// Wochenweise Aufschlüsselung der tatsächlichen Arbeitszeit und der daraus
-// resultierenden Überzeit — dieselbe Wochen-Gruppierung (Montag-Start) und
-// Filterlogik (nur typ="arbeit", nur innerhalb [from, to]) wie der
-// ueberzeit-Teil von kennzahlen() oben, hier aber PRO WOCHE statt nur als
-// Summe zurückgegeben. Gebraucht vom ArG-Kontrollexport (MIGRATION.md
-// Punkt 7), der die wöchentliche Arbeitszeit und die Überzeit separat je
-// Woche ausweisen muss (Art. 73 ArGV 1) — kennzahlen() selbst bleibt
-// unverändert, das ist eine zusätzliche, rein additive Funktion.
+// Wochenweise Aufschlüsselung der Arbeitszeit — DICHT über jede Kalenderwoche
+// zwischen montagDerWoche(from) und montagDerWoche(to) (auch Wochen ganz ohne
+// Einträge erscheinen mit 0-Werten), nicht nur über Wochen mit Einträgen.
+// Dient gleich drei Zwecken, die dieselbe Wochen-Gruppierung brauchen und
+// deshalb bewusst eine gemeinsame Funktion sind statt drei fast identischer:
+//   - ArG-Kontrollexport (Punkt 7): arbeitsstunden + ueberzeit je Woche.
+//   - Teamsicht-Heatmap (Punkt 8): verrechnungsgrad je Mitarbeiter*in und Woche.
+//   - Teamsicht-Prognose (Punkt 8): auslastung (arbeitsstunden/sollStunden)
+//     für Wochen, deren Montag in der Zukunft liegt — "geplante Auslastung
+//     aus vorerfassten Einträgen".
+// kennzahlen() selbst bleibt unverändert, das hier ist eine zusätzliche,
+// rein additive Funktion.
 export function wochenUebersicht(
   eintraege: EintragMitDatum[],
   profil: Profil,
+  changes: PensumChangeInput[],
+  holidays: HolidayInput[],
   from: Date | string,
   to: Date | string
 ): WochenSummary[] {
   const fromD = toUTCDate(from);
   const toD = toUTCDate(to);
-  const map = new Map<number, number>();
+  if (toD.getTime() < fromD.getTime()) return [];
+
+  const arbeitMap = new Map<number, number>();
+  const kundenMap = new Map<number, number>();
   for (const eintrag of eintraege) {
     if (eintrag.typ !== "arbeit") continue;
     const d = toUTCDate(eintrag.date);
@@ -324,15 +350,110 @@ export function wochenUebersicht(
     // nutzt es nur für Absenzen ohne eigene von/bis-Zeit) — 0 ist hier sicher.
     const stunden = stundenAusEintrag(eintrag, 0);
     const key = montagDerWoche(d).getTime();
-    map.set(key, (map.get(key) ?? 0) + stunden);
+    arbeitMap.set(key, (arbeitMap.get(key) ?? 0) + stunden);
+    if (eintrag.billable) kundenMap.set(key, (kundenMap.get(key) ?? 0) + stunden);
   }
-  return Array.from(map.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([montagMs, arbeitsstunden]) => ({
-      montag: new Date(montagMs).toISOString().split("T")[0],
-      arbeitsstunden: round1(arbeitsstunden),
+
+  const result: WochenSummary[] = [];
+  let montag = montagDerWoche(fromD);
+  const letzterMontag = montagDerWoche(toD);
+  while (montag.getTime() <= letzterMontag.getTime()) {
+    const key = montag.getTime();
+    const arbeitsstunden = round1(arbeitMap.get(key) ?? 0);
+    const kundenstunden = round1(kundenMap.get(key) ?? 0);
+    const wochenEnde = new Date(montag.getTime() + 6 * 24 * 60 * 60 * 1000);
+    const sollStunden = round1(summeSollstunden(montag, wochenEnde, profil, changes, holidays));
+    result.push({
+      montag: montag.toISOString().split("T")[0],
+      arbeitsstunden,
       ueberzeit: round1(Math.max(0, arbeitsstunden - profil.maxWeeklyHours)),
-    }));
+      kundenstunden,
+      verrechnungsgrad: arbeitsstunden > 0 ? round1((kundenstunden / arbeitsstunden) * 100) : 0,
+      sollStunden,
+      auslastung: sollStunden > 0 ? round1((arbeitsstunden / sollStunden) * 100) : 0,
+    });
+    montag = new Date(montag.getTime() + 7 * 24 * 60 * 60 * 1000);
+  }
+  return result;
+}
+
+export interface TeamMemberInput {
+  userId: string;
+  name: string;
+  profil: Profil;
+  changes: PensumChangeInput[];
+  eintraege: EintragMitDatum[];
+  payouts: PayoutInput[];
+}
+
+export interface TeamMemberResult {
+  userId: string;
+  name: string;
+  soll: number;
+  ist: number;
+  ueberstunden: number;
+  ueberzeit: number;
+  kundenstunden: number;
+  verrechnungsgrad: number;
+}
+
+export interface TeamKennzahlenInput {
+  from: Date | string;
+  to: Date | string;
+  heute: Date | string;
+  // Feiertage gelten organisationsweit (Punkt 6c) — ein einziges Array für
+  // alle Mitglieder statt eines pro Person.
+  holidays: HolidayInput[];
+  members: TeamMemberInput[];
+}
+
+export interface TeamKennzahlenResult {
+  members: TeamMemberResult[];
+  totals: {
+    soll: number;
+    ist: number;
+    ueberstunden: number;
+    kundenstunden: number;
+    verrechnungsgrad: number;
+  };
+}
+
+// Team-Aggregation für die Teamsicht (MIGRATION.md Punkt 8) — ruft für jede
+// Person die bereits verifizierte kennzahlen() auf und fasst die Ergebnisse
+// zusammen. Keine eigene Berechnungslogik, nur Aggregation: "keine
+// Rechenlogik in Komponenten oder Routen" gilt genauso für diese Funktion
+// selbst — sie darf nicht anfangen, soll/ist eigenständig neu zu berechnen.
+export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult {
+  const members: TeamMemberResult[] = input.members.map((m) => {
+    const k = kennzahlen({
+      from: input.from,
+      to: input.to,
+      heute: input.heute,
+      eintraege: m.eintraege,
+      profil: m.profil,
+      changes: m.changes,
+      payouts: m.payouts,
+      holidays: input.holidays,
+    });
+    return {
+      userId: m.userId,
+      name: m.name,
+      soll: k.soll,
+      ist: k.ist,
+      ueberstunden: k.ueberstunden,
+      ueberzeit: k.ueberzeit,
+      kundenstunden: k.kundenstunden,
+      verrechnungsgrad: k.verrechnungsgrad,
+    };
+  });
+
+  const soll = round1(members.reduce((s, m) => s + m.soll, 0));
+  const ist = round1(members.reduce((s, m) => s + m.ist, 0));
+  const ueberstunden = round1(members.reduce((s, m) => s + m.ueberstunden, 0));
+  const kundenstunden = round1(members.reduce((s, m) => s + m.kundenstunden, 0));
+  const verrechnungsgrad = ist > 0 ? round1((kundenstunden / ist) * 100) : 0;
+
+  return { members, totals: { soll, ist, ueberstunden, kundenstunden, verrechnungsgrad } };
 }
 
 export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
