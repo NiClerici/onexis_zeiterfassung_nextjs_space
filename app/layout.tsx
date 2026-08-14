@@ -4,6 +4,17 @@ import { Providers } from "@/components/providers";
 
 export const dynamic = "force-dynamic";
 
+// "next/font/google" lädt die Font-Dateien beim BUILD herunter und liefert
+// sie danach unter der eigenen Domain aus (/_next/static/media/*.woff2) —
+// per HTTP-Response verifiziert (MIGRATION.md Punkt 10, "Fonts selbst
+// hosten statt Google-CDN"). Der Browser einer nutzenden Person stellt zu
+// keinem Zeitpunkt eine Anfrage an fonts.googleapis.com/fonts.gstatic.com;
+// es gibt also keinen Laufzeit-Drittdienst-Kontakt und keine IP-Weitergabe
+// an Google. Das erfüllt den Punkt bereits — eine zusätzliche Umstellung
+// auf next/font/local mit von Hand eingecheckten .woff2-Dateien würde
+// keinen zusätzlichen Datenschutz-Nutzen bringen (die Build-Pipeline lädt
+// ohnehin schon alle Abhängigkeiten aus externen Registries), nur unnötiges
+// Risiko bei Lizenz/Versionsabgleich — deshalb bewusst nicht umgestellt.
 const dmSans = DM_Sans({ subsets: ["latin"], variable: "--font-sans" });
 const jakartaSans = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-display" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
