@@ -1329,7 +1329,7 @@ Konfiguration, keine Datenmodelländerung.
 
 ---
 
-### - [ ] 12. Verkaufsfähigkeit
+### - [x] 12. Verkaufsfähigkeit
 
 - `/admin/legal`: AVV (Auftragsbearbeitungsvertrag) und
   Bearbeitungsverzeichnis-Vorlage als Download, Datenschutzerklärung mit
@@ -1339,6 +1339,88 @@ Konfiguration, keine Datenmodelländerung.
 - `lib/billing.ts` als Interface (`BillingProvider`) mit Plan-, Nutzerlimiten-
   und Trial-Logik. Implementierung vorerst manuell — aber Trial-Ablauf muss
   wirken: nach `trialEndsAt` ist die Organisation read-only.
+
+**Ergebnis:** Alle drei Bullets umgesetzt, in drei Commits (12a Billing/
+Trial, 12b Export/Löschung Backend, 12c `/admin/legal`-UI inkl.
+Rechtsdokumente). Letzter Punkt der Migration — mit diesem Commit sind
+alle 12 Punkte von MIGRATION.md abgeschlossen.
+
+- **12a — `lib/billing.ts`:** Interface `BillingProvider` mit einer
+  vorerst rein manuellen Implementierung (`ManualBillingProvider`,
+  Plan-/Trial-Logik über die bereits seit Punkt 3a bestehenden
+  `Organization.plan`/`trialEndsAt`-Felder, Nutzerlimiten als
+  dokumentierte Platzhalter-Werte trial=5/starter=10/pro=50 — keine reale
+  Preisgestaltung). Die reinen Regeln (`isTrialExpired`, `PLAN_LIMITS`)
+  liegen bewusst in einer eigenen Datei `lib/billing-rules.ts`, nicht in
+  `lib/billing.ts` selbst: `middleware.ts` läuft in der Next.js
+  Edge-Runtime (kein Prisma), und `app/(app)/layout.tsx` ist eine
+  "use client"-Komponente — ein Import aus `lib/billing.ts` hätte Prisma
+  Client ins Browser-Bundle gezogen. Trial-Ablauf wirkt jetzt wirklich:
+  `middleware.ts` blockiert mutierende API-Aufrufe (POST/PUT/PATCH/DELETE)
+  einer Organisation mit abgelaufenem Trial mit 403, lässt GET-Aufrufe
+  aber unverändert durch (echtes "read-only", kein Totalausfall) und
+  rührt die bestehende Auth-Semantik für alle anderen Fälle nicht an
+  (nicht authentifizierte API-Aufrufe liefern weiterhin die 401-JSON-
+  Antwort ihrer eigenen Route, keine Middleware-Umleitung). `plan`/
+  `trialEndsAt` neu im JWT/Session (`lib/auth-options.ts`, gleiches Muster
+  wie `orgId`/`role`, inkl. derselben dokumentierten JWT-Staleness-
+  Einschränkung aus Punkt 4). Neuer Banner in `app/(app)/layout.tsx` zeigt
+  den Trial-Status für jede Rolle. `/api/invitations` POST prüft das
+  Nutzerlimit des Plans vor dem Versenden einer Einladung.
+- **12b — Organisationsexport und -löschung (Backend):**
+  `lib/org-export.ts` sammelt wirklich ALLE Daten, inkl. soft-gelöschter
+  TimeEntries (Punkt 6b) und beider Audit-Trails. `GET /api/admin/
+  organization/export` (owner/admin, `?format=json|excel`): JSON ist die
+  technisch vollständige Fassung, Excel bewusst eine lesbare geschäftliche
+  Zusammenfassung ohne die rein technischen Audit-Tabellen. `DELETE /api/
+  admin/organization`: die schwerwiegendste Aktion der App — nur owner
+  (nicht admin), serverseitig geprüfte exakte Namensbestätigung.
+  `TimeEntryAudit`/`MonthLockAudit` haben bewusst KEINE Prisma-Relation
+  auf `Organization` (der Audit-Trail soll ein gelöschtes TimeEntry/einen
+  gelöschten Account überleben können, siehe Punkt 6b/6e) und werden
+  deshalb explizit mitgelöscht, statt sich auf Prismas automatische
+  Kaskadierung zu verlassen — sonst blieben verwaiste Zeilen mit
+  personenbezogenen Daten zurück. Alle übrigen Modelle kaskadieren
+  automatisch über ihre bestehende Organization-Relation.
+- **12c — `/admin/legal` (UI):** drei Rechtsdokument-Vorlagen unter
+  `public/legal/` (AVV, Bearbeitungsverzeichnis-Eintrag,
+  Datenschutzerklärung mit explizit genanntem Hosting-Standort Schweiz
+  und Verweis auf die in Punkt 10 umgesetzten Massnahmen — keine
+  US-Drittdienste, Schweizer SMTP) — alle drei ausdrücklich als "Vorlage,
+  vor Verwendung durch eine Rechtsberatung prüfen lassen" markiert, keine
+  fertig geprüften Rechtsdokumente (bewusste, dokumentierte Grenze: dieser
+  Loop kann keine Rechtsberatung ersetzen). Neue Seite mit Downloads für
+  alle drei Dokumente, Organisationsexport-Buttons und einer
+  "Gefahrenzone" (nur owner) mit Tippen-zum-Bestätigen-Löschung und dem im
+  Punkt-Text geforderten Hinweis auf die unabhängig weiterbestehende
+  gesetzliche Aufbewahrungspflicht. Nach erfolgreicher Löschung
+  erzwungener Sign-out (gleiche JWT-Staleness-Begründung wie in 12a).
+
+Tests: 18 neue (`lib/billing.test.ts` 8, `lib/invitations-limit.test.ts`
+2, `lib/org-export.test.ts` 8). 190 Tests insgesamt grün.
+
+Browser-verifiziert (Playwright, mehrere echte Logins, **kritisch für
+middleware.ts, das vitest nicht durchläuft**): nicht authentifizierter
+Zugriff auf eine geschützte Seite leitet weiterhin korrekt zu `/login` um
+(Regressionsschutz für die in `middleware.ts` manuell nachgebildete
+Seiten-Auth); ein pro-Plan-Org zeigt keinen Trial-Banner und mutiert
+normal; ein Trial mit zukünftigem `trialEndsAt` zeigt den informativen
+Banner und mutiert normal; ein Trial mit abgelaufenem `trialEndsAt` zeigt
+den Warn-Banner, GET funktioniert weiterhin, POST liefert korrekt 403.
+Für `/admin/legal`: member wird weggeleitet und sieht den Nav-Tab nicht;
+admin sieht die Gefahrenzone korrekt NICHT; alle drei Dokument-Downloads
+sowie JSON-/Excel-Export funktionieren; eigens angelegte Wegwerf-
+Organisation eigens für den Löschtest — Löschen-Button bleibt bei
+falschem Namen deaktiviert, die tatsächliche Löschung wurde per direktem
+DB-Check bestätigt (Organisation/Membership/TimeEntry/TimeEntryAudit alle
+auf 0, das User-Konto blieb korrekt erhalten). Keine Konsolenfehler in
+allen Durchläufen. Alle Testdaten (Organisationen, User, Memberships,
+TimeEntries, Audit-Zeilen) vollständig per SQL entfernt, Baseline (66
+`TimeEntry`-Zeilen) nach jedem Durchlauf bestätigt.
+
+Eine additive Prisma-Migration hätte für diesen Punkt nicht nötig sein
+sollen (alle genutzten Felder `Organization.plan`/`trialEndsAt` existieren
+bereits seit Punkt 3a) — bestätigt: keine Migration in diesem Punkt.
 
 ---
 
@@ -1695,3 +1777,39 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   Testlauf auf einer echten VM (oder lokal mit laufendem Docker Desktop)
   bleibt ein sinnvoller, noch offener Schritt — im `deploy/README.md`
   bereits als Empfehlung vermerkt.
+- Punkt 12, technischer Kernentscheid: die Trial-Ablauf-Durchsetzung
+  ("read-only nach trialEndsAt") wurde bewusst NICHT durch einen Retrofit
+  aller ~15 mutierenden API-Routen umgesetzt (hohe Regressionsgefahr,
+  jede Route hätte einzeln angefasst werden müssen), sondern zentral in
+  `middleware.ts` — der einzige Ort, der jeden mutierenden Request
+  automatisch abfängt, ohne dass eine einzelne Route ihn vergessen kann.
+  Der Preis dafür: `middleware.ts` musste die bestehende `withAuth`-
+  Seiten-Auth manuell nachbilden (Next.js erlaubt nur eine
+  `middleware.ts`-Datei), was besonders sorgfältige Verifikation
+  brauchte, weil vitest diese Datei nicht ausführt — kein Unit-Test hätte
+  eine falsch nachgebildete Umleitung bemerkt. Für künftige Änderungen an
+  `middleware.ts`: IMMER mit einem echten Playwright-Durchlauf verifizieren
+  (nicht authentifizierter Zugriff → Redirect, normale Mutation → 200,
+  Edge-Fall → korrekter Statuscode), nie allein auf `npm test` verlassen.
+- Punkt 12, zweiter technischer Kernentscheid: `lib/billing-rules.ts` als
+  eigene, Prisma-freie Datei — der Grund ist nicht nur `middleware.ts`
+  (Edge-Runtime), sondern auch `app/(app)/layout.tsx` als "use client"-
+  Komponente, die den Trial-Banner rendert. Für künftige Punkte relevant:
+  jede reine Berechnungs-/Regel-Funktion, die sowohl serverseitig (mit
+  Prisma) als auch in einer Middleware oder einer Client-Komponente
+  gebraucht wird, gehört in eine eigene Prisma-freie Datei — nicht in
+  dieselbe Datei wie die Prisma-abhängige Implementierung, auch wenn
+  beide fachlich zusammengehören (siehe `lib/calc.ts` als das seit Punkt 1
+  etablierte Vorbild für diese Trennung, jetzt zum zweiten Mal bewusst so
+  gemacht).
+- Punkt 12, letzte Notiz der Migration: alle 12 Punkte von MIGRATION.md
+  sind damit abgeschlossen. Bewusst dokumentierte, noch offene Lücken aus
+  früheren Punkten, die kein Blocker für den Abschluss dieser Migration
+  waren, aber für den weiteren Betrieb relevant bleiben: die Org-Wechsel-
+  UI für Personen mit mehreren Mitgliedschaften (Punkt 3/4), ein
+  Personen-Picker für manager-Einzelexporte (Punkt 7/8), ein echter
+  End-to-End-Deployment-Testlauf auf echter Infrastruktur (Punkt 11), und
+  eine echte Zahlungsanbieter-Anbindung anstelle der manuellen
+  `BillingProvider`-Implementierung (Punkt 12). Keine davon wurde
+  stillschweigend übersprungen — jede ist an ihrer Stelle oben explizit
+  als bewusste, begründete Scope-Entscheidung festgehalten.
