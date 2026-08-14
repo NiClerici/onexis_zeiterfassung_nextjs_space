@@ -57,7 +57,7 @@ Quartal). Prüfen: `sollStundenTag`, `kennzahlen`, `feriensaldo` und
 Zeitpunkt gültigen Satz, nicht den letzten. Gleicher Test zusätzlich mit
 einem Wechsel exakt auf den `gueltig_ab`-Tag selbst (Boundary).
 
-### - [ ] A3. Jahresübergänge und Kalenderrandfälle
+### - [x] A3. Jahresübergänge und Kalenderrandfälle
 
 - Ferienanspruch bei Eintritt/Austritt exakt am 31.12. bzw. 1.1.
 - `wochenUebersicht`/Überzeit-Berechnung für eine Kalenderwoche, die über
@@ -349,3 +349,50 @@ Stand nach A2: 16 Dateien, 201 Tests, typecheck sauber.
 > `lib/calc.ts:486`), der Ferientag wird also nicht doppelt abgezogen.
 > Gehört zu keinem Punkt dieser Datei — als eigener Punkt nachzutragen,
 > hier bewusst nicht gefixt.
+
+### A3 — Kalenderrandfälle, 14.08.2026
+
+Alle vier Bereiche geprüft, **kein Rechenfehler gefunden**. Die
+UTC-Arithmetik in `lib/calc.ts` (`toUTCDate`, `montagDerWoche` per
+`setUTCDate`, `summeSollstunden` tageweise) trägt alle Randfälle. 13 neue
+Tests halten das fest:
+
+| Randfall | Ergebnis |
+|---|---|
+| Ferienanspruch Eintritt 01.01. | 25 (voll) ✓ |
+| Ferienanspruch Eintritt 31.12. | 2.1 (25/12) ✓ |
+| Eintritt 31.12. des Vorjahres | 25 im Folgejahr ✓ |
+| KW 53/2026 → KW 1/2027 (Mo 28.12.–So 03.01.) | eine Woche, 50h, 5h Überzeit ✓ |
+| Schaltjahr Februar 2028 (21 Werktage) vs. 2026 (20) | 168h vs. 160h ✓ |
+| 29.02.2028 als normaler Werktag | 8h ✓ |
+| DST-Sonntage 29.03./25.10.2026 | kein Datumsversatz ✓ |
+| Nachtschicht 22:00–06:00 an beiden Umstellungstagen | 7.5h wie an jedem anderen Tag ✓ |
+
+Zwei bewusst festgehaltene Ist-Verhalten (je mit einem Test dokumentiert,
+kein Fix in diesem Loop):
+
+**1. `exitDate` kürzt den Ferienanspruch nicht.** `feriensaldo`
+(`lib/calc.ts:465-470`) kürzt anteilig nur bei EINTRITT im Abfragejahr;
+`profil.exitDate` geht in den Anspruch gar nicht ein. Wer am 31.01.2026
+austritt, hat für 2026 den vollen Anspruch von 25 Tagen. Das ist eine
+fehlende Regel, kein Rechenfehler — `sollStundenTag` respektiert `exitDate`
+korrekt (MIGRATION.md Punkt 4d), nur die Anspruchsformel kennt es nicht.
+
+> Vorschlag für eine künftige Datei: Ferienanspruch bei Austritt analog zum
+> Eintritt anteilig kürzen (`ferientage * austrittsMonat / 12`), inkl. des
+> Falls Eintritt UND Austritt im selben Jahr.
+
+**2. Nachtschichten über den DST-Wechsel werden als Wanduhrzeit gerechnet.**
+`stundenAusEintrag` (`lib/calc.ts:178-191`) rechnet auf Minuten aus den
+`von`/`bis`-Strings, ohne Zeitzone. Eine Schicht 22:00–06:00 in der Nacht
+auf den Frühjahrswechsel dauert real 6.5h, wird aber wie überall mit 7.5h
+gutgeschrieben (im Herbst umgekehrt 8.5h real). Das ist konsistent und
+deterministisch, aber nicht die real geleistete Zeit. Eine Korrektur
+bräuchte eine Zeitzone pro Organisation und damit ein Schema-Feld — laut
+Vorwort dieser Datei ohne konkreten Befund nicht zu bauen.
+
+> Vorschlag für eine künftige Datei: Organisation um eine Zeitzone
+> erweitern und `stundenAusEintrag` an den beiden Umstellungstagen die real
+> verstrichene Zeit rechnen lassen. Betrifft nur Betriebe mit Nachtarbeit.
+
+Stand nach A3: 16 Dateien, 214 Tests, typecheck sauber.

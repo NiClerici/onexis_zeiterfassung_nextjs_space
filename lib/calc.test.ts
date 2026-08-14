@@ -7,6 +7,7 @@ import {
   stundenAusEintrag,
   wochenUebersicht,
   teamKennzahlen,
+  montagDerWoche,
   type Profil,
   type HolidayInput,
 } from "./calc";
@@ -818,5 +819,161 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
     const result = teamKennzahlen({ from: "2026-08-03", to: "2026-08-03", heute: "2026-08-03", holidays: [], members: [] });
     expect(result.members).toEqual([]);
     expect(result.totals).toEqual({ soll: 0, ist: 0, ueberstunden: 0, kundenstunden: 0, verrechnungsgrad: 0 });
+  });
+});
+
+// HARDENING.md A3 — Jahresübergänge und Kalenderrandfälle.
+describe("Kalenderrandfälle (HARDENING.md A3)", () => {
+  const vollzeit: Profil = {
+    wochenstunden: 40,
+    pensum: 100,
+    ferientage: 25,
+    startDate: "2020-01-01",
+    exitDate: null,
+    maxWeeklyHours: 45,
+  };
+
+  describe("Ferienanspruch am Jahresrand", () => {
+    it("Eintritt exakt am 01.01. gibt den vollen Jahresanspruch", () => {
+      const profil: Profil = { ...vollzeit, startDate: "2026-01-01" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(25);
+    });
+
+    it("Eintritt exakt am 31.12. gibt genau einen Monatsanteil (25/12 = 2.1)", () => {
+      const profil: Profil = { ...vollzeit, startDate: "2026-12-31" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(2.1);
+    });
+
+    it("Eintritt am 31.12. des VORjahres gibt im Folgejahr den vollen Anspruch", () => {
+      const profil: Profil = { ...vollzeit, startDate: "2025-12-31" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-06-30", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(25);
+    });
+
+    it("dokumentiert: exitDate kürzt den Anspruch NICHT (nur startDate geht ein)", () => {
+      // Bewusst festgehaltenes Ist-Verhalten, kein Wunschverhalten: wer am
+      // 31.01.2026 austritt, bekommt für 2026 trotzdem den vollen Anspruch.
+      // Siehe "Notizen des Loops" in HARDENING.md — eine anteilige Kürzung
+      // bei Austritt ist eine fehlende REGEL, kein Rechenfehler, und wird in
+      // diesem Loop bewusst nicht gebaut.
+      const profil: Profil = { ...vollzeit, startDate: "2020-01-01", exitDate: "2026-01-31" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(25);
+    });
+  });
+
+  describe("Kalenderwoche über den Jahreswechsel (KW 53/2026 → KW 1/2027)", () => {
+    // Mo 28.12.2026 – So 03.01.2027; Werktage sind Mo–Do (28.–31.12.) und
+    // Fr 01.01.2027 → 5 Werktage.
+    const eintraege = [
+      { date: "2026-12-28", typ: "arbeit" as const, von: "08:00", bis: "18:00", pauseMin: 0 },
+      { date: "2026-12-29", typ: "arbeit" as const, von: "08:00", bis: "18:00", pauseMin: 0 },
+      { date: "2026-12-30", typ: "arbeit" as const, von: "08:00", bis: "18:00", pauseMin: 0 },
+      { date: "2026-12-31", typ: "arbeit" as const, von: "08:00", bis: "18:00", pauseMin: 0 },
+      { date: "2027-01-01", typ: "arbeit" as const, von: "08:00", bis: "18:00", pauseMin: 0 },
+    ];
+
+    it("wochenUebersicht fasst die Woche zu EINEM Eintrag zusammen, nicht zu zwei Jahresteilen", () => {
+      const wochen = wochenUebersicht(eintraege, vollzeit, [], [], "2026-12-28", "2027-01-03");
+      expect(wochen).toHaveLength(1);
+      expect(wochen[0].montag).toBe("2026-12-28");
+      expect(wochen[0].arbeitsstunden).toBe(50);
+      expect(wochen[0].sollStunden).toBe(40);
+    });
+
+    it("die Überzeit der Woche wird über den Jahreswechsel hinweg als eine Woche gerechnet", () => {
+      const wochen = wochenUebersicht(eintraege, vollzeit, [], [], "2026-12-28", "2027-01-03");
+      expect(wochen[0].ueberzeit).toBe(5); // 50h − 45h
+      const k = kennzahlen({
+        from: "2026-12-28", to: "2027-01-03", heute: "2027-01-03",
+        eintraege, profil: vollzeit, changes: [], holidays: [], payouts: [],
+      });
+      // Eine einzige Woche über dem Limit, nicht zwei Teilwochen mit je 0.
+      expect(k.ueberzeit).toBe(5);
+      expect(k.ist).toBe(50);
+      expect(k.soll).toBe(40);
+    });
+
+    it("montagDerWoche liefert für den 01.01.2027 (Fr) den Montag des Vorjahres", () => {
+      expect(montagDerWoche(new Date("2027-01-01T00:00:00Z")).toISOString().split("T")[0]).toBe("2026-12-28");
+    });
+  });
+
+  describe("Schaltjahr", () => {
+    it("Februar 2028 (29 Tage, 21 Werktage) hat mehr Soll als Februar 2026 (28 Tage, 20 Werktage)", () => {
+      const feb2026 = kennzahlen({
+        from: "2026-02-01", to: "2026-02-28", heute: "2026-03-01",
+        eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+      });
+      const feb2028 = kennzahlen({
+        from: "2028-02-01", to: "2028-02-29", heute: "2028-03-01",
+        eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+      });
+      expect(feb2026.soll).toBe(160); // 20 × 8h
+      expect(feb2028.soll).toBe(168); // 21 × 8h
+    });
+
+    it("der 29.02.2028 ist ein normaler Werktag (Di) mit vollem Tagessoll", () => {
+      expect(sollStundenTag("2028-02-29", vollzeit, [], [])).toBeCloseTo(8, 5);
+    });
+  });
+
+  describe("Sommerzeitwechsel (letzter Sonntag im März/Oktober)", () => {
+    // Der Prozess läuft in Europe/Zurich; die Berechnung darf davon nicht
+    // abhängen. sollStundenTag/stundenAusEintrag rechnen bewusst in UTC bzw.
+    // auf Wanduhr-Minuten — diese Tests halten fest, dass der Wechsel weder
+    // das Datum verschiebt noch die Stundenberechnung verändert.
+    it("verschiebt kein Datum: der Umstellungssonntag bleibt Sonntag, der Folgetag Montag", () => {
+      expect(sollStundenTag("2026-03-29", vollzeit, [], [])).toBe(0); // So
+      expect(sollStundenTag("2026-03-30", vollzeit, [], [])).toBeCloseTo(8, 5); // Mo
+      expect(sollStundenTag("2026-10-25", vollzeit, [], [])).toBe(0); // So
+      expect(sollStundenTag("2026-10-26", vollzeit, [], [])).toBeCloseTo(8, 5); // Mo
+    });
+
+    it("Nachtschicht über Mitternacht liefert am Umstellungstag dasselbe wie an jedem anderen Tag", () => {
+      // 22:00–06:00 mit 30 Min Pause. Wanduhrzeit = 7.5h. In der Nacht auf den
+      // Frühjahrswechsel dauert die Schicht real 6.5h, auf den Herbstwechsel
+      // 8.5h — die Berechnung ist bewusst reine Wanduhrarithmetik und liefert
+      // in allen drei Fällen 7.5h. Bewusst festgehaltenes Ist-Verhalten, siehe
+      // "Notizen des Loops" in HARDENING.md.
+      const nacht = (datum: string) =>
+        kennzahlen({
+          from: datum, to: datum, heute: "2027-01-01",
+          eintraege: [{ date: datum, typ: "arbeit", von: "22:00", bis: "06:00", pauseMin: 30 }],
+          profil: vollzeit, changes: [], holidays: [], payouts: [],
+        }).ist;
+
+      expect(nacht("2026-03-28")).toBe(7.5); // Nacht auf den Frühjahrswechsel
+      expect(nacht("2026-10-24")).toBe(7.5); // Nacht auf den Herbstwechsel
+      expect(nacht("2026-06-13")).toBe(7.5); // gewöhnliche Nacht ohne Wechsel
+    });
+
+    it("kennzahlen über die Umstellungswoche liefert das unveränderte Wochensoll", () => {
+      // Mo 23.03. – So 29.03.2026 und Mo 19.10. – So 25.10.2026: je 5 Werktage.
+      const maerz = kennzahlen({
+        from: "2026-03-23", to: "2026-03-29", heute: "2026-03-29",
+        eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+      });
+      const oktober = kennzahlen({
+        from: "2026-10-19", to: "2026-10-25", heute: "2026-10-25",
+        eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+      });
+      expect(maerz.soll).toBe(40);
+      expect(oktober.soll).toBe(40);
+    });
+
+    it("eine Nachtschicht am Umstellungssamstag landet auf dem Samstag, nicht auf dem Sonntag", () => {
+      // Der Eintrag gehört dem Kalendertag seines von-Zeitpunkts; die
+      // Verschiebung über Mitternacht darf ihn nicht in den Folgetag kippen.
+      const k = kennzahlen({
+        from: "2026-03-28", to: "2026-03-28", heute: "2026-03-29",
+        eintraege: [{ date: "2026-03-28", typ: "arbeit", von: "22:00", bis: "06:00", pauseMin: 30 }],
+        profil: vollzeit, changes: [], holidays: [], payouts: [],
+      });
+      expect(k.ist).toBe(7.5);
+      expect(k.soll).toBe(0); // Samstag
+    });
   });
 });
