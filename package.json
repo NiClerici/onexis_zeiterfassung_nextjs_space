@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@next/swc-wasm-nodejs": "13.5.1",
+    "@playwright/test": "^1.62.1",
     "@types/node": "20.6.2",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "18.2.22",
