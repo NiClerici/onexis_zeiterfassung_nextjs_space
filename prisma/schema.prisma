@@ -172,11 +172,6 @@ model TimeEntry {
   von        String?
   bis        String?
   pauseMin   Int      @default(0)
-  // Wird durch projectId (MIGRATION.md Punkt 5) abgelöst — bleibt bis zur
-  // abschliessenden, destruktiven Migration bestehen (siehe Notizen des
-  // Loops), damit bereits migrierte Bestandsdaten nicht verloren gehen,
-  // bevor sichergestellt ist, dass nichts mehr darauf schreibt.
-  projekt    String?
   notiz      String?
   customerId String?
   projectId  String?

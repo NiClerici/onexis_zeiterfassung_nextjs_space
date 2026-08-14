@@ -200,9 +200,10 @@ export async function GET(req: Request) {
       );
       sheet1TotalHours += stunden;
       // Kunde/Projekt aus der Relation statt dem alten Freitext (MIGRATION.md
-      // Punkt 5) — entry.projekt bleibt als Fallback für Alt-Einträge, die vor
-      // der Migration angelegt und nie mit einem Kunden verknüpft wurden.
-      const kundeProjekt = [(entry as any).customer?.name, (entry as any).project?.name].filter(Boolean).join(" – ") || entry.projekt || "";
+      // Punkt 5, Abschluss — die projekt-Spalte ist inzwischen gedroppt;
+      // vor dem Drop per SQL verifiziert, dass 0 Zeilen unmigrierten Freitext
+      // ohne projectId hatten).
+      const kundeProjekt = [entry.customer?.name, entry.project?.name].filter(Boolean).join(" – ") || "";
       const row = ws1.addRow({
         date: fmtDate(d),
         weekday: weekdayNames[d.getDay()] ?? "",
