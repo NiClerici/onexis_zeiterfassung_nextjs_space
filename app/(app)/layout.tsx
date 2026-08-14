@@ -5,12 +5,16 @@ import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge } from "lucide-react";
+import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOff } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const baseTabs = [
   { href: "/calendar", icon: Calendar, labelKey: "nav.calendar" },
+  // Absenzanträge (MIGRATION.md Punkt 9) — für jede Rolle, auch admin/owner/
+  // manager brauchen Ferien; deshalb in baseTabs statt einer der
+  // rollen-gefilterten Listen unten.
+  { href: "/absences", icon: CalendarOff, labelKey: "nav.absences" },
   { href: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
   { href: "/profile", icon: UserCircle, labelKey: "nav.profile" },
 ];

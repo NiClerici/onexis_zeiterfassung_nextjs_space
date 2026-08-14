@@ -1047,13 +1047,103 @@ Keine Prisma-Migration nötig — reine Aggregation bereits vorhandener Daten.
 
 ---
 
-### - [ ] 9. Absenzen mit Genehmigung
+### - [x] 9. Absenzen mit Genehmigung
 
 Tabelle `AbsenceRequest` (orgId, userId, from, to, type, status, decidedBy,
 decidedAt, comment). Member stellt Antrag, Manager oder Admin genehmigt.
 Bei Genehmigung werden die TimeEntries automatisch erzeugt (bestehende
 `bulk-vacation`-Logik wiederverwenden). Team-Kalender mit Abwesenheiten und
 Warnung bei zu vielen gleichzeitig Abwesenden.
+
+**Ergebnis:** Vollständig umgesetzt, in zwei Commits (9a Backend, 9b UI +
+Nav). `AbsenceRequest` genau wie beschrieben (orgId, userId, fromDate,
+toDate, type, status, decidedBy, decidedAt, comment) — additive Migration,
+direkt angewendet. `decidedBy` bewusst keine Relation (gleiches Muster wie
+`TimeEntryAudit.changedBy`/`MonthLock.lockedBy`).
+
+- **Wiederverwendung von bulk-vacation, wie im Punkt-Text gefordert:** die
+  Kernlogik (Tagesrate je aktuellem Pensumsstand, Feiertage nie
+  überschrieben, Audit-Trail bei Updates) wurde aus
+  `app/api/time-entries/bulk-vacation/route.ts` nach `lib/absence-entries.ts`
+  extrahiert (`createAbsenceEntries()`) und für beliebige Absenztypen
+  parametrisiert (vorher hart auf `type: "ferien"` verdrahtet). Sowohl
+  bulk-vacation selbst als auch die neue Genehmigungs-Route rufen jetzt
+  dieselbe Funktion auf statt die Logik zu duplizieren — als
+  Regressionsschutz wurden die bestehenden `lib/month-locks.test.ts`-Tests
+  für bulk-vacation nach der Extraktion erneut grün verifiziert
+  (unverändertes Verhalten bestätigt, nicht nur angenommen).
+- **`app/api/absence-requests/route.ts`:** POST (Self-Service, jede Rolle —
+  auch admin/owner/manager brauchen Ferien; geprüfte Absenztypen
+  `ferien`/`krank`/`militaer`/`unbezahlt`, nicht `arbeit`/`feiertag`; ein
+  Antrag für einen bereits gesperrten Monat wird schon beim Stellen
+  abgelehnt, Punkt 6e). GET mit `scope=mine` (eigene Anträge) und
+  `scope=team` (Genehmigungs-Warteschlange für owner/admin/manager, eigener
+  Antrag ausgeschlossen). PATCH (`action=approve`/`reject`) nur für
+  sichtbare Mitglieder UND nie für den eigenen Antrag — Selbst-Genehmigung
+  wäre eine Rechteausweitung, dieselbe Vorsicht wie bei den
+  Team-Schutzregeln in Punkt 4c. DELETE (Zurückziehen) nur durch die
+  antragstellende Person, nur solange der Antrag noch `offen` ist.
+- **Team-Kalender (`app/api/absences/calendar/route.ts`):** bewusst eine
+  TAGESLISTE statt eines vollen Monatsrasters — deckt den geforderten
+  Zweck ("auf einen Blick sehen, ob zu viele gleichzeitig fehlen") ab, ohne
+  die Komplexität des persönlichen Kalenders für eine Team-Übersicht zu
+  duplizieren. Liest direkt aus `TimeEntry` (nicht aus `AbsenceRequest`),
+  damit auch manuell erfasste Absenzen erscheinen, nicht nur über den
+  neuen Antragsweg entstandene. Warnung ab 30% gleichzeitig abwesenden,
+  sichtbaren Mitgliedern — dokumentierte, aber willkürliche Praxisschwelle
+  (Anteil statt fester Zahl, damit sie für ein 5er- wie ein 50er-Team
+  gleichermassen sinnvoll greift), analog zu den bereits dokumentierten
+  Praxis-Konstanten in 6c/6d/Punkt 8.
+- **`lib/access.ts` bekam `listVisibleUserIds()`:** dieselbe manager/
+  admin-Sichtbarkeits-Hierarchie wie `canSeeUser()`, aber als Liste statt
+  Einzelprüfung — war zu diesem Zeitpunkt bereits DREIMAL fast identisch
+  dupliziert (`/api/team` aus Punkt 8, `/api/export?scope=org` aus Punkt 7,
+  jetzt neu `/api/absence-requests`). Alle vier Stellen (inkl. der neuen
+  Kalender-Route) auf den gemeinsamen Helfer umgestellt — mit
+  Regressionstests verifiziert (`lib/team-route.test.ts`,
+  `lib/export-routes.test.ts`, `lib/month-locks.test.ts` bleiben grün).
+- **UI (`app/(app)/absences/page.tsx`):** neue Karte „Neuer Antrag"
+  (Zeitraum, Typ, Notiz) und „Meine Anträge" (Status-Badge, Zurückziehen-
+  Button solange offen) für JEDE Rolle. Zusätzlich für owner/admin/manager:
+  „Zu genehmigen" (Genehmigen/Ablehnen-Buttons mit Toast-Rückmeldung, wie
+  viele TimeEntries erzeugt/übersprungen wurden) und „Team-Kalender"
+  (Monatsauswahl, pro Tag die abwesenden Personen als Badges, rot
+  hervorgehoben bei Überschreiten der Warnschwelle). Neuer Nav-Tab
+  „Absenzen" — bewusst in `baseTabs` (für alle Rollen sichtbar), nicht in
+  einer der rollen-gefilterten Listen, da auch admin/owner/manager Anträge
+  stellen können müssen.
+
+Tests: 16 neue in `lib/absence-requests.test.ts` (Antrag stellen/
+validieren inkl. ungültiger Typen und gesperrter Monate, Sichtbarkeits-
+Scoping für `scope=mine`/`scope=team`, Selbst-Genehmigung verboten,
+Genehmigung ausserhalb des eigenen Teams verboten, TimeEntries werden bei
+Genehmigung tatsächlich mit korrekten Stunden erzeugt, keine bei Ablehnung,
+Zurückziehen nur durch die antragstellende Person und nur solange offen,
+Kalender-Warnschwelle). 170 Tests insgesamt grün.
+
+Browser-verifiziert (Playwright, zwei echte Logins): Mia stellt einen
+Ferienantrag (09.–10.11.2026) und einen zweiten, den sie danach selbst
+zurückzieht (per SQL bestätigt: der zurückgezogene Antrag existiert
+danach nicht mehr in der DB, der andere bleibt `offen`); Marco (ihr
+Vorgesetzter) sieht den offenen Antrag in „Zu genehmigen" und genehmigt
+ihn — direkter DB-Check bestätigt genau zwei neue `TimeEntry`-Zeilen
+(09./10.11., `type=ferien`, korrekt anteilige Stunden nach Mias Pensum)
+und den Antragsstatus `genehmigt`; der Team-Kalender für November 2026
+zeigt Mia danach korrekt als abwesend. Keine Konsolenfehler in beiden
+Durchläufen. **Ein echter Test-Skript-Fehler beim eigenen Verifizieren
+gefunden und korrigiert** (kein Produktbug): ein erster Durchlauf
+selektierte Buttons über eine zu grobe `querySelectorAll("div")`-Suche,
+die auch weit entfernte Vorfahren-Divs traf und dadurch versehentlich
+falsche Buttons anklickte — der Erfolg wurde nur an Text-Vorhandensein
+geprüft, nicht an der tatsächlichen Zustandsänderung, sodass ein
+fehlgeschlagener Klick unbemerkt geblieben wäre. Nach Umstellung auf
+präzise, klassenbasierte Playwright-Locator (`div.rounded-xl` kombiniert
+mit `hasText`, exakte `button[title=...]`-Selektoren) und Verifikation der
+tatsächlichen Zustandsänderung (Zeilenanzahl vorher/nachher, nicht nur
+Text-Vorhandensein) lief die Verifikation sauber durch. Testdaten
+(`AbsenceRequest`- und `TimeEntry`-Zeilen) danach vollständig per SQL
+entfernt (Baseline 66 `TimeEntry`- und 0 `AbsenceRequest`-Zeilen
+bestätigt).
 
 ---
 
@@ -1360,3 +1450,38 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   „Ist"-Stunden über `kennzahlen()`/`teamKennzahlen()` prüfen wollen: das
   Testdatum muss immer vor dem tatsächlichen `new Date()`-Zeitpunkt der
   Testausführung liegen, nicht nur irgendein plausibles Kalenderdatum.
+- Punkt 9: die in Punkt 8 als offene Lücke notierte Idee — eine
+  „sichtbare Mitglieder"-Logik zu extrahieren, statt sie pro Route zu
+  duplizieren — wurde hier tatsächlich umgesetzt, allerdings anders als
+  dort skizziert: nicht als eigener API-Endpunkt, sondern als Helfer-
+  funktion `listVisibleUserIds()` in `lib/access.ts`, direkt in den
+  Routen aufgerufen (`/api/team`, `/api/export`, `/api/absence-requests`,
+  `/api/absences/calendar`). Das war zum jetzigen Zeitpunkt der bessere
+  Schnitt: alle vier Aufrufer brauchen die Liste ohnehin serverseitig für
+  eigene weitere Prisma-Queries, ein zusätzlicher HTTP-Roundtrip über
+  einen eigenen Endpunkt hätte nur Overhead ohne echten Nutzen gebracht.
+  Für künftige Punkte, die eine CLIENT-seitige Personenliste brauchen
+  (z.B. ein Personen-Picker in einer UI), bleibt ein dünner
+  `/api/team/members`-artiger Endpunkt, der `listVisibleUserIds()` intern
+  nutzt, weiterhin eine sinnvolle spätere Ergänzung — aber erst, wenn ein
+  konkreter UI-Bedarf dafür entsteht (siehe die bereits in Punkt 7
+  dokumentierte, weiterhin offene Lücke: manager haben noch keinen
+  Personen-Picker für Einzelexporte in `profile/page.tsx`).
+- Punkt 9, methodischer Fund bei der eigenen Verifikation (kein
+  Produktbug, aber lehrreich): ein erster Playwright-Durchlauf nutzte
+  `Array.from(document.querySelectorAll("div"))` kombiniert mit
+  `.find(el => el.textContent.includes(...))`, um eine Zeile zu treffen —
+  das matcht in der Dokumentreihenfolge das ERSTE div, dessen gesamter
+  (verschachtelter) Textinhalt den gesuchten String enthält, was bei
+  React-Komponenten mit tief verschachtelten divs fast immer ein
+  Vorfahren-Element weit oben im Baum ist, nicht die eigentliche Zeile —
+  der Klick auf `buttons[0]` innerhalb dieses Vorfahren trifft dann einen
+  komplett anderen, meist unbeabsichtigten Button. Der Fehler blieb beim
+  ersten Durchlauf unbemerkt, weil die Erfolgsprüfung nur "steht der Text
+  noch auf der Seite" testete, nicht "hat sich der erwartete Zustand
+  geändert". Für künftige Playwright-Skripte in diesem Loop: Zeilen über
+  eine spezifische, in der Komponente auch tatsächlich verwendete
+  CSS-Klasse treffen (hier `div.rounded-xl` statt generisch `div`),
+  Buttons wenn möglich über ihr `title`-Attribut statt Index ansteuern,
+  und Erfolg immer über eine echte Zustandsänderung (Zeilenanzahl vorher/
+  nachher, DB-Query) verifizieren — nie nur über Text-Vorhandensein.
