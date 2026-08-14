@@ -1147,7 +1147,7 @@ bestätigt).
 
 ---
 
-### - [ ] 10. Aufräumen und Sicherheit
+### - [x] 10. Aufräumen und Sicherheit
 
 - `next` auf eine gepatchte Version aktualisieren (14.2.28 hat eine bekannte
   Sicherheitslücke). Danach vollen Regressionspass.
@@ -1162,6 +1162,86 @@ bestätigt).
 - **Keine Drittdienste ausserhalb der Schweiz**: Fonts selbst hosten statt
   Google-CDN, kein US-Analytics, kein US-Error-Tracking. Das ist Teil des
   Produktversprechens und darf nicht durch bequeme Defaults unterlaufen werden.
+
+**Ergebnis:** Alle fünf Bullets umgesetzt, in vier Commits (10a–10d, je
+einer pro thematischem Block).
+
+- **10a — `next` gepatcht:** 14.2.28 → 14.2.35 (aktuellster 14.x-Patch,
+  bewusst keine Major-Migration — der Punkt-Text verlangt "eine gepatchte
+  Version", keinen Versionssprung; ein Wechsel auf 15/16 wäre ein eigener,
+  riskanterer Punkt). `eslint-config-next` im selben Zug von einer zuvor
+  falsch gepinnten 15.3.0 (inkonsistent zur next-Major-Version, vermutlich
+  ein Alt-Fehler aus einem früheren, nie fertig durchgeführten
+  Upgrade-Versuch) auf 14.2.35 ausgerichtet. Voller Regressionspass:
+  `typecheck` sauber, alle Tests grün, `npm run build` erfolgreich, dazu ein
+  Playwright-Smoke-Test über sieben zentrale Seiten ohne Konsolenfehler —
+  bewusst über das in anderen Punkten übliche Mass hinaus, weil ein
+  Framework-Patch potenziell JEDE Seite betrifft, nicht nur eine.
+- **10b — Doppelte Abhängigkeiten entfernt:** vor jeder Entfernung per grep
+  über `app/`, `components/`, `lib/`, `scripts/` geprüft (nicht nur
+  angenommen) — `plotly.js`, `react-plotly.js`, die beiden zugehörigen
+  `@types/*`-Pakete, `chart.js`, `react-chartjs-2`, `mapbox-gl`, `formik`
+  und `yup` hatten alle null Treffer und wurden ersatzlos entfernt.
+  `jotai`, `zustand`, `swr` ebenfalls entfernt (auch sie null Treffer).
+  `react-hook-form`/`zod`/`@tanstack/react-query` bleiben installiert wie
+  im Punkt-Text vorgegeben — obwohl auch sie im aktiven App-Code aktuell
+  nirgends direkt verwendet werden (die App arbeitet durchgehend mit
+  `useState`+`fetch` statt eines Formular-/State-Frameworks); einzige
+  Verwenderin von `react-hook-form` ist `components/ui/form.tsx`, ein
+  shadcn-Scaffold-Bestandteil, der selbst von keiner einzigen Seite
+  importiert wird. Das Entfernen dieses ungenutzten UI-Kit-Scaffolds (und
+  der zugehörigen `@radix-ui/*`-Pakete) ist NICHT Teil dieses explizit
+  aufgezählten Punktes und deshalb bewusst unangetastet geblieben.
+  `browserslist` im selben Commit auf die vorgegebene Liste ohne `ie >= 11`
+  gesetzt. Bundle-Grössen nach `npm run build` unverändert — bestätigt,
+  dass die entfernten Pakete auch im Client-Bundle nirgends mitgezogen
+  wurden, das Risiko dieser Aufräumaktion war also von Anfang an gering.
+- **10c — Security-Header und ein wichtiger Nebenfund:** `next.config.js`
+  bekam eine `headers()`-Funktion mit CSP, HSTS, `X-Frame-Options`,
+  `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` für
+  jede Route. `script-src`/`style-src` brauchen `'unsafe-inline'`
+  (Next.js App Router streamt Hydration-Daten über inline `<script>` ohne
+  Nonce in diesem Setup; praktisch jede Karte in der App nutzt
+  `style={{ boxShadow: ... }}` statt Tailwind-Klassen) — dokumentiert als
+  bewusste, aber nachvollziehbare Abschwächung, eine Nonce-basierte
+  striktere CSP wäre eine sinnvolle spätere Verschärfung ausserhalb dieses
+  Punktes. `connect-src 'self'` genügt, per grep bestätigt (kein
+  Client-Code ruft `fetch()` gegen eine absolute externe URL auf).
+  **Beim Prüfen auf externe Ressourcen zwei aktive, aus dem ursprünglichen
+  Hosting-Plattform-Scaffold stammende US-Drittdienste gefunden und
+  entfernt, keine vom ONEXIS-Produkt selbst hinzugefügt:** `app/layout.tsx`
+  lud bei JEDEM Seitenaufruf unbedingt ein Chat-Widget-Skript von
+  `https://apps.abacus.ai` (ohne Consent, ohne Produktbezug); `next.config.js`
+  injizierte — nur bei `NEXT_OUTPUT_MODE=standalone` — eine
+  Base64-kodierte Datei, die `window.onerror`/`unhandledrejection`/
+  `console.error` hookt und Stacktraces plus aktuelle URL per
+  `sendBeacon` an `/__abacus/client-error` schickt, eine Route, die in
+  dieser Codebasis gar nicht existiert (kein zugehöriger API-Handler) —
+  vermutlich von der Hosting-Infrastruktur selbst abgefangen. Fehler-
+  meldungen können Nutzerdaten enthalten; genau die Art "bequemer
+  Default", vor der der Punkt-Text ausdrücklich warnt. Beide entfernt.
+- **10d — Fonts:** `next/font/google` lädt die drei verwendeten Schriften
+  (DM Sans, Plus Jakarta Sans, JetBrains Mono) beim BUILD herunter und
+  liefert sie danach unter der eigenen Domain aus
+  (`/_next/static/media/*.woff2`, per echtem HTTP-Response verifiziert) —
+  der Browser einer nutzenden Person kontaktiert zu keinem Zeitpunkt
+  `fonts.googleapis.com`/`fonts.gstatic.com`. Das erfüllt "Fonts selbst
+  hosten statt Google-CDN" bereits; eine zusätzliche Umstellung auf
+  `next/font/local` mit von Hand eingecheckten `.woff2`-Dateien würde
+  keinen zusätzlichen Datenschutz-Nutzen bringen (kein Laufzeit-Kontakt zu
+  Google in beiden Varianten) und nur unnötiges Lizenz-/Versionsrisiko
+  einführen — bewusst nicht umgestellt, Entscheidung als Kommentar direkt
+  bei den Font-Imports dokumentiert. Keine weiteren Analytics-/Error-
+  Tracking-SDKs im Repo gefunden (Sentry, PostHog, Google Analytics,
+  Vercel Analytics, etc. — alle mit null Treffern geprüft).
+
+Voller Regressionspass nach jedem Unterschritt: `npm run typecheck` sauber,
+alle 170 Tests grün, `npm run build` erfolgreich, Playwright-Verifikation
+mit echten Logins über sieben zentrale Seiten (inkl. eines Recharts-
+SVG-Charts als CSP-Stresstest) — keine Konsolenfehler, keine CSP-
+Verletzungen, das entfernte Abacus-Skript nachweislich nicht mehr im DOM.
+Keine Prisma-Migration nötig — reines Dependency-/Config-/Security-Aufräumen,
+keine Datenmodelländerung.
 
 ---
 
@@ -1485,3 +1565,34 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   Buttons wenn möglich über ihr `title`-Attribut statt Index ansteuern,
   und Erfolg immer über eine echte Zustandsänderung (Zeilenanzahl vorher/
   nachher, DB-Query) verifizieren — nie nur über Text-Vorhandensein.
+- Punkt 10, wichtigster Fund der ganzen Migration bisher (kein Blocker,
+  aber sicherheitsrelevant genug, um hier besonders hervorgehoben zu
+  werden): der ursprüngliche App-Scaffold enthielt zwei aktive, unauffällig
+  eingebettete US-Drittdienst-Kontakte — ein bei jedem Seitenaufruf
+  geladenes Chat-Widget-Skript von `apps.abacus.ai` in `app/layout.tsx`
+  und eine als Base64-Blob in `next.config.js` versteckte
+  Fehler-Reporting-Injektion, die Stacktraces (potenziell mit Nutzerdaten)
+  per `sendBeacon` an eine in dieser Codebasis nicht existierende Route
+  schickte. Beide waren vermutlich Standard-Bestandteil der
+  Hosting-Plattform, auf der dieses Projekt ursprünglich aufgesetzt wurde,
+  nicht bewusst vom ONEXIS-Produktteam hinzugefügt — genau die Art
+  "bequemer Default", die Punkt 10 im Text ausdrücklich als Gefahr nennt
+  ("darf nicht durch bequeme Defaults unterlaufen werden"). Für künftige
+  Punkte (v.a. 11, Deployment, und 12, Verkaufsfähigkeit/Rechtstexte)
+  wichtig: bevor irgendeine Aussage über Datenstandort/Drittdienste
+  gegenüber Kund*innen gemacht wird (Datenschutzerklärung, AVV), lohnt
+  sich ein erneuter, genauso gründlicher Scan wie hier — nicht nur der
+  offensichtliche Code, sondern auch generierte/injizierte Build-Artefakte
+  und Plattform-Scaffolding, die beim ursprünglichen Aufsetzen des Projekts
+  unbemerkt mitgekommen sein könnten.
+- Punkt 10, Scope-Entscheidung: `react-hook-form`, `zod` und
+  `@tanstack/react-query` bleiben installiert (wie im Punkt-Text
+  vorgegeben), werden aber aktuell nirgends im aktiven App-Code verwendet
+  — nur vom nie importierten `components/ui/form.tsx`-Scaffold. Der
+  gesamte ungenutzte `components/ui/`-Ordner (shadcn-artiges UI-Kit mit
+  vielen `@radix-ui/*`-Abhängigkeiten) wurde bewusst NICHT angefasst, da
+  er nicht Teil der explizit aufgezählten Bullets dieses Punktes ist.
+  Falls ein künftiger Punkt eine grössere UI-Bereinigung vorsieht, wäre
+  das der richtige Ort, diesen toten Code (und die zugehörigen
+  `@radix-ui/*`-Pakete) ebenfalls zu entfernen — bisher bewusst
+  unangetastet gelassen, nicht übersehen.
