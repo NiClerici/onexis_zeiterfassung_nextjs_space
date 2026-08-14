@@ -680,6 +680,59 @@ Pause unter 15 Minuten bei über 5.5h, unter 30 Minuten bei über 7h, unter
 11 Stunden zum Vortag; Sonntags- oder Nachtarbeit ohne Markierung. Im Kalender
 als nicht-blockierende Warnung am Tag anzeigen. Vollständig getestet.
 
+**Ergebnis:** `pruefeCompliance(eintraegeEinesTages, eintraegeVortag)` genau
+wie beschrieben in `lib/compliance.ts` (kein Prisma, kein DB-Zugriff, gleiches
+Trennungsprinzip wie `lib/calc.ts`). Liefert eine Liste typisierter
+`ComplianceViolation` (`pause_zu_kurz` | `tagesarbeitszeit_ueberschritten` |
+`ruhezeit_zu_kurz` | `sonntagsarbeit` | `nachtarbeit`) mit deutschem
+Klartext-Message pro Verstoss — rein informativ, blockiert nichts.
+
+Pausenregel (Art. 15 ArG) bewusst als Schwellenwert, nicht additiv: die
+höchste erreichte Stufe (>9h→60min, sonst >7h→30min, sonst >5.5h→15min)
+bestimmt die Mindestpause, nicht die Summe aller Stufen. Tageshöchstgrenze
+als dokumentierter Praxis-Richtwert (12.5h netto, SECO-Wegleitung) umgesetzt
+— das Gesetz selbst kennt primär die WÖCHENTLICHE Höchstarbeitszeit
+(`Profil.maxWeeklyHours`, Punkt 6a); dieser Tageswert ist eine bewusst
+gekennzeichnete Vereinfachung, kein Gesetzeszitat, gleiche Vorgehensweise wie
+schon beim Feiertags-Basissatz in 6c. Ruhezeit (Art. 15a ArG, 11h) vergleicht
+den spätesten Schichtende-Zeitpunkt des Vortags mit dem frühesten
+Schichtbeginn des aktuellen Tages als absolute Zeitpunkte (Datum + Uhrzeit),
+inkl. korrekter Behandlung einer Vortags-Nachtschicht über Mitternacht.
+Sonntags-/Nachtarbeit (Art. 16–18 ArG, Nachtfenster 23:00–06:00) wird
+erkannt, sobald ein `arbeit`-Eintrag dort hineinfällt — es gibt (noch) kein
+separates "bewilligt/markiert"-Feld im Schema, die Warnung macht genau
+diese fehlende Markierung sichtbar (daher "ohne Markierung" im Punkt-Text).
+Absenzen (`ferien`/`krank`/…) zählen nirgends als Arbeitszeit.
+
+Kalender (`app/(app)/calendar/page.tsx`) berechnet pro Tag die Verstösse aus
+den bereits geladenen Monatseinträgen (Vortag = derselbe Monat, Tag−1) und
+zeigt bei Verstössen ein kleines gelbes Warndreieck mit den Verstoss-Texten
+als Tooltip — rein informativ, es verhindert weder das Anlegen noch das
+Speichern eines Eintrags. Bekannte, dokumentierte Einschränkung: am 1. eines
+Monats fehlen die Einträge des Vormonats (nur der aktuelle Monat wird
+geladen), die Ruhezeitprüfung zum Vortag greift dort deshalb nicht — gleiche
+Klasse von Monatsgrenzen-Einschränkung wie schon bei `soll`/`ist` in
+Punkt 1 und der wöchentlichen Überzeit in 6a.
+
+Tests: `lib/compliance.test.ts` (17 Tests) — alle drei Pausenschwellen
+einzeln (mit und ohne Verstoss), Tageshöchstgrenze exakt an der 12.5h-Grenze
+und knapp darüber, Ruhezeit zu kurz/ausreichend/nicht prüfbar (kein Vortag)
+und mit einer Vortags-Nachtschicht über Mitternacht, Sonntagsarbeit an einem
+echten Sonntag vs. einem Werktag, Nachtarbeit-Überschneidung vs. Tagschicht,
+leere Eingabe, Absenzen zählen nicht, mehrere gleichzeitige Verstösse.
+
+Browser-verifiziert (manager@onexis.test, Kalender, Sonntag 03.05.2026 —
+bewusst ein leerer Tag ausserhalb bestehender Testdaten, per Monats-Picker
+angesteuert und der erreichte Monat vor dem Klick verifiziert): Arbeitseintrag
+08:00–17:00 ohne Pause angelegt → Warndreieck erscheint mit Tooltip
+"Bei 9.0h Arbeitszeit sind mindestens 30 Min. Pause vorgeschrieben (erfasst:
+0 Min.) · Sonntagsarbeit erfasst — bewilligungspflichtig, sofern nicht
+ausdrücklich freigegeben." — beide erwarteten Verstösse korrekt gleichzeitig
+erkannt. Keine Konsolenfehler. Testdaten per SQL entfernt (Baseline 66
+`TimeEntry`-Zeilen bestätigt).
+
+Keine Prisma-Migration nötig — reine Funktion + UI, kein neues Schema.
+
 **6e. Monatsabschluss.** Tabelle `MonthLock` (orgId, userId, year, month,
 lockedAt, lockedBy). Gesperrte Monate sind für `member` read-only; `admin` kann
 entsperren, was im Audit-Trail landet.
@@ -946,3 +999,13 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   `Holiday`-Tabelle (org-weiter, automatisch das Soll reduzierender Kalender)
   — beide bewusst nicht zusammengeführt, da sie unterschiedliche Dinge
   ausdrücken (persönlicher Eintrag vs. organisationsweiter Fakt).
+- Punkt 6d: die Tageshöchstgrenze (12.5h) und die Nachtzeitspanne
+  (23:00–06:00) sind wie der Feiertags-Basissatz in 6c bewusst dokumentierte
+  Praxis-Vereinfachungen, keine wörtlichen Gesetzeszitate — falls das in
+  einem späteren Punkt (z.B. 12, Verkaufsfähigkeit/Rechtstexte) genauer
+  werden muss, zuerst dort nachschärfen, nicht rückwirkend hier. Ausserdem:
+  die Compliance-Prüfung im Kalender rechnet aktuell nur mit den bereits
+  geladenen Monatsdaten — bekommt `/admin/holidays` oder ein künftiger
+  Punkt einen Jahres- oder Wochenview, sollte die Ruhezeitprüfung an
+  Monatsgrenzen (aktuell: 1. eines Monats ungeprüft) nochmals angeschaut
+  werden, statt die Einschränkung stillschweigend fortzuschreiben.

@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ChevronRight, X, CalendarClock, Palmtree } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, CalendarClock, Palmtree, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
-import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput, type HolidayInput } from "@/lib/calc";
+import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput, type HolidayInput, type EintragMitDatum } from "@/lib/calc";
+import { pruefeCompliance } from "@/lib/compliance";
 import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
 
 interface UserProfile {
@@ -223,6 +224,20 @@ export default function CalendarPage() {
   const getHolidayForDay = (day: number): Holiday | null => {
     const dateStr = buildDateStr(day);
     return holidays.find((h) => h.date === dateStr) ?? null;
+  };
+
+  const toEintragMitDatum = (dateStr: string, dayEntries: DayTimeEntry[]): EintragMitDatum[] =>
+    dayEntries.map((e) => ({ date: dateStr, typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }));
+
+  // Nicht-blockierende ArG-Compliance-Warnungen pro Tag (MIGRATION.md Punkt
+  // 6d). Bekannte Einschränkung: am 1. eines Monats fehlen die Einträge des
+  // Vormonats (nur der aktuelle Monat wird geladen) — die Ruhezeitprüfung
+  // zum Vortag greift dort deshalb nicht.
+  const getComplianceViolations = (day: number) => {
+    const dateStr = buildDateStr(day);
+    const heute = toEintragMitDatum(dateStr, getEntriesForDay(day));
+    const vortag = day > 1 ? toEintragMitDatum(buildDateStr(day - 1), getEntriesForDay(day - 1)) : [];
+    return pruefeCompliance(heute, vortag);
   };
 
   const getTagesSoll = (day: number): number => {
@@ -499,6 +514,7 @@ export default function CalendarPage() {
               const isWorkday = weekday !== 0 && weekday !== 6;
               const isMissing = dayEntries.length === 0 && isWorkday && tagesSoll > 0;
               const holiday = getHolidayForDay(day);
+              const violations = dayEntries.length > 0 ? getComplianceViolations(day) : [];
 
               return (
                 <button
@@ -507,6 +523,11 @@ export default function CalendarPage() {
                   title={holiday ? `${holiday.name}${holiday.halfDay ? " (halber Tag)" : ""}` : undefined}
                   className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm hover:bg-accent cursor-pointer ${isToday(day) ? 'ring-2 ring-primary/30' : ''} ${holiday ? 'bg-purple-50 dark:bg-purple-950/30' : ''}`}
                 >
+                  {violations.length > 0 && (
+                    <span className="absolute top-0.5 right-0.5" title={violations.map((v) => v.message).join(" · ")}>
+                      <AlertTriangle className="w-3 h-3 text-amber-500" />
+                    </span>
+                  )}
                   <span className={`font-medium ${isToday(day) ? 'text-primary font-bold' : holiday ? 'text-purple-600' : di >= 5 ? 'text-muted-foreground/60' : ''}`}>
                     {day}
                   </span>
