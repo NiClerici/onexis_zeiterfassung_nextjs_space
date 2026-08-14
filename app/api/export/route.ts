@@ -27,6 +27,7 @@ function buildProfil(membership: any): Profil {
     startDate: membership?.startDate ?? null,
     exitDate: membership?.exitDate ?? null,
     ferientage: membership?.vacationDays ?? 25,
+    maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,
   };
 }
 
@@ -97,7 +98,7 @@ export async function GET(req: Request) {
   try {
     const { userId, orgId } = await requireOrg();
 
-    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } }, include: { org: true } });
     if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
 
     const url = new URL(req.url);
@@ -148,7 +149,8 @@ export async function GET(req: Request) {
 
     const allPayouts = await prisma.overtimePayout.findMany({ where: { userId, orgId } });
     const totalPaidOutHours = allPayouts.reduce((s, p) => s + p.hours, 0);
-    const netOvertime = k.ueberzeit;
+    // Überstunden (Art. 321c OR, vertraglich) netto nach Auszahlungen.
+    const netOvertime = k.ueberstunden;
     const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
 
     // Stunden je Kunde im Zeitraum (arbeit-Einträge mit customerId), für Sheet 2
@@ -290,11 +292,15 @@ export async function GET(req: Request) {
     if (totalPaidOutHours > 0) {
       summaryRows.push(
         { label: "Ausbezahlte Überstunden", value: `−${totalPaidOutHours.toFixed(1)}h` },
-        { label: "Überzeit (netto)", value: `${netOvertime >= 0 ? "+" : ""}${netOvertime.toFixed(1)}h`, bold: true, color: netOvertime >= 0 ? "FF16A34A" : "FFDC2626" },
+        { label: "Überstunden (netto)", value: `${netOvertime >= 0 ? "+" : ""}${netOvertime.toFixed(1)}h`, bold: true, color: netOvertime >= 0 ? "FF16A34A" : "FFDC2626" },
       );
     }
 
     summaryRows.push(
+      { label: "", value: "" },
+      // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — eigener Begriff,
+      // unabhängig von Überstunden/Auszahlungen (MIGRATION.md Punkt 6a).
+      { label: `Überzeit (> ${profil.maxWeeklyHours}h/Woche)`, value: `${k.ueberzeit.toFixed(1)}h`, bold: true, color: k.ueberzeit > 0 ? "FFDC2626" : "FF16A34A" },
       { label: "", value: "" },
       { label: "Kundenstunden (Total)", value: `${k.kundenstunden.toFixed(1)}h` },
       { label: "Verrechnungsgrad", value: `${k.verrechnungsgrad.toFixed(1)}%` },

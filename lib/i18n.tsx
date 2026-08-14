@@ -142,7 +142,11 @@ const translations: Record<string, string> = {
   "analytics.to": "Bis",
   "analytics.h": "h",
   "analytics.noData": "Keine Daten für diesen Zeitraum",
-  "analytics.overtime": "Überzeit",
+  "analytics.overtime": "Überstunden",
+  // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — eigener Begriff,
+  // getrennt von Überstunden (MIGRATION.md Punkt 6a).
+  "analytics.weeklyOvertime": "Überzeit",
+  "analytics.weeklyOvertimeHint": "Stunden über der gesetzlichen Höchstarbeitszeit (Art. 12/13 ArG), pro Kalenderwoche berechnet.",
   "analytics.vacationBalance": "Feriensaldo",
   "analytics.totalVacation": "Total Ferientage",
   "analytics.usedVacation": "Bezogen",
@@ -158,7 +162,7 @@ const translations: Record<string, string> = {
   "analytics.forecastHint": "Rein informativ — berücksichtigt vorerfasste zukünftige Einträge im gewählten Zeitraum.",
   // Overtime payouts
   "profile.overtimePayouts": "Überstunden-Auszahlungen",
-  "profile.overtimePayoutsDesc": "Hier kannst du ausbezahlte Überstunden erfassen. Diese werden vom Überzeitsaldo abgezogen.",
+  "profile.overtimePayoutsDesc": "Hier kannst du ausbezahlte Überstunden erfassen. Diese werden vom Überstundensaldo abgezogen.",
   "profile.payoutDate": "Datum der Auszahlung",
   "profile.payoutHours": "Ausbezahlte Stunden",
   "profile.payoutNote": "Notiz (optional)",
@@ -167,7 +171,7 @@ const translations: Record<string, string> = {
   "profile.noPayouts": "Keine Auszahlungen erfasst",
   "profile.payoutSaved": "Auszahlung erfasst!",
   "analytics.paidOutOvertime": "Ausbezahlte Überstunden",
-  "analytics.netOvertime": "Überzeit (netto)",
+  "analytics.netOvertime": "Überstunden (netto)",
   // Profile
   "profile.title": "Profil",
   "profile.personalInfo": "Persönliche Daten",

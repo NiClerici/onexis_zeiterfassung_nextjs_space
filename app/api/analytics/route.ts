@@ -24,6 +24,7 @@ function buildProfil(membership: any): Profil {
     startDate: membership?.startDate ?? null,
     exitDate: membership?.exitDate ?? null,
     ferientage: membership?.vacationDays ?? 25,
+    maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,
   };
 }
 
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
   try {
     const { userId, orgId } = await requireOrg();
 
-    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+    const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } }, include: { org: true } });
     if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
 
     const url = new URL(req.url);
@@ -145,7 +146,11 @@ export async function GET(req: Request) {
       holidays: currentDailyRate > 0 ? Math.round((holidayHours / currentDailyRate) * 10) / 10 : 0,
       overtime: overtimeGross,
       paidOutHours: Math.round(totalPaidOutHours * 10) / 10,
-      netOvertime: k.ueberzeit,
+      // Überstunden (Art. 321c OR, vertraglich) — netto nach Auszahlungen.
+      netOvertime: k.ueberstunden,
+      // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — separater Begriff,
+      // siehe lib/calc.ts KennzahlenResult.ueberzeit (MIGRATION.md Punkt 6a).
+      weeklyOvertime: k.ueberzeit,
       // Forecast fields (für Prognose-Info-Box)
       futureHours: k.geplantZukunft,
       fullTargetHours: k.sollGesamt,

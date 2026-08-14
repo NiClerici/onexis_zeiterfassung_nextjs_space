@@ -12,7 +12,7 @@ export async function GET() {
 
     const [user, membership] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId } }),
-      prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } }),
+      prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } }, include: { org: true } }),
     ]);
 
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -25,6 +25,9 @@ export async function GET() {
       baseWeeklyHours: membership?.baseWeeklyHours ?? null,
       basePensum: membership?.basePensum ?? null,
       vacationDays: membership?.vacationDays ?? 25,
+      // Gesetzliche Höchstarbeitszeit der Organisation (Art. 12/13 ArG,
+      // MIGRATION.md Punkt 6a) — für die Kalender-Kennzahlenberechnung.
+      maxWeeklyHours: (membership as any)?.org?.maxWeeklyHours ?? 45,
       startDate: membership?.startDate?.toISOString?.() ?? null,
       // Nur lesend — Austrittsdatum wird ausschliesslich über /admin/team
       // gesetzt (MIGRATION.md Punkt 4c), nicht von der Person selbst.

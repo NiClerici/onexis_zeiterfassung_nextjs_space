@@ -494,6 +494,50 @@ Migrationsstrategie wie bei Punkt 3.
 50 Stunden, Art. 12/13 ArG), kalenderwochenweise gerechnet. Beide Werte
 getrennt in Analytics und Export ausweisen. Tests für beide.
 
+**Ergebnis:** `KennzahlenResult.ueberzeit` in `ueberstunden` umbenannt
+(Art. 321c OR, unverändert `ist − soll − payoutSum`); neues Feld `ueberzeit`
+ergänzt (Art. 12/13 ArG). Neuer privater Helper `montagDerWoche()` gruppiert
+`typ="arbeit"`-Stunden nach Montag der Kalenderwoche (Mo–So-Konvention wie im
+Kalender); für jede Woche, die `profil.maxWeeklyHours` überschreitet, wird der
+Überschuss aufsummiert. Nur tatsächliche Arbeitszeit zählt — Absenzen sind
+keine Arbeitszeit im Sinne des ArG. Bekannte Einschränkung (wie bei soll/ist):
+nur Wochen(-anteile) innerhalb `[from, bisHeute]` fliessen ein, kein Nachladen
+von Tagen ausserhalb des abgefragten Zeitraums.
+
+`Profil` um `maxWeeklyHours` erweitert (required, nicht optional — damit
+`tsc` jeden Aufrufer zwingt). Betroffene Stellen durchgereicht:
+`app/api/analytics/route.ts` und `app/api/export/route.ts` (`buildProfil()`
+liest jetzt `membership.org.maxWeeklyHours`, Membership-Query um
+`include: { org: true }` ergänzt), `app/api/profile/route.ts` (liefert
+`maxWeeklyHours` jetzt mit) und `app/(app)/calendar/page.tsx` (Client-State
++ `Profil`-Konstruktion erweitert). Beide API-Routen weisen `ueberstunden` und
+`ueberzeit` getrennt aus (`netOvertime` bzw. neues Feld `weeklyOvertime`);
+Excel-Export bekam eine eigene Zeile „Überzeit (> Xh/Woche)". i18n-Labels in
+`lib/i18n.tsx` korrigiert: `analytics.overtime`/`analytics.netOvertime` hiessen
+fälschlich „Überzeit" (waren aber Überstunden) — jetzt „Überstunden"/
+„Überstunden (netto)"; neuer Key `analytics.weeklyOvertime` für den echten
+ArG-Begriff. Analytics-UI (`app/(app)/analytics/page.tsx`) bekam eine eigene
+KPI-Karte für die wöchentliche Überzeit.
+
+Tests in `lib/calc.test.ts`: bestehender Test für Auszahlungsabzug auf
+`ueberstunden` umbenannt plus eine Zusatzprüfung, dass eine unauffällige Woche
+keine Überzeit erzeugt; vier neue Tests für die echte Überzeit (Woche über dem
+Limit, Woche unter dem Limit, Absenzen zählen nicht, mehrere Wochen im
+Zeitraum). Alle 13 bestehenden `Profil`-Testfixtures per Skript um
+`maxWeeklyHours: 45` ergänzt.
+
+Browser-verifiziert: Testdaten (5×10h in einer sonst leeren Woche,
+manager@onexis.test, Mai 2026) direkt per SQL angelegt — Ziel der Verifikation
+war die Anzeige-/Berechnungsschicht, nicht die (unveränderte)
+Eintrags-Erfassung. `/analytics` zeigt „Überstunden −126.4h" und separat
+„Überzeit 5.0h" (5 Werktage × 10h = 50h, 5h über dem 45h-Limit); Excel-Export
+zeigt dieselben getrennten Werte in der Zusammenfassung. Keine Konsolenfehler.
+Testdaten wieder gelöscht (Baseline 66 `TimeEntry`-Zeilen bestätigt
+wiederhergestellt).
+
+Keine Prisma-Migration nötig — `Organization.maxWeeklyHours` existierte
+bereits seit Punkt 3a genau für diesen Zweck.
+
 **6b. Audit-Trail und Soft-Delete.** Neue Tabelle `TimeEntryAudit`
 (entryId, orgId, changedBy, changedAt, field, oldValue, newValue). Jede
 Änderung und Löschung eines TimeEntry protokollieren. `TimeEntry.deletedAt`
@@ -742,3 +786,14 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   Soll/Ist gegen das Budget, kein aus dem Stundensatz abgeleiteter
   Umsatz) — das ist bewusst ausserhalb des Scopes von Punkt 5 geblieben
   und wird der eigentliche Inhalt von Punkt 8.
+- Punkt 6a: `Organization.maxWeeklyHours` existierte bereits seit Punkt 3a
+  (vorausschauend für genau diesen Punkt angelegt) — keine Migration nötig,
+  reine Code-Verdrahtung. Für die Browser-Verifikation wurde die
+  Testfixture (5×10h-Woche) bewusst per SQL statt über die Kalender-UI
+  angelegt, weil die Eintrags-Erfassung selbst in 6a nicht verändert wurde
+  und nur die Berechnungs-/Anzeigeschicht zu verifizieren war — vermeidet
+  das Risiko eines weiteren Klick-Navigations-Bugs wie in Punkt 5. Wichtig
+  für 6b–6e: der ArG-Begriff „Überzeit" ist jetzt sauber von der
+  OR-„Überstunden" getrennt (Feld, i18n-Label, UI-Karte, Export-Zeile) —
+  künftige Compliance-Punkte (v.a. 6d, Pausen-/Ruhezeitprüfung) sollten
+  konsequent denselben Begriff verwenden und nicht wieder vermischen.

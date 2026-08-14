@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
-import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, CalendarClock, Banknote } from "lucide-react";
+import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, CalendarClock, Banknote, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 
@@ -25,6 +25,7 @@ interface AnalyticsData {
   overtime: number;
   paidOutHours: number;
   netOvertime: number;
+  weeklyOvertime: number;
   futureHours: number;
   fullTargetHours: number;
   forecastOvertime: number;
@@ -106,6 +107,8 @@ export default function AnalyticsPage() {
   const hasPaidOut = (data?.paidOutHours ?? 0) > 0;
   const netOvertimeVal = data?.netOvertime ?? 0;
   const netOvertimeColor = netOvertimeVal >= 0 ? "text-green-600" : "text-red-500";
+  const weeklyOvertimeVal = data?.weeklyOvertime ?? 0;
+  const weeklyOvertimeColor = weeklyOvertimeVal > 0 ? "text-red-500" : "text-green-600";
 
   return (
     <div>
@@ -174,6 +177,10 @@ export default function AnalyticsPage() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><BarChart3 className="w-4 h-4 text-sky-500" /><span className="text-xs text-muted-foreground">{t("analytics.customerHours")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.customerHours ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }} title={t("analytics.weeklyOvertimeHint")}>
+              <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-4 h-4 text-red-500" /><span className="text-xs text-muted-foreground">{t("analytics.weeklyOvertime")}</span></div>
+              <p className={`text-xl font-mono font-bold ${weeklyOvertimeColor}`}>{weeklyOvertimeVal.toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
             </motion.div>
 
           </div>

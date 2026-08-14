@@ -14,6 +14,7 @@ const testProfil: Profil = {
   ferientage: 25,
   startDate: "2026-04-01",
   exitDate: null,
+  maxWeeklyHours: 45,
 };
 
 describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, Stichtag 12.08.2026)", () => {
@@ -96,6 +97,7 @@ describe("Pensumwechsel mitten im Monat", () => {
     ferientage: 25,
     startDate: "2026-01-01",
     exitDate: null,
+    maxWeeklyHours: 45,
   };
   const changes = [{ effectiveFrom: "2026-08-15", pensum: 50, wochenstunden: 40 }];
 
@@ -118,7 +120,7 @@ describe("Pensumwechsel mitten im Monat", () => {
 
 describe("Zeitraum komplett vor startDate", () => {
   it("Soll ist 0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-04-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-04-01", exitDate: null, maxWeeklyHours: 45 };
     const result = kennzahlen({
       from: "2026-01-05",
       to: "2026-01-09",
@@ -135,7 +137,7 @@ describe("Zeitraum komplett vor startDate", () => {
 
 describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
   // 2026-08-14 ist ein Freitag, 2026-08-17 der nächste Werktag (Montag).
-  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: "2026-08-14" };
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: "2026-08-14", maxWeeklyHours: 45 };
 
   it("exitDate selbst zählt noch als normaler Arbeitstag (letzter Arbeitstag)", () => {
     expect(sollStundenTag("2026-08-14", profil, [])).toBeCloseTo(8, 5);
@@ -176,14 +178,14 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
   });
 
   it("ohne exitDate (null) bleibt das Verhalten unverändert", () => {
-    const profilOhneExit: Profil = { ...profil, exitDate: null };
+    const profilOhneExit: Profil = { ...profil, exitDate: null, maxWeeklyHours: 45 };
     expect(sollStundenTag("2026-08-17", profilOhneExit, [])).toBeCloseTo(8, 5);
   });
 });
 
 describe("Zeitraum komplett in der Zukunft", () => {
   it("soll = 0, sollGesamt > 0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = kennzahlen({
       from: "2026-09-01",
       to: "2026-09-30",
@@ -200,7 +202,7 @@ describe("Zeitraum komplett in der Zukunft", () => {
 
 describe("verrechnungsgrad", () => {
   it("bei ist == 0 ist 0, kein NaN", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = kennzahlen({
       from: "2026-08-01",
       to: "2026-08-02",
@@ -216,7 +218,7 @@ describe("verrechnungsgrad", () => {
   });
 
   it("berechnet sich aus billable Kundenstunden / ist", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = kennzahlen({
       from: "2026-08-10",
       to: "2026-08-11",
@@ -235,9 +237,9 @@ describe("verrechnungsgrad", () => {
   });
 });
 
-describe("ueberzeit berücksichtigt OvertimePayouts", () => {
+describe("ueberstunden berücksichtigt OvertimePayouts (Art. 321c OR)", () => {
   it("zieht Auszahlungen im Zeitraum ab", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = kennzahlen({
       from: "2026-08-10",
       to: "2026-08-11",
@@ -250,15 +252,107 @@ describe("ueberzeit berücksichtigt OvertimePayouts", () => {
       changes: [],
       payouts: [{ date: "2026-08-11", hours: 3 }],
     });
-    // ist = 20h, soll = 16h (2 Tage × 8h), Auszahlung 3h → ueberzeit = 20 - 16 - 3 = 1
+    // ist = 20h, soll = 16h (2 Tage × 8h), Auszahlung 3h → ueberstunden = 20 - 16 - 3 = 1
     expect(result.ist).toBe(20);
     expect(result.soll).toBe(16);
-    expect(result.ueberzeit).toBe(1);
+    expect(result.ueberstunden).toBe(1);
+    // Woche 10.–11.8. bleibt mit 20h weit unter dem gesetzlichen Limit von 45h → keine Überzeit.
+    expect(result.ueberzeit).toBe(0);
+  });
+});
+
+describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => {
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+
+  it("Woche über dem Limit erzeugt Überzeit in Höhe des Überschusses", () => {
+    // Woche 10.–14.8.2026 (Mo–Fr), 5 × 10h = 50h arbeit → 5h über dem Limit von 45h.
+    const result = kennzahlen({
+      from: "2026-08-10",
+      to: "2026-08-14",
+      heute: "2026-08-14",
+      eintraege: [
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-12", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-13", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-14", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+      ],
+      profil,
+      changes: [],
+      payouts: [],
+    });
+    expect(result.ueberzeit).toBe(5);
+  });
+
+  it("Woche unter dem Limit erzeugt keine Überzeit", () => {
+    // Woche 10.–14.8.2026, 5 × 8h = 40h arbeit, unter dem Limit von 45h.
+    const result = kennzahlen({
+      from: "2026-08-10",
+      to: "2026-08-14",
+      heute: "2026-08-14",
+      eintraege: [
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+        { date: "2026-08-12", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+        { date: "2026-08-13", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+        { date: "2026-08-14", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+      ],
+      profil,
+      changes: [],
+      payouts: [],
+    });
+    expect(result.ueberzeit).toBe(0);
+  });
+
+  it("Absenzen zählen nicht zur wöchentlichen Überzeit", () => {
+    // Woche 10.–14.8.2026: 4 Tage à 10h arbeit (40h) + 1 Krankheitstag mit 10h hours.
+    // Nur arbeit zählt zum gesetzlichen Limit → 40h, unter 45h → keine Überzeit,
+    // obwohl "ist" (inkl. Absenz) über dem Limit läge.
+    const result = kennzahlen({
+      from: "2026-08-10",
+      to: "2026-08-14",
+      heute: "2026-08-14",
+      eintraege: [
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-12", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-13", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-14", typ: "krank", hours: 10 },
+      ],
+      profil,
+      changes: [],
+      payouts: [],
+    });
+    expect(result.ueberzeit).toBe(0);
+  });
+
+  it("mehrere Wochen: nur die überschreitende Woche trägt zur Überzeit bei", () => {
+    // Woche 1 (10.–14.8.): 5 × 10h = 50h → 5h Überzeit.
+    // Woche 2 (17.–18.8.): 2 × 8h = 16h → 0h Überzeit.
+    // Summe über den Zeitraum: 5h.
+    const result = kennzahlen({
+      from: "2026-08-10",
+      to: "2026-08-18",
+      heute: "2026-08-18",
+      eintraege: [
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-12", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-13", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-14", typ: "arbeit", von: "08:00", bis: "18:00", pauseMin: 0 },
+        { date: "2026-08-17", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+        { date: "2026-08-18", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+      ],
+      profil,
+      changes: [],
+      payouts: [],
+    });
+    expect(result.ueberzeit).toBe(5);
   });
 });
 
 describe("feriensaldo", () => {
-  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
 
   it("bezogen zählt Ferien bis heute, geplant danach — in Tagen, nicht Stunden", () => {
     // Tagessoll bei 40h/100% = 8h/Tag → ein Ganztages-Eintrag mit 8h = 1 Tag
@@ -307,7 +401,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
   // sonst wäre das Tagessoll 0 und die Umrechnung stillschweigend 0 Tage.
 
   it("Reduktion 100% → 60% per 01.09.: beide Ferientage zählen je exakt 1.0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-12-31",
@@ -325,7 +419,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
   });
 
   it("Erhöhung 60% → 100% per 01.09.: beide Ferientage zählen je exakt 1.0", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 60, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 60, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-12-31",
@@ -342,7 +436,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
   });
 
   it("geplant (nach heute) wird ebenfalls über das korrekte Tagessoll gerechnet", () => {
-    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null };
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = feriensaldo({
       jahr: 2026,
       heute: "2026-08-12",

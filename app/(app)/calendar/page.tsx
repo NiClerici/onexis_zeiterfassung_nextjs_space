@@ -21,6 +21,7 @@ interface UserProfile {
   vacationDays: number;
   startDate: string | null;
   exitDate: string | null;
+  maxWeeklyHours: number;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
 }
 
@@ -119,6 +120,7 @@ export default function CalendarPage() {
           vacationDays: data?.vacationDays ?? 25,
           startDate: data?.startDate ?? null,
           exitDate: data?.exitDate ?? null,
+          maxWeeklyHours: data?.maxWeeklyHours ?? 45,
           standardWeek: data?.standardWeek ?? { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
         });
       }
@@ -193,6 +195,7 @@ export default function CalendarPage() {
         startDate: profile.startDate,
         exitDate: profile.exitDate,
         ferientage: profile.vacationDays,
+        maxWeeklyHours: profile.maxWeeklyHours,
       }
     : null;
   const changes: PensumChangeInput[] = pensumChanges.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));

@@ -21,6 +21,12 @@ export interface Profil {
   // Punkt 4d, Austritt eines Mitglieds).
   exitDate: Date | string | null;
   ferientage: number;
+  // Gesetzliche Höchstarbeitszeit (Art. 12/13 ArG, 45 oder 50 Stunden pro
+  // Kalenderwoche) — Organization.maxWeeklyHours, hier auf Profil statt in
+  // einem eigenen Parameter, damit sollStundenTag/kennzahlen weiterhin aus
+  // einem einzigen "was diese Person/Organisation betrifft"-Objekt lesen
+  // (MIGRATION.md Punkt 6a).
+  maxWeeklyHours: number;
 }
 
 export interface PensumChangeInput {
@@ -64,6 +70,17 @@ export interface KennzahlenInput {
 export interface KennzahlenResult {
   soll: number;
   ist: number;
+  // Überstunden (Art. 321c OR): über der VERTRAGLICHEN Arbeitszeit, abzüglich
+  // Auszahlungen. Hiess früher "ueberzeit" — fachlich falsch benannt, siehe
+  // ueberzeit unten für den tatsächlichen ArG-Begriff (MIGRATION.md Punkt 6a).
+  ueberstunden: number;
+  // Überzeit (Art. 12/13 ArG): Summe der Wochenanteile über der GESETZLICHEN
+  // Höchstarbeitszeit (profil.maxWeeklyHours), kalenderwochenweise (Mo–So)
+  // gerechnet. Zählt nur typ="arbeit" — Absenzen sind keine Arbeitszeit im
+  // Sinne des ArG. Berücksichtigt nur Wochen(-anteile) innerhalb von
+  // [from, bisHeute]; Tage ausserhalb des abgefragten Zeitraums (z.B. der Rest
+  // einer Woche vor Periodenbeginn) fliessen wie bei soll/ist grundsätzlich
+  // nicht ein — dieselbe Einschränkung gilt dort bereits.
   ueberzeit: number;
   kundenstunden: number;
   verrechnungsgrad: number;
@@ -158,6 +175,17 @@ export function stundenAusEintrag(eintrag: EintragInput, sollStundenDesTages: nu
   return eintrag.hours ?? sollStundenDesTages;
 }
 
+// Montag der Kalenderwoche (UTC-Mitternacht), in der datum liegt — dieselbe
+// "Woche startet Montag"-Konvention, die auch der Kalender verwendet. Dient
+// als Gruppierungsschlüssel für die wochenweise ArG-Überzeit.
+function montagDerWoche(datum: Date): Date {
+  const day = datum.getUTCDay(); // 0=So, 1=Mo, ..., 6=Sa
+  const diffZuMontag = day === 0 ? -6 : 1 - day;
+  const montag = new Date(datum);
+  montag.setUTCDate(datum.getUTCDate() + diffZuMontag);
+  return montag;
+}
+
 function summeSollstunden(
   from: Date,
   to: Date,
@@ -186,6 +214,10 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   let ist = 0;
   let kundenstunden = 0;
   let geplantZukunft = 0;
+  // Nur tatsächlich geleistete Arbeitszeit (typ="arbeit") zählt für die
+  // ArG-Höchstarbeitszeit — Absenzen sind keine Arbeitszeit im Sinne des
+  // Gesetzes. Gruppiert nach Montag der jeweiligen Kalenderwoche.
+  const arbeitsstundenProWoche = new Map<number, number>();
 
   for (const eintrag of input.eintraege) {
     const d = toUTCDate(eintrag.date);
@@ -196,6 +228,10 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
       ist += stunden;
       if (eintrag.typ === "arbeit" && eintrag.billable) {
         kundenstunden += stunden;
+      }
+      if (eintrag.typ === "arbeit" && d.getTime() >= from.getTime()) {
+        const wochenSchluessel = montagDerWoche(d).getTime();
+        arbeitsstundenProWoche.set(wochenSchluessel, (arbeitsstundenProWoche.get(wochenSchluessel) ?? 0) + stunden);
       }
     } else if (d.getTime() > heute.getTime()) {
       geplantZukunft += stunden;
@@ -209,7 +245,15 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     })
     .reduce((s, p) => s + p.hours, 0);
 
-  const ueberzeit = ist - soll - payoutSum;
+  const ueberstunden = ist - soll - payoutSum;
+
+  let ueberzeit = 0;
+  for (const wochenstunden of arbeitsstundenProWoche.values()) {
+    if (wochenstunden > input.profil.maxWeeklyHours) {
+      ueberzeit += wochenstunden - input.profil.maxWeeklyHours;
+    }
+  }
+
   const verrechnungsgrad = ist > 0 ? (kundenstunden / ist) * 100 : 0;
   const totalPrognose = ist + geplantZukunft;
   const prognoseSaldo = totalPrognose - sollGesamt;
@@ -217,6 +261,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   return {
     soll: round1(soll),
     ist: round1(ist),
+    ueberstunden: round1(ueberstunden),
     ueberzeit: round1(ueberzeit),
     kundenstunden: round1(kundenstunden),
     verrechnungsgrad: round1(verrechnungsgrad),
