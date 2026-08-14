@@ -124,6 +124,126 @@ describe("Pensumwechsel mitten im Monat", () => {
   });
 });
 
+// HARDENING.md A2 — bisher war nur EIN Wechsel pro Zeitraum getestet
+// ("Pensumwechsel mitten im Monat" oben). Hier zwei Wechsel innerhalb
+// desselben Auswertungszeitraums: jeder Tag muss den zu SEINEM Zeitpunkt
+// gültigen Satz bekommen, nicht den letzten der Liste.
+describe("Mehrfache Pensumsänderungen im selben Zeitraum (HARDENING.md A2)", () => {
+  const profil: Profil = {
+    wochenstunden: 40,
+    pensum: 100,
+    ferientage: 25,
+    startDate: "2026-01-01",
+    exitDate: null,
+    maxWeeklyHours: 45,
+  };
+  // 100% (bis 30.04.) → 80% (ab 01.05.) → 60% (ab 01.06.), je zum Monatsersten.
+  const changes = [
+    { effectiveFrom: "2026-05-01", pensum: 80, wochenstunden: 40 },
+    { effectiveFrom: "2026-06-01", pensum: 60, wochenstunden: 40 },
+  ];
+  // Werktage Q2 2026, unabhängig ausgezählt: April 22, Mai 21, Juni 22.
+  // Soll = 22×8 + 21×6.4 + 22×4.8 = 176 + 134.4 + 105.6 = 416
+  const Q2_SOLL = 416;
+
+  it("sollStundenTag liefert je Monat den zum Zeitpunkt gültigen Satz, nicht den letzten", () => {
+    expect(sollStundenTag("2026-04-15", profil, changes, [])).toBeCloseTo(8, 5);
+    expect(sollStundenTag("2026-05-15", profil, changes, [])).toBeCloseTo(6.4, 5);
+    expect(sollStundenTag("2026-06-15", profil, changes, [])).toBeCloseTo(4.8, 5);
+  });
+
+  it("Boundary: der effectiveFrom-Tag selbst zählt bereits mit dem neuen Satz", () => {
+    // 30.04. (Do) noch 100%, 01.05. (Fr) bereits 80%
+    expect(sollStundenTag("2026-04-30", profil, changes, [])).toBeCloseTo(8, 5);
+    expect(sollStundenTag("2026-05-01", profil, changes, [])).toBeCloseTo(6.4, 5);
+    // 29.05. (Fr) noch 80%, 01.06. (Mo) bereits 60%
+    expect(sollStundenTag("2026-05-29", profil, changes, [])).toBeCloseTo(6.4, 5);
+    expect(sollStundenTag("2026-06-01", profil, changes, [])).toBeCloseTo(4.8, 5);
+    expect(pensumAt("2026-05-01", profil, changes)).toEqual({ pensum: 80, wochenstunden: 40 });
+    expect(pensumAt("2026-06-01", profil, changes)).toEqual({ pensum: 60, wochenstunden: 40 });
+  });
+
+  it("kennzahlen summiert das Quartalssoll über beide Wechsel hinweg korrekt", () => {
+    const result = kennzahlen({
+      from: "2026-04-01",
+      to: "2026-06-30",
+      heute: "2026-07-01",
+      eintraege: [],
+      profil,
+      changes,
+      holidays: [],
+      payouts: [],
+    });
+    expect(result.soll).toBe(Q2_SOLL);
+    expect(result.sollGesamt).toBe(Q2_SOLL);
+  });
+
+  it("die Reihenfolge der Changes im Array ändert das Ergebnis nicht", () => {
+    const unsortiert = [changes[1], changes[0]];
+    expect(sollStundenTag("2026-05-15", profil, unsortiert, [])).toBeCloseTo(6.4, 5);
+    expect(sollStundenTag("2026-06-15", profil, unsortiert, [])).toBeCloseTo(4.8, 5);
+    const sortiertesSoll = kennzahlen({
+      from: "2026-04-01", to: "2026-06-30", heute: "2026-07-01",
+      eintraege: [], profil, changes, holidays: [], payouts: [],
+    }).soll;
+    const unsortiertesSoll = kennzahlen({
+      from: "2026-04-01", to: "2026-06-30", heute: "2026-07-01",
+      eintraege: [], profil, changes: unsortiert, holidays: [], payouts: [],
+    }).soll;
+    expect(unsortiertesSoll).toBe(sortiertesSoll);
+  });
+
+  it("bei zwei Changes mit identischem effectiveFrom gewinnt der zuletzt übergebene", () => {
+    // PensumChange hat kein @@unique([userId, effectiveFrom]) — zwei Einträge
+    // auf denselben Tag sind möglich (z.B. Korrektur). Ohne feste Regel hinge
+    // das Ergebnis von der Array-Reihenfolge ab.
+    const kollision = [
+      { effectiveFrom: "2026-05-01", pensum: 80, wochenstunden: 40 },
+      { effectiveFrom: "2026-05-01", pensum: 50, wochenstunden: 40 },
+    ];
+    expect(pensumAt("2026-05-15", profil, kollision)).toEqual({ pensum: 50, wochenstunden: 40 });
+    expect(sollStundenTag("2026-05-15", profil, kollision, [])).toBeCloseTo(4, 5);
+  });
+
+  it("feriensaldo rechnet jeden Ferientag über das Tagessoll SEINES Monats in genau 1.0 Tage um", () => {
+    const result = feriensaldo({
+      jahr: 2026,
+      heute: "2026-07-01",
+      profil,
+      changes,
+      holidays: [],
+      eintraege: [
+        { date: "2026-04-15", typ: "ferien", hours: 8 },   // 100% → Tagessoll 8
+        { date: "2026-05-15", typ: "ferien", hours: 6.4 }, // 80%  → Tagessoll 6.4
+        { date: "2026-06-15", typ: "ferien", hours: 4.8 }, // 60%  → Tagessoll 4.8
+      ],
+    });
+    // Ohne korrekte Auflösung pro Tag (z.B. immer der letzte Satz 4.8):
+    // 8/4.8 + 6.4/4.8 + 1 = 1.67 + 1.33 + 1 = 4.0 statt 3.0
+    expect(result.bezogen).toBe(3);
+    expect(result.geplant).toBe(0);
+    expect(result.anspruch).toBe(25);
+    expect(result.offen).toBe(22);
+  });
+
+  it("teamKennzahlen: Person mit Wechseln und Person ohne bekommen je ihr eigenes Soll", () => {
+    const result = teamKennzahlen({
+      from: "2026-04-01",
+      to: "2026-06-30",
+      heute: "2026-07-01",
+      holidays: [],
+      members: [
+        { userId: "mit", name: "Mit Wechseln", profil, changes, eintraege: [], payouts: [] },
+        { userId: "ohne", name: "Ohne Wechsel", profil, changes: [], eintraege: [], payouts: [] },
+      ],
+    });
+    expect(result.members.find((m) => m.userId === "mit")!.soll).toBe(Q2_SOLL);
+    // 65 Werktage × 8h, unabhängig ausgezählt
+    expect(result.members.find((m) => m.userId === "ohne")!.soll).toBe(520);
+    expect(result.totals.soll).toBe(Q2_SOLL + 520);
+  });
+});
+
 describe("Zeitraum komplett vor startDate", () => {
   it("Soll ist 0", () => {
     const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-04-01", exitDate: null, maxWeeklyHours: 45 };

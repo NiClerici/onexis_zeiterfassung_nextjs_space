@@ -47,7 +47,7 @@ Austrittsdatum, Feiertags-Wochen) noch einmal isoliert laufen lassen und in
 dieser Datei mit Datum bestätigen. Das ist die Baseline, gegen die alle
 folgenden Punkte laufen.
 
-### - [ ] A2. Mehrfache Pensumsänderungen im selben Zeitraum
+### - [x] A2. Mehrfache Pensumsänderungen im selben Zeitraum
 
 Bisher getestet: ein Wechsel pro Zeitraum. Neuer Testfall: zwei oder drei
 `PensumChange`-Einträge innerhalb desselben Analyse-/Ferienzeitraums
@@ -301,3 +301,51 @@ Gesamtlauf als Baseline für alle folgenden Punkte: **`npm test` →
 (Der `Healthcheck failed: connection refused`-Stacktrace im Testlauf ist
 die erwartete Konsolenausgabe des absichtlichen Fehlerpfad-Tests in
 `lib/health.test.ts`, kein Fehlschlag.)
+
+### A2 — Mehrfache Pensumsänderungen, 14.08.2026
+
+Befund: die Auflösung selbst war korrekt. `pensumAt` (`lib/calc.ts:137`)
+wählt aus ALLEN Changes den spätesten mit `effectiveFrom <= datum`, mehrere
+Wechsel im selben Zeitraum funktionieren also strukturell, und der
+Wechseltag selbst zählt bereits neu. Kein Fix nötig — die Lücke war eine
+Test-Lücke, nicht ein Rechenfehler. Neu abgesichert (100% → 80% → 60% je
+zum Monatsersten, Auswertung über Q2 2026, Soll 416h):
+`sollStundenTag`, `kennzahlen`, `feriensaldo`, `teamKennzahlen`, Boundary
+auf `effectiveFrom`, unsortiertes Changes-Array.
+
+**Eine echte Lücke gefunden und geschlossen:** `PensumChange` hat kein
+`@@unique([userId, effectiveFrom])` (`prisma/schema.prisma:35-48`), zwei
+Changes auf denselben Tag sind also möglich (z.B. eine Korrektur). Bei
+Gleichstand entschied `pensumAt` per `>` für den ZUERST übergebenen
+Eintrag — das Ergebnis hing damit von der Array-Reihenfolge ab, ohne dass
+die Funktion dazu etwas zusagte. Auf `>=` geändert: der zuletzt übergebene
+gewinnt. Das deckt sich mit `getDailyRateForDate` in
+`lib/absence-entries.ts:52-58` (überschreibt in Schleifenreihenfolge) und
+mit dem `orderBy: { effectiveFrom: "asc" }` aller acht Aufrufer, bei dem
+der später angelegte Eintrag hinten steht.
+
+**Zweite Implementierung derselben Regel angebunden statt entfernt:**
+`createAbsenceEntries` löst das Pensum in `getDailyRateForDate` selbst auf,
+statt `pensumAt` zu benutzen. Ein Vergleich beider über einen Zeitraum mit
+zwei Wechseln zeigt keine Abweichung — die Duplikation wurde deshalb NICHT
+angefasst (kein Befund = kein Eingriff), aber durch
+`lib/absence-entries.test.ts` aneinandergebunden: jeder erzeugte Eintrag
+wird gegen `sollStundenTag` geprüft, ein künftiges Auseinanderdriften
+bricht damit den Test.
+
+Stand nach A2: 16 Dateien, 201 Tests, typecheck sauber.
+
+> **Befund ausserhalb von A2 — Absenzen an Feiertagen.**
+> `createAbsenceEntries` kennt die `Holiday`-Tabelle nicht (kein
+> Holiday-Query, kein `holidays`-Parameter), und nichts im Code
+> materialisiert Feiertage als `feiertag`-TimeEntries — der Skip in
+> `lib/absence-entries.ts:102` greift nur, wenn jemand einen solchen
+> Eintrag von Hand angelegt hat. Eine genehmigte Ferienwoche über einen
+> Feiertag erzeugt daher am Feiertag einen `ferien`-Eintrag mit vollen
+> Stunden, während `sollStundenTag` für denselben Tag 0 liefert
+> (`lib/calc.ts:182-183`). Folge in `kennzahlen`: die Stunden zählen ins
+> `ist`, das `soll` ist 0 → Phantom-Überstunden in Höhe eines Tagessolls
+> je Feiertag. Der Feriensaldo bleibt korrekt (`tagesSoll > 0 ? … : 0`,
+> `lib/calc.ts:486`), der Ferientag wird also nicht doppelt abgezogen.
+> Gehört zu keinem Punkt dieser Datei — als eigener Punkt nachzutragen,
+> hier bewusst nicht gefixt.

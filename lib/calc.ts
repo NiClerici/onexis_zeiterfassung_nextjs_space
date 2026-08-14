@@ -144,7 +144,16 @@ export function pensumAt(
   let latest: number | null = null;
   for (const change of changes) {
     const cd = toUTCDate(change.effectiveFrom).getTime();
-    if (cd <= d.getTime() && (latest === null || cd > latest)) {
+    // `>=` statt `>`: bei ZWEI Changes mit identischem effectiveFrom gewinnt
+    // der zuletzt übergebene. PensumChange hat kein @@unique([userId,
+    // effectiveFrom]) (prisma/schema.prisma:35-48), zwei Einträge auf
+    // denselben Tag sind also möglich — ohne diese Regel hinge das Ergebnis
+    // von der Array-Reihenfolge ab, ohne dass die Funktion dazu etwas
+    // zusagt. "Der zuletzt übergebene gewinnt" deckt sich mit der
+    // Auflösung in lib/absence-entries.ts (getDailyRateForDate überschreibt
+    // in Schleifenreihenfolge) und mit dem `orderBy: { effectiveFrom: "asc" }`
+    // aller Aufrufer, bei dem der später angelegte Eintrag hinten steht.
+    if (cd <= d.getTime() && (latest === null || cd >= latest)) {
       latest = cd;
       result = { pensum: change.pensum, wochenstunden: change.wochenstunden };
     }
