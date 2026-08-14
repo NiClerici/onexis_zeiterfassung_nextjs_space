@@ -108,3 +108,22 @@ export async function canSeeUser(ctx: OrgContext, targetUserId: string): Promise
   }
   return false;
 }
+
+// Liste statt Einzelprüfung derselben Sichtbarkeits-Hierarchie wie
+// canSeeUser() — gebraucht von Routen, die eine ganze Team-Übersicht bauen
+// (/api/team, /api/export?scope=org, /api/absence-requests?scope=team,
+// /api/absences/calendar, MIGRATION.md Punkt 8/9). Rückgabe `null` bedeutet
+// "keine Einschränkung" (admin/owner sehen die ganze Organisation) statt
+// einer expliziten, potenziell sehr langen userId-Liste — Aufrufer müssen
+// `null` deshalb gesondert behandeln (kein Prisma-`userId: { in: [] }`,
+// das null Zeilen träfe).
+export async function listVisibleUserIds(ctx: OrgContext): Promise<string[] | null> {
+  if (ctx.role === "admin" || ctx.role === "owner") return null;
+  if (ctx.role === "manager") {
+    const ownMembership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId: ctx.orgId, userId: ctx.userId } } });
+    if (!ownMembership) return [ctx.userId];
+    const reports = await prisma.membership.findMany({ where: { orgId: ctx.orgId, managerId: ownMembership.id }, select: { userId: true } });
+    return [ctx.userId, ...reports.map((r) => r.userId)];
+  }
+  return [ctx.userId];
+}

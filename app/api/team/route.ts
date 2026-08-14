@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireOrg, requireRole, AccessError } from "@/lib/access";
+import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/access";
 import { teamKennzahlen, feriensaldo, wochenUebersicht, montagDerWoche, stundenAusEintrag, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
 
@@ -29,16 +29,10 @@ export async function GET(req: Request) {
     const forecastStart = montagDerWoche(heute);
     const forecastEnd = new Date(forecastStart.getTime() + (FORECAST_WEEKS * 7 - 1) * 24 * 60 * 60 * 1000);
 
-    // Manager sieht nur sich selbst + direkt unterstellte Mitglieder
-    // (Membership.managerId), admin/owner sehen die ganze Organisation —
-    // dieselbe Hierarchie wie canSeeUser() in lib/access.ts, hier aber als
-    // Listen- statt Einzelprüfung gebraucht.
-    let visibilityFilter: any = {};
-    if (role === "manager") {
-      const ownMembership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
-      if (!ownMembership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
-      visibilityFilter = { OR: [{ userId }, { managerId: ownMembership.id }] };
-    }
+    // Manager sieht nur sich selbst + direkt unterstellte Mitglieder,
+    // admin/owner sehen die ganze Organisation — siehe listVisibleUserIds().
+    const visibleUserIds = await listVisibleUserIds(ctx);
+    const visibilityFilter = visibleUserIds ? { userId: { in: visibleUserIds } } : {};
 
     // Nur Mitgliedschaften, die im gewählten Zeitraum mindestens einen Tag
     // aktiv waren — dieselbe Logik wie im Lohnexport (Punkt 7), damit ein

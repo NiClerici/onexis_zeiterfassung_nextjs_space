@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireOrg, requireRole, canSeeUser, AccessError } from "@/lib/access";
+import { requireOrg, requireRole, canSeeUser, listVisibleUserIds, AccessError } from "@/lib/access";
 import ExcelJS from "exceljs";
 import { kennzahlen, feriensaldo, sollStundenTag, stundenAusEintrag, type HolidayInput, type PayoutInput } from "@/lib/calc";
 import {
@@ -103,13 +103,7 @@ export async function GET(req: Request) {
 
     if (scope === "org") {
       requireRole(ctx.role, ["owner", "admin", "manager"]);
-      let restrictToUserIds: string[] | undefined;
-      if (ctx.role === "manager") {
-        const ownMembership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId: ctx.userId } } });
-        if (!ownMembership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
-        const reports = await prisma.membership.findMany({ where: { orgId, managerId: ownMembership.id }, select: { userId: true } });
-        restrictToUserIds = [ctx.userId, ...reports.map((r) => r.userId)];
-      }
+      const restrictToUserIds = (await listVisibleUserIds(ctx)) ?? undefined;
       const workbook = await buildOrgSummaryWorkbook(orgId, startDate, endDate, restrictToUserIds);
       const buffer = await workbook.xlsx.writeBuffer();
       return new Response(buffer as ArrayBuffer, {
