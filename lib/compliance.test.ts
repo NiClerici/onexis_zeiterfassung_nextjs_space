@@ -37,6 +37,104 @@ describe("pruefeCompliance — Pausenregel (Art. 15 ArG)", () => {
   });
 });
 
+// HARDENING.md A5 — bis hierher war die Pausenregel nur mit EINEM Eintrag pro
+// Tag getestet. Reales Muster: vormittags ein Kunde, nachmittags ein anderer,
+// zwei separate Einträge, Mittagspause als LÜCKE statt als pauseMin erfasst.
+describe("pruefeCompliance — Pausenregel bei mehreren Einträgen am selben Tag (HARDENING.md A5)", () => {
+  it("erkennt die Lücke zwischen zwei Einträgen als Pause (kein Fehlalarm)", () => {
+    // 08:00–12:00 + 13:00–17:00 = 8h Arbeit, 60 Min. Lücke, je pauseMin 0.
+    // Vorschrift bei 8h: 30 Min. — die Lücke deckt das ab.
+    const violations = pruefeCompliance(
+      [arbeit("2026-08-10", "08:00", "12:00", 0), arbeit("2026-08-10", "13:00", "17:00", 0)],
+      []
+    );
+    expect(violations.some((v) => v.type === "pause_zu_kurz")).toBe(false);
+  });
+
+  it("meldet weiterhin, wenn die Lücke zu kurz ist", () => {
+    // 08:00–12:00 + 12:10–16:10 = 8h Arbeit, nur 10 Min. Lücke, Vorschrift 30.
+    const violations = pruefeCompliance(
+      [arbeit("2026-08-10", "08:00", "12:00", 0), arbeit("2026-08-10", "12:10", "16:10", 0)],
+      []
+    );
+    const v = violations.find((x) => x.type === "pause_zu_kurz");
+    expect(v).toBeTruthy();
+    expect(v!.message).toContain("10 Min. zwischen den Einträgen");
+    expect(v!.message).toContain("= 10 Min.");
+  });
+
+  it("addiert erfasste pauseMin und Lücke zur effektiven Pause", () => {
+    // 08:00–12:20 (20 Min. Pause) + 12:40–16:20 (0 Min.) = 8h Arbeit.
+    // 20 Min. pauseMin + 20 Min. Lücke = 40 Min. ≥ 30 Min. Vorschrift.
+    const violations = pruefeCompliance(
+      [arbeit("2026-08-10", "08:00", "12:20", 20), arbeit("2026-08-10", "12:40", "16:20", 0)],
+      []
+    );
+    expect(violations.some((v) => v.type === "pause_zu_kurz")).toBe(false);
+  });
+
+  it("die Reihenfolge der Einträge im Array spielt keine Rolle", () => {
+    const nachmittagZuerst = pruefeCompliance(
+      [arbeit("2026-08-10", "13:00", "17:00", 0), arbeit("2026-08-10", "08:00", "12:00", 0)],
+      []
+    );
+    expect(nachmittagZuerst.some((v) => v.type === "pause_zu_kurz")).toBe(false);
+  });
+
+  it("überlappende Einträge erzeugen keine negative Pause", () => {
+    // 08:00–17:00 und 10:00–12:00 überlappen vollständig. Netto-Arbeitszeit
+    // 9h + 2h = 11h → Vorschrift 60 Min., erfasst 0 → Verstoss, aber die
+    // Lücke darf die erfasste Pause nicht ins Negative ziehen.
+    const violations = pruefeCompliance(
+      [arbeit("2026-08-10", "08:00", "17:00", 0), arbeit("2026-08-10", "10:00", "12:00", 0)],
+      []
+    );
+    const v = violations.find((x) => x.type === "pause_zu_kurz");
+    expect(v).toBeTruthy();
+    expect(v!.message).toContain("erfasst: 0 Min.");
+    expect(v!.message).not.toContain("-");
+  });
+
+  it("drei Einträge: alle Lücken zählen zusammen", () => {
+    // 08:00–10:00 + 10:20–12:00 + 12:40–15:00 = 2 + 1.67 + 2.33 = 6h Arbeit.
+    // Vorschrift bei 6h: 15 Min. Lücken: 20 + 40 = 60 Min.
+    const violations = pruefeCompliance(
+      [
+        arbeit("2026-08-10", "08:00", "10:00", 0),
+        arbeit("2026-08-10", "10:20", "12:00", 0),
+        arbeit("2026-08-10", "12:40", "15:00", 0),
+      ],
+      []
+    );
+    expect(violations.some((v) => v.type === "pause_zu_kurz")).toBe(false);
+  });
+
+  it("ein einzelner Eintrag verhält sich unverändert (keine Lücke, alte Meldung)", () => {
+    const violations = pruefeCompliance([arbeit("2026-08-10", "08:00", "16:20", 20)], []);
+    const v = violations.find((x) => x.type === "pause_zu_kurz");
+    expect(v).toBeTruthy();
+    expect(v!.message).toBe(
+      "Bei 8.0h Arbeitszeit sind mindestens 30 Min. Pause vorgeschrieben (erfasst: 20 Min.)."
+    );
+  });
+
+  it("eine Absenz zwischen zwei Arbeitseinträgen erzeugt keine Phantom-Lücke", () => {
+    // Ein krank-Eintrag ohne von/bis liefert kein Intervall und darf die
+    // Lückenberechnung nicht beeinflussen.
+    const violations = pruefeCompliance(
+      [
+        arbeit("2026-08-10", "08:00", "12:00", 0),
+        { date: "2026-08-10", typ: "krank", hours: 4 },
+        arbeit("2026-08-10", "12:10", "16:10", 0),
+      ],
+      []
+    );
+    const v = violations.find((x) => x.type === "pause_zu_kurz");
+    expect(v).toBeTruthy();
+    expect(v!.message).toContain("10 Min. zwischen den Einträgen");
+  });
+});
+
 describe("pruefeCompliance — Tageshöchstarbeitszeit", () => {
   it("meldet Überschreitung bei mehr als 12.5h Arbeit am Tag", () => {
     const violations = pruefeCompliance([arbeit("2026-08-10", "06:00", "19:30", 60)], []); // 12.5h netto

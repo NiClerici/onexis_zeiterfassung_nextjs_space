@@ -81,7 +81,7 @@ einem Wechsel exakt auf den `gueltig_ab`-Tag selbst (Boundary).
   `/api/absence-requests?scope=team` dürfen nicht crashen, sondern leere
   Listen zeigen
 
-### - [ ] A5. Compliance-Prüfung an echten Mehrfach-Eintrags-Tagen
+### - [x] A5. Compliance-Prüfung an echten Mehrfach-Eintrags-Tagen
 
 `pruefeCompliance` wurde primär mit einem Eintrag pro Tag getestet. Neuer
 Testfall: zwei `arbeit`-Einträge am selben Tag (z.B. Vormittag/Nachmittag
@@ -417,3 +417,52 @@ korrekt leer, weil sie den eigenen Antrag ausschliesst. Beides ist
 sinnvoll und crasht nicht; als Ist-Verhalten festgeschrieben.
 
 Stand nach A4: 16 Dateien, 219 Tests, typecheck sauber.
+
+### A5 — Compliance an Mehrfach-Eintrags-Tagen, 14.08.2026
+
+**Der Verdacht des Punktes hat gestimmt — echter Fehlalarm, jetzt gefixt.**
+
+Reproduziert vor dem Fix:
+
+```
+pruefeCompliance([
+  { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0 },
+  { date: "2026-08-10", typ: "arbeit", von: "13:00", bis: "17:00", pauseMin: 0 },
+], [])
+→ [{ type: "pause_zu_kurz",
+     message: "Bei 8.0h Arbeitszeit sind mindestens 30 Min. Pause
+               vorgeschrieben (erfasst: 0 Min.)." }]
+```
+
+Ursache: `pauseMinutenDesTages` summierte ausschliesslich die `pauseMin`-Felder
+der einzelnen Einträge. Die Netto-Arbeitszeit wurde korrekt über alle Einträge
+des Tages summiert (8h → Pflichtpause 30 Min.), die 60-minütige **Lücke**
+zwischen 12:00 und 13:00 zählte aber nirgends. Wer vormittags für Kunde A und
+nachmittags für Kunde B je einen eigenen Eintrag erfasst — das im Punkt
+beschriebene, realistische Muster — bekam eine Warnung für eine Pause, die er
+tatsächlich gemacht hat.
+
+Fix in `lib/compliance.ts`: neue Funktion `lueckenMinutenDesTages`. Sie sortiert
+die Arbeitsintervalle des Tages nach Startzeitpunkt, führt das bisher späteste
+Ende mit und summiert die positiven Abstände. Effektive Pause = erfasste
+`pauseMin` + Lücken. Wiederverwendet wird das vorhandene `eintragStartEnde`,
+das den Mitternachtsübergang bereits korrekt behandelt. Überlappende oder
+verschachtelte Einträge können durch das mitgeführte Maximum keine negative
+Pause erzeugen.
+
+Die Meldung nennt die Lücke jetzt getrennt, aber nur wenn es eine gibt —
+`(erfasst: 20 Min. + 10 Min. zwischen den Einträgen = 30 Min.)`. Bei einem
+einzelnen Eintrag ist der Text unverändert; ein Test schreibt das fest.
+
+Acht neue Tests in `lib/compliance.test.ts`: Lücke deckt die Pflichtpause,
+Lücke zu kurz (Warnung bleibt), `pauseMin` + Lücke addieren sich,
+Array-Reihenfolge egal, überlappende Einträge ohne negative Pause, drei
+Einträge mit zwei Lücken, Einzeleintrag unverändert, Absenz zwischen zwei
+Arbeitseinträgen erzeugt keine Phantom-Lücke.
+
+Keine UI-Änderung nötig und deshalb keine Browser-Verifikation: der Kalender
+übergibt in `app/(app)/calendar/page.tsx:265-270` bereits ALLE Einträge eines
+Tages an `pruefeCompliance`, der Fix wirkt dort unmittelbar. Zweiter Aufrufer
+`app/api/export/arg-control/route.ts:96` ebenso.
+
+Stand nach A5: 16 Dateien, 227 Tests, typecheck sauber.

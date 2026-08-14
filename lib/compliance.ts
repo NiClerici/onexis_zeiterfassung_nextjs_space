@@ -82,6 +82,34 @@ function pauseMinutenDesTages(eintraege: EintragMitDatum[]): number {
     .reduce((sum, e) => sum + (e.pauseMin ?? 0), 0);
 }
 
+// Zeit zwischen zwei Arbeitseinträgen desselben Tages. Wer vormittags für
+// Kunde A und nachmittags für Kunde B je einen eigenen Eintrag erfasst
+// (08:00–12:00 und 13:00–17:00), hat die Mittagspause als LÜCKE erfasst und
+// nicht als pauseMin — sie ist trotzdem eine Pause im Sinne von Art. 15 ArG.
+// Ohne diese Funktion meldet die Pausenregel dort einen Verstoss, obwohl
+// faktisch pausiert wurde (HARDENING.md A5).
+//
+// Überlappende oder verschachtelte Einträge erzeugen keine negative Pause:
+// die Intervalle werden nach Startzeitpunkt sortiert und das bisher späteste
+// Ende mitgeführt, Lücken unter 0 fallen weg.
+function lueckenMinutenDesTages(eintraege: EintragMitDatum[]): number {
+  const intervalle = eintraege
+    .map(eintragStartEnde)
+    .filter((x): x is { start: Date; ende: Date } => x !== null)
+    .map((x) => ({ start: x.start.getTime(), ende: x.ende.getTime() }))
+    .sort((a, b) => a.start - b.start);
+  if (intervalle.length < 2) return 0;
+
+  let luecken = 0;
+  let spaetestesEnde = intervalle[0].ende;
+  for (let i = 1; i < intervalle.length; i++) {
+    const luecke = intervalle[i].start - spaetestesEnde;
+    if (luecke > 0) luecken += luecke / (1000 * 60);
+    spaetestesEnde = Math.max(spaetestesEnde, intervalle[i].ende);
+  }
+  return luecken;
+}
+
 // Prüft, ob ein [start,ende)-Intervall (in Minuten seit Mitternacht, ende
 // kann > 1440 sein bei Nachtschicht) die Nachtzeitspanne 23:00–06:00 berührt.
 function ueberschneidetNachtzeit(vonMin: number, bisMin: number): boolean {
@@ -106,7 +134,11 @@ export function pruefeCompliance(
   if (eintraegeEinesTages.length === 0) return violations;
 
   const arbeitsstunden = arbeitsstundenDesTages(eintraegeEinesTages);
-  const pauseMin = pauseMinutenDesTages(eintraegeEinesTages);
+  // Effektive Pause = erfasste pauseMin PLUS die Lücken zwischen mehreren
+  // Arbeitseinträgen desselben Tages (siehe lueckenMinutenDesTages).
+  const erfasstePauseMin = pauseMinutenDesTages(eintraegeEinesTages);
+  const lueckenMin = Math.round(lueckenMinutenDesTages(eintraegeEinesTages));
+  const pauseMin = erfasstePauseMin + lueckenMin;
 
   // Pausenregel Art. 15 ArG: der höchste erreichte Schwellenwert bestimmt die
   // Mindestpause, nicht eine Summe aus allen Stufen.
@@ -116,9 +148,15 @@ export function pruefeCompliance(
   else if (arbeitsstunden > 5.5) erforderlichePauseMin = 15;
 
   if (erforderlichePauseMin > 0 && pauseMin < erforderlichePauseMin) {
+    // Lücken nur erwähnen, wenn es welche gibt — sonst bleibt die Meldung
+    // wie bisher.
+    const erfasstText =
+      lueckenMin > 0
+        ? `erfasst: ${erfasstePauseMin} Min. + ${lueckenMin} Min. zwischen den Einträgen = ${pauseMin} Min.`
+        : `erfasst: ${pauseMin} Min.`;
     violations.push({
       type: "pause_zu_kurz",
-      message: `Bei ${arbeitsstunden.toFixed(1)}h Arbeitszeit sind mindestens ${erforderlichePauseMin} Min. Pause vorgeschrieben (erfasst: ${pauseMin} Min.).`,
+      message: `Bei ${arbeitsstunden.toFixed(1)}h Arbeitszeit sind mindestens ${erforderlichePauseMin} Min. Pause vorgeschrieben (${erfasstText}).`,
     });
   }
 
