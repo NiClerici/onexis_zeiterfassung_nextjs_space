@@ -68,7 +68,7 @@ einem Wechsel exakt auf den `gueltig_ab`-Tag selbst (Boundary).
   bulk-vacation gefixt, hier gezielt für die reguläre Tageserfassung
   nachprüfen
 
-### - [ ] A4. Verrechnungsgrad und Teamkennzahlen bei Randfällen
+### - [x] A4. Verrechnungsgrad und Teamkennzahlen bei Randfällen
 
 - Person ohne jeden Eintrag im Zeitraum → `verrechnungsgrad` darf nicht
   NaN/Infinity werfen (Division durch 0 bei `ist = 0`)
@@ -396,3 +396,24 @@ Vorwort dieser Datei ohne konkreten Befund nicht zu bauen.
 > verstrichene Zeit rechnen lassen. Betrifft nur Betriebe mit Nachtarbeit.
 
 Stand nach A3: 16 Dateien, 214 Tests, typecheck sauber.
+
+### A4 — Randfälle Verrechnungsgrad/Teamkennzahlen, 14.08.2026
+
+Alle vier Randfälle waren bereits korrekt behandelt — **kein Fix nötig**,
+aber keiner war getestet. Fünf neue Tests schreiben sie fest:
+
+| Randfall | Ist-Verhalten | Wo abgesichert |
+|---|---|---|
+| Person ohne jeden Eintrag (`ist = 0`) | `verrechnungsgrad` 0 statt NaN (`lib/calc.ts:278`), alle Felder endlich, Soll bleibt stehen, `ueberstunden` negativ | `lib/calc.test.ts` |
+| Projekt UND Kunde ohne `hourlyRate` | Fallback Projekt → Kunde → 0 (`app/api/team/route.ts:131`, `:150`), Umsatz 0, kein `null` in einer Summe | `lib/team-route.test.ts` |
+| Budget exakt erreicht (4h von 4h) | `ueberzogen: stunden > budgetHours` ist strikt grösser (`app/api/team/route.ts:140`) → nicht markiert | `lib/team-route.test.ts` |
+| Manager ohne direkt unterstellte Personen | `/api/team` liefert 200 und nur die Person selbst; `/api/absence-requests?scope=team` liefert 200 mit leerer Liste (Selbstausschluss in `route.ts:54-56` führt zu `in: []`) | `lib/team-route.test.ts` |
+
+Der Manager-Fall ist bemerkenswert, weil er nicht das ist, was der Punkt
+erwartet hat: ein manager ohne Berichte sieht in `/team` **nicht** eine
+leere Liste, sondern genau sich selbst — `listVisibleUserIds` schliesst die
+anfragende Person immer ein. Die Genehmigungs-Warteschlange ist dagegen
+korrekt leer, weil sie den eigenen Antrag ausschliesst. Beides ist
+sinnvoll und crasht nicht; als Ist-Verhalten festgeschrieben.
+
+Stand nach A4: 16 Dateien, 219 Tests, typecheck sauber.

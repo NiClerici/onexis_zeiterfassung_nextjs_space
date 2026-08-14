@@ -815,6 +815,41 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
     expect(result.totals.verrechnungsgrad).toBe(0);
   });
 
+  // HARDENING.md A4 — eine Person ganz ohne Einträge im Zeitraum darf in
+  // KEINEM Feld NaN oder Infinity liefern, auch nicht neben Personen, die
+  // Einträge haben (ist = 0 → Division durch 0 in verrechnungsgrad).
+  it("Person ohne jeden Eintrag: alle Kennzahlen sind endliche Zahlen, verrechnungsgrad ist 0", () => {
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+    const result = teamKennzahlen({
+      from: "2026-08-03",
+      to: "2026-08-07",
+      heute: "2026-08-07",
+      holidays: [],
+      members: [
+        { userId: "leer", name: "Ohne Einträge", profil, changes: [], eintraege: [], payouts: [] },
+        {
+          userId: "voll", name: "Mit Einträgen", profil, changes: [], payouts: [],
+          eintraege: [{ date: "2026-08-03", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, billable: true }],
+        },
+      ],
+    });
+
+    const leer = result.members.find((m) => m.userId === "leer")!;
+    expect(leer.ist).toBe(0);
+    expect(leer.kundenstunden).toBe(0);
+    expect(leer.verrechnungsgrad).toBe(0);
+    expect(leer.soll).toBe(40); // 5 Werktage × 8h — das Soll bleibt, nur ist ist 0
+    expect(leer.ueberstunden).toBe(-40);
+    for (const [feld, wert] of Object.entries(leer)) {
+      if (typeof wert === "number") expect(Number.isFinite(wert), `${feld} von leer`).toBe(true);
+    }
+
+    // Die leere Person darf die Team-Summen nicht vergiften.
+    expect(Number.isFinite(result.totals.verrechnungsgrad)).toBe(true);
+    expect(result.totals.ist).toBe(8);
+    expect(result.totals.verrechnungsgrad).toBe(100);
+  });
+
   it("liefert eine leere Mitgliederliste und Null-Totals ohne Mitglieder", () => {
     const result = teamKennzahlen({ from: "2026-08-03", to: "2026-08-03", heute: "2026-08-03", holidays: [], members: [] });
     expect(result.members).toEqual([]);
