@@ -16,7 +16,7 @@ function setSession(userId: string, orgId: string, role: string) {
 }
 
 import { GET as orgExportGet } from "@/app/api/admin/organization/export/route";
-import { DELETE as orgDelete } from "@/app/api/admin/organization/route";
+import { GET as orgGet, DELETE as orgDelete } from "@/app/api/admin/organization/route";
 
 function req(url: string): Request {
   return new Request(`http://localhost${url}`);
@@ -74,6 +74,42 @@ describe("GET /api/admin/organization/export", () => {
     const res = await orgExportGet(req("/api/admin/organization/export?format=excel"));
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("spreadsheetml");
+  });
+});
+
+describe("GET /api/admin/organization", () => {
+  const ORG = "test_org_get_org";
+  let ownerId: string, memberId: string;
+
+  beforeAll(async () => {
+    await prisma.organization.create({ data: { id: ORG, name: "Org Get Test Org", slug: "org-get-test-org", plan: "starter" } });
+    const owner = await prisma.user.create({ data: { email: "org-get-owner@example.test", password: "irrelevant", firstName: "O", lastName: "Wner" } });
+    const member = await prisma.user.create({ data: { email: "org-get-member@example.test", password: "irrelevant", firstName: "M", lastName: "Ember" } });
+    ownerId = owner.id;
+    memberId = member.id;
+    await prisma.membership.create({ data: { orgId: ORG, userId: ownerId, role: "owner", entryDate: new Date() } });
+    await prisma.membership.create({ data: { orgId: ORG, userId: memberId, role: "member", entryDate: new Date() } });
+  });
+
+  afterAll(async () => {
+    await prisma.membership.deleteMany({ where: { orgId: ORG } });
+    await prisma.user.deleteMany({ where: { id: { in: [ownerId, memberId] } } });
+    await prisma.organization.deleteMany({ where: { id: ORG } });
+  });
+
+  it("member erhält 403", async () => {
+    setSession(memberId, ORG, "member");
+    const res = await orgGet();
+    expect(res.status).toBe(403);
+  });
+
+  it("owner erhält Name/Plan der eigenen Organisation", async () => {
+    setSession(ownerId, ORG, "owner");
+    const res = await orgGet();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe("Org Get Test Org");
+    expect(body.plan).toBe("starter");
   });
 });
 

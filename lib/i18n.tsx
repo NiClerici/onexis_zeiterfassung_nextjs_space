@@ -11,6 +11,7 @@ const translations: Record<string, string> = {
   "nav.teamsicht": "Teamsicht",
   "nav.holidays": "Feiertage",
   "nav.absences": "Absenzen",
+  "nav.legal": "Rechtliches",
   // Login
   "login.title": "Anmelden",
   "login.email": "E-Mail",
@@ -344,6 +345,22 @@ const translations: Record<string, string> = {
   // Billing/Trial (MIGRATION.md Punkt 12)
   "billing.trialActive": "Testphase läuft bis {date}.",
   "billing.trialExpired": "Testzeitraum abgelaufen. Diese Organisation ist schreibgeschützt, bis ein Plan gewählt wird.",
+  // Rechtliches (MIGRATION.md Punkt 12)
+  "legal.title": "Rechtliches",
+  "legal.documentsTitle": "Rechtliche Dokumente",
+  "legal.documentsHint": "Vorlagen — vor Verwendung durch eine Rechtsberatung prüfen lassen.",
+  "legal.docAvv": "Auftragsbearbeitungsvertrag (AVV)",
+  "legal.docRecords": "Bearbeitungsverzeichnis-Vorlage",
+  "legal.docPrivacy": "Datenschutzerklärung",
+  "legal.exportTitle": "Organisationsexport",
+  "legal.exportHint": "Vollständiger Export aller Daten dieser Organisation — auch als Vorbereitung für eine Kündigung, siehe gesetzliche Aufbewahrungspflicht.",
+  "legal.exportJson": "JSON (vollständig)",
+  "legal.exportExcel": "Excel (Übersicht)",
+  "legal.dangerZoneTitle": "Gefahrenzone",
+  "legal.dangerZoneHint": "Löscht die Organisation und alle zugehörigen Daten unwiderruflich. Vorher unbedingt einen Export vornehmen — die gesetzliche Aufbewahrungspflicht für Geschäftsunterlagen besteht unabhängig von dieser Anwendung weiter.",
+  "legal.confirmNameLabel": "Zum Bestätigen \"{name}\" eingeben:",
+  "legal.deleteButton": "Organisation endgültig löschen",
+  "legal.orgDeleted": "Organisation gelöscht",
   // Common
   "common.loading": "Laden...",
   "common.error": "Ein Fehler ist aufgetreten",

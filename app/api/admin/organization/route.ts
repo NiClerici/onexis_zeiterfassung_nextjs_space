@@ -4,6 +4,25 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 
+// Minimale Org-Stammdaten für die /admin/legal-Seite (MIGRATION.md
+// Punkt 12) — u.a. für die Tippen-zum-Bestätigen-Löschbestätigung, ohne
+// dafür den vollen (teuren) Organisationsexport laden zu müssen.
+export async function GET() {
+  try {
+    const { orgId, role } = await requireOrg();
+    requireRole(role, ["owner", "admin"]);
+
+    const org = await prisma.organization.findUnique({ where: { id: orgId } });
+    if (!org) return NextResponse.json({ error: "Organisation nicht gefunden" }, { status: 404 });
+
+    return NextResponse.json({ id: org.id, name: org.name, slug: org.slug, plan: org.plan, trialEndsAt: org.trialEndsAt });
+  } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("GET organization error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
 // Vollständige Löschung einer Organisation auf Knopfdruck (MIGRATION.md
 // Punkt 12) — die schwerwiegendste Aktion in dieser App, deshalb strenger
 // als alle übrigen admin-Aktionen: nur owner (nicht admin), und nur mit

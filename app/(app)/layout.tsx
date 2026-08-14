@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOff, AlertTriangle } from "lucide-react";
+import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOff, AlertTriangle, ShieldAlert } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { isTrialExpired } from "@/lib/billing-rules";
@@ -25,6 +25,7 @@ const baseTabs = [
 const teamsichtTab = { href: "/team", icon: Gauge, labelKey: "nav.teamsicht" };
 const teamTab = { href: "/admin/team", icon: Users, labelKey: "nav.team" };
 const holidaysTab = { href: "/admin/holidays", icon: CalendarDays, labelKey: "nav.holidays" };
+const legalTab = { href: "/admin/legal", icon: ShieldAlert, labelKey: "nav.legal" };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession() || {};
@@ -43,7 +44,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const trialEndsAtDate = trialEndsAt ? new Date(trialEndsAt) : null;
   const tabs =
     role === "owner" || role === "admin"
-      ? [...baseTabs, teamsichtTab, teamTab, holidaysTab]
+      ? [...baseTabs, teamsichtTab, teamTab, holidaysTab, legalTab]
       : role === "manager"
       ? [...baseTabs, teamsichtTab]
       : baseTabs;
