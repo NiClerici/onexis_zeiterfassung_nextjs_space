@@ -92,7 +92,7 @@ und die Lücke ignoriert. Das ist ein plausibles echtes Nutzungsmuster
 (Vormittag ein Kunde, Nachmittag ein anderer, zwei separate Einträge) und
 könnte falsche oder fehlende Warnungen erzeugen.
 
-### - [ ] A6. Monatssperre und Absenzgenehmigung im Zusammenspiel
+### - [x] A6. Monatssperre und Absenzgenehmigung im Zusammenspiel
 
 Ein Antrag wird gestellt, bevor der Monat gesperrt wird, aber erst
 genehmigt, nachdem admin ihn gesperrt hat. Was passiert?
@@ -466,3 +466,50 @@ Tages an `pruefeCompliance`, der Fix wirkt dort unmittelbar. Zweiter Aufrufer
 `app/api/export/arg-control/route.ts:96` ebenso.
 
 Stand nach A5: 16 Dateien, 227 Tests, typecheck sauber.
+
+### A6 — Monatssperre × Absenzgenehmigung, 14.08.2026
+
+**Geklärt: die dritte Möglichkeit ist implementiert, und sie ist stimmig.**
+Der Punkt stellte zwei Alternativen zur Wahl (Sperre respektieren und Tag
+überspringen ODER Genehmigung ablehnen). Tatsächlich tut der Code weder das
+eine noch das andere: `createAbsenceEntries` wird bei der Genehmigung ohne
+`skipDates` aufgerufen (`app/api/absence-requests/route.ts:145-154`), die
+Einträge entstehen also im gesperrten Monat. **Kein Fix**, weil das kein
+Widerspruch ist, sondern die konsequente Anwendung der Regel aus
+MIGRATION.md Punkt 6e.
+
+Die Regel, aufgelöst über drei Aufrufstellen:
+
+- `assertMonthEditable` (`lib/access.ts:89-94`) greift ausschliesslich bei
+  `role === "member"`. manager/admin/owner werden von einer Sperre nie
+  eingeschränkt.
+- Genehmigen dürfen nur manager/admin/owner (`route.ts:119`), und nie den
+  eigenen Antrag (`route.ts:130`). Die Genehmigung ist damit immer ein
+  Schreibvorgang einer Rolle, die schreiben darf.
+- Ein Antrag FÜR einen bereits gesperrten Monat ist gar nicht erst möglich —
+  POST prüft `assertMonthEditable` auf `fromDate` und `toDate`
+  (`route.ts:96-97`) und liefert 403. Die Situation aus dem Punkt kann also
+  ausschliesslich entstehen, wenn zwischen Antrag und Genehmigung gesperrt
+  wird.
+
+Entscheidend für die Frage „widersprechen sich Sperre und Genehmigung?" ist
+der dritte Test: die so erzeugten Einträge sind für member weiterhin
+schreibgeschützt (PUT und DELETE liefern 403). Die Sperre verliert durch die
+Genehmigung nichts von ihrer Wirkung — sie regelt, WER schreiben darf, und
+die genehmigende Rolle darf es. Drei neue Tests in `lib/month-locks.test.ts`
+schreiben die Kette fest.
+
+Nebenbefund ohne Handlungsbedarf: `/api/time-entries` schreibt immer auf die
+`userId` aus der Session (`route.ts:96`, `:114`), niemand kann darüber
+Einträge für eine andere Person anlegen. Die Absenzgenehmigung ist damit der
+einzige Weg, auf dem Einträge im Kalender einer anderen Person entstehen —
+weshalb sie den Audit-Trail über `changedBy` auch korrekt mitführt
+(`lib/absence-entries.ts:127-134`).
+
+> Vorschlag für eine künftige Datei: bei der Genehmigung eines Antrags, der
+> ganz oder teilweise in einem inzwischen gesperrten Monat liegt, einen
+> Hinweis in der Antwort mitgeben („3 Tage liegen im abgeschlossenen Dezember
+> 2026"). Rein informativ — die Genehmigung soll weiterhin durchgehen, aber
+> die genehmigende Person sollte es sehen. Das ist ein Feature, kein Fix.
+
+Stand nach A6: 16 Dateien, 230 Tests, typecheck sauber. **Teil A vollständig.**

@@ -19,6 +19,7 @@ import { GET as mlGet, POST as mlPost, DELETE as mlDelete } from "@/app/api/mont
 import { POST as tePost, PUT as tePut, DELETE as teDelete } from "@/app/api/time-entries/route";
 import { POST as bulkVacationPost } from "@/app/api/time-entries/bulk-vacation/route";
 import { POST as bulkApplyPost } from "@/app/api/time-entries/bulk-apply/route";
+import { POST as arPost, PATCH as arPatch } from "@/app/api/absence-requests/route";
 
 const ORG = "test_monthlock_org";
 
@@ -53,6 +54,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma.monthLockAudit.deleteMany({ where: { orgId: ORG } });
   await prisma.monthLock.deleteMany({ where: { orgId: ORG } });
+  await prisma.absenceRequest.deleteMany({ where: { orgId: ORG } });
   await prisma.timeEntryAudit.deleteMany({ where: { orgId: ORG } });
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
   await prisma.membership.deleteMany({ where: { orgId: ORG } });
@@ -223,5 +225,73 @@ describe("MonthLock-Durchsetzung in den Bulk-Routen (member übersprungene Tage 
     expect(septemberEntries).toHaveLength(0);
 
     await prisma.timeEntry.deleteMany({ where: { orgId: ORG, userId: memberId, date: { gte: new Date("2026-10-01"), lte: new Date("2026-10-02") } } });
+  });
+});
+
+// HARDENING.md A6 — was passiert, wenn ein Antrag VOR der Sperre gestellt,
+// aber erst DANACH genehmigt wird? Die Antwort steckte bisher nur in einem
+// Kommentar in app/api/absence-requests/route.ts:141-144 und war ungetestet.
+// Sie lautet: die Genehmigung schreibt in den gesperrten Monat, weil sie ein
+// Schreibvorgang der genehmigenden Rolle (manager/admin/owner) ist und diese
+// Rollen laut MIGRATION.md Punkt 6e nicht von einer Sperre eingeschränkt
+// werden. Für member bleibt der Monat trotzdem dicht — genau das prüfen die
+// drei Tests hier, damit sich Sperre und Genehmigung nicht widersprechen.
+describe("Monatssperre × Absenzgenehmigung (HARDENING.md A6)", () => {
+  let requestId: string;
+
+  it("Antrag vor der Sperre gestellt, nach der Sperre genehmigt: die Einträge entstehen trotzdem", async () => {
+    // 1. Dezember 2026 ist noch offen — member stellt einen Antrag für
+    //    Mo 07.12. bis Mi 09.12.2026 (3 Werktage).
+    setSession(memberId, ORG, "member");
+    const createRes = await arPost(
+      jsonReq("/api/absence-requests", "POST", { fromDate: "2026-12-07", toDate: "2026-12-09", type: "ferien" })
+    );
+    expect(createRes.status).toBe(200);
+    requestId = (await createRes.json()).request.id;
+
+    // 2. Erst danach sperrt admin den Dezember für member.
+    setSession(adminId, ORG, "admin");
+    const lockRes = await mlPost(jsonReq("/api/month-locks", "POST", { userId: memberId, year: 2026, month: 12 }));
+    expect(lockRes.status).toBe(200);
+
+    // 3. admin genehmigt den Antrag — die Sperre hält ihn NICHT auf.
+    const approveRes = await arPatch(jsonReq("/api/absence-requests", "PATCH", { id: requestId, action: "approve" }));
+    expect(approveRes.status).toBe(200);
+    const body = await approveRes.json();
+    expect(body.request.status).toBe("genehmigt");
+    expect(body.entries.created).toBe(3);
+
+    const entries = await prisma.timeEntry.findMany({
+      where: { orgId: ORG, userId: memberId, type: "ferien", date: { gte: new Date("2026-12-07"), lte: new Date("2026-12-09") } },
+    });
+    expect(entries).toHaveLength(3);
+  });
+
+  it("die so erzeugten Einträge bleiben für member trotzdem schreibgeschützt", async () => {
+    // Das ist der eigentliche Kohärenz-Test: die Sperre verliert durch die
+    // Genehmigung nichts von ihrer Wirkung. Geschrieben hat eine Rolle, die
+    // das darf — member selbst kommt weiterhin nicht an den Monat heran.
+    const entry = await prisma.timeEntry.findFirst({
+      where: { orgId: ORG, userId: memberId, type: "ferien", date: new Date("2026-12-07") },
+    });
+    expect(entry).toBeTruthy();
+
+    setSession(memberId, ORG, "member");
+    const putRes = await tePut(jsonReq("/api/time-entries", "PUT", { id: entry!.id, hours: 2 }));
+    expect(putRes.status).toBe(403);
+    const delRes = await teDelete(jsonReq("/api/time-entries", "DELETE", { id: entry!.id }));
+    expect(delRes.status).toBe(403);
+  });
+
+  it("für einen bereits gesperrten Monat kann member gar keinen Antrag mehr stellen (403)", async () => {
+    // Die Gegenprobe: der Weg über einen NEUEN Antrag ist versperrt
+    // (assertMonthEditable in app/api/absence-requests/route.ts:96-97).
+    // Der Fall aus Test 1 kann also nur entstehen, wenn zwischen Antrag und
+    // Genehmigung gesperrt wird.
+    setSession(memberId, ORG, "member");
+    const res = await arPost(
+      jsonReq("/api/absence-requests", "POST", { fromDate: "2026-12-14", toDate: "2026-12-16", type: "ferien" })
+    );
+    expect(res.status).toBe(403);
   });
 });
