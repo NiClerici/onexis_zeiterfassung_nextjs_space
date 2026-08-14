@@ -5,6 +5,7 @@ import {
   pensumAt,
   sollStundenTag,
   stundenAusEintrag,
+  wochenUebersicht,
   type Profil,
   type HolidayInput,
 } from "./calc";
@@ -537,5 +538,69 @@ describe("Feiertage (MIGRATION.md Punkt 6c)", () => {
     });
     expect(result.soll).toBe(0);
     expect(result.ist).toBe(4);
+  });
+});
+
+// MIGRATION.md Punkt 7 — ArG-Kontrollexport braucht die wöchentliche
+// Arbeitszeit und Überzeit separat je Woche, nicht nur als Summe.
+describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
+  const profil: Profil = {
+    wochenstunden: 40,
+    pensum: 100,
+    ferientage: 25,
+    startDate: null,
+    exitDate: null,
+    maxWeeklyHours: 45,
+  };
+
+  it("liefert eine Woche mit korrekter Arbeitszeit und keiner Überzeit unter dem Limit", () => {
+    // 2026-08-03 (Mo) – 2026-08-07 (Fr), 5×9h = 45h — genau am Limit.
+    const eintraege = ["03", "04", "05", "06", "07"].map((d) => ({
+      date: `2026-08-${d}`,
+      typ: "arbeit" as const,
+      von: "08:00",
+      bis: "17:00",
+      pauseMin: 0,
+    }));
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
+    expect(result).toHaveLength(1);
+    expect(result[0].montag).toBe("2026-08-03");
+    expect(result[0].arbeitsstunden).toBe(45);
+    expect(result[0].ueberzeit).toBe(0);
+  });
+
+  it("weist Überzeit aus, sobald die Wochenarbeitszeit über maxWeeklyHours liegt", () => {
+    // 5×10h = 50h, 5h über dem 45h-Limit.
+    const eintraege = ["03", "04", "05", "06", "07"].map((d) => ({
+      date: `2026-08-${d}`,
+      typ: "arbeit" as const,
+      von: "08:00",
+      bis: "18:00",
+      pauseMin: 0,
+    }));
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
+    expect(result[0].arbeitsstunden).toBe(50);
+    expect(result[0].ueberzeit).toBe(5);
+  });
+
+  it("gruppiert mehrere Wochen getrennt und sortiert sie aufsteigend nach Montag", () => {
+    const eintraege = [
+      { date: "2026-08-10", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }, // KW2
+      { date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }, // KW1
+    ];
+    const result = wochenUebersicht(eintraege, profil, "2026-08-01", "2026-08-14");
+    expect(result.map((w) => w.montag)).toEqual(["2026-08-03", "2026-08-10"]);
+  });
+
+  it("ignoriert Einträge ausserhalb von [from, to]", () => {
+    const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }];
+    const result = wochenUebersicht(eintraege, profil, "2026-08-10", "2026-08-14");
+    expect(result).toHaveLength(0);
+  });
+
+  it("zählt Absenzen nicht als Arbeitszeit", () => {
+    const eintraege = [{ date: "2026-08-03", typ: "ferien" as const, hours: 8 }];
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
+    expect(result).toHaveLength(0);
   });
 });

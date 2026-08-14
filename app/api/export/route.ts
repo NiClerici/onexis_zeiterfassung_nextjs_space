@@ -2,129 +2,122 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireOrg, AccessError } from "@/lib/access";
+import { requireOrg, requireRole, canSeeUser, AccessError } from "@/lib/access";
 import ExcelJS from "exceljs";
+import { kennzahlen, feriensaldo, sollStundenTag, stundenAusEintrag, type HolidayInput, type PayoutInput } from "@/lib/calc";
 import {
-  kennzahlen,
-  feriensaldo,
-  sollStundenTag,
-  stundenAusEintrag,
-  type Profil,
-  type PensumChangeInput,
-  type EintragMitDatum,
-  type PayoutInput,
-  type HolidayInput,
-} from "@/lib/calc";
+  buildProfil,
+  mapChanges,
+  mapEintraege,
+  parseExportRange,
+  fmtDate,
+  TYPE_LABELS,
+  LABEL_FONT,
+  BORDER_THIN,
+  styleHeaderRow,
+  styleDataRow,
+} from "@/lib/export-helpers";
 
-// Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
-// für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
-// aktuelle Wert. membership.pensum/weeklyHours werden von /api/pensum-changes
-// bei jeder Änderung auf den neuesten Stand überschrieben; die Basis liegt in
-// basePensum/baseWeeklyHours. Gleiches Muster wie in bulk-vacation/route.ts.
-function buildProfil(membership: any): Profil {
-  return {
-    pensum: membership?.basePensum ?? membership?.pensum ?? 100,
-    wochenstunden: membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42,
-    startDate: membership?.startDate ?? null,
-    exitDate: membership?.exitDate ?? null,
-    ferientage: membership?.vacationDays ?? 25,
-    maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,
-  };
-}
+// Für scope=org (siehe GET unten): eine Zeile pro aktivem Mitglied statt der
+// vollen Tagesliste — ein kompletter Tagesbericht für jede Person in einem
+// einzigen Workbook wäre für grössere Organisationen unhandlich und
+// überschneidet sich mit der noch kommenden Teamsicht (MIGRATION.md
+// Punkt 8, teamKennzahlen()), die genau dafür gebaut wird. Diese Sheet
+// bleibt bewusst eine kompakte Übersicht.
+async function buildOrgSummaryWorkbook(orgId: string, startDate: Date, endDate: Date): Promise<ExcelJS.Workbook> {
+  const heute = new Date();
+  const memberships = await prisma.membership.findMany({
+    where: { orgId, status: "aktiv" },
+    include: { user: { select: { firstName: true, lastName: true, email: true } }, org: true },
+    orderBy: [{ user: { lastName: "asc" } }, { user: { firstName: "asc" } }],
+  });
 
-function mapChanges(changes: any[]): PensumChangeInput[] {
-  return changes.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
-}
+  const holidaysRaw = await prisma.holiday.findMany({ where: { orgId } });
+  const holidays: HolidayInput[] = holidaysRaw.map((h) => ({ date: h.date, halfDay: h.halfDay }));
 
-function mapEintraege(entries: any[]): EintragMitDatum[] {
-  return entries.map((e) => ({
-    date: e.date,
-    typ: e.type,
-    von: e.von,
-    bis: e.bis,
-    pauseMin: e.pauseMin,
-    hours: e.hours,
-    customerId: e.customerId,
-    billable: e.billable,
-  }));
-}
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "ONEXIS Zeiterfassung";
+  const ws = workbook.addWorksheet("Alle Mitarbeitenden");
+  ws.columns = [
+    { header: "Name", key: "name", width: 24 },
+    { header: "E-Mail", key: "email", width: 26 },
+    { header: "Sollstunden", key: "soll", width: 14 },
+    { header: "Iststunden", key: "ist", width: 14 },
+    { header: "Überstunden", key: "ueberstunden", width: 14 },
+    { header: "Überzeit", key: "ueberzeit", width: 12 },
+    { header: "Verrechnungsgrad", key: "verrechnung", width: 16 },
+    { header: "Feriensaldo (offen)", key: "ferien", width: 16 },
+  ];
+  styleHeaderRow(ws.getRow(1), 8);
 
-const fmtDate = (d: Date) => {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}.${mm}.${yyyy}`;
-};
+  for (const m of memberships) {
+    const profil = buildProfil(m);
+    const [pensumChangesRaw, entries, payoutsRaw, ferienRaw] = await Promise.all([
+      prisma.pensumChange.findMany({ where: { userId: m.userId, orgId }, orderBy: { effectiveFrom: "asc" } }),
+      prisma.timeEntry.findMany({ where: { userId: m.userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
+      prisma.overtimePayout.findMany({ where: { userId: m.userId, orgId, date: { gte: startDate, lte: endDate } } }),
+      prisma.timeEntry.findMany({ where: { userId: m.userId, orgId, deletedAt: null, type: "ferien", date: { gte: new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1)), lte: new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31)) } } }),
+    ]);
+    const changes = mapChanges(pensumChangesRaw);
+    const eintraege = mapEintraege(entries);
+    const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
+    const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
 
-const TYPE_LABELS: Record<string, string> = {
-  arbeit: "Arbeitszeit",
-  ferien: "Ferien",
-  krank: "Krank",
-  feiertag: "Feiertag",
-  militaer: "Militär",
-  unbezahlt: "Unbezahlt",
-};
-
-// Style helpers
-const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1A56DB" } };
-const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
-const LABEL_FONT: Partial<ExcelJS.Font> = { bold: true, size: 11 };
-const BORDER_THIN: Partial<ExcelJS.Borders> = {
-  top: { style: "thin", color: { argb: "FFD0D0D0" } },
-  bottom: { style: "thin", color: { argb: "FFD0D0D0" } },
-  left: { style: "thin", color: { argb: "FFD0D0D0" } },
-  right: { style: "thin", color: { argb: "FFD0D0D0" } },
-};
-
-function styleHeaderRow(row: ExcelJS.Row, colCount: number) {
-  for (let i = 1; i <= colCount; i++) {
-    const cell = row.getCell(i);
-    cell.fill = HEADER_FILL;
-    cell.font = HEADER_FONT;
-    cell.border = BORDER_THIN;
-    cell.alignment = { vertical: "middle", horizontal: "center" };
+    const row = ws.addRow({
+      name: `${m.user.firstName} ${m.user.lastName}`,
+      email: m.user.email,
+      soll: k.soll,
+      ist: k.ist,
+      ueberstunden: k.ueberstunden,
+      ueberzeit: k.ueberzeit,
+      verrechnung: `${k.verrechnungsgrad.toFixed(1)}%`,
+      ferien: `${fs.offen} Tage`,
+    });
+    styleDataRow(row, 8);
+    if (k.ueberzeit > 0) row.getCell(6).font = { color: { argb: "FFDC2626" }, bold: true };
   }
-  row.height = 24;
-}
 
-function styleDataRow(row: ExcelJS.Row, colCount: number) {
-  for (let i = 1; i <= colCount; i++) {
-    const cell = row.getCell(i);
-    cell.border = BORDER_THIN;
-    cell.alignment = { vertical: "middle" };
-  }
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  return workbook;
 }
 
 export async function GET(req: Request) {
   try {
-    const { userId, orgId } = await requireOrg();
+    const ctx = await requireOrg();
+    const { orgId } = ctx;
+
+    const url = new URL(req.url);
+    const { startDate, endDate } = parseExportRange(url);
+
+    // scope: "self" (Standard) | "person" (admin/owner/manager exportiert
+    // für ein anderes, sichtbares Mitglied — canSeeUser prüft das) | "org"
+    // (nur admin/owner, gesamte Organisation als Übersicht). MIGRATION.md
+    // Punkt 7, erster Bullet: "pro Person oder gesamte Organisation".
+    const scope = url?.searchParams?.get?.("scope") ?? "self";
+
+    if (scope === "org") {
+      requireRole(ctx.role, ["owner", "admin"]);
+      const workbook = await buildOrgSummaryWorkbook(orgId, startDate, endDate);
+      const buffer = await workbook.xlsx.writeBuffer();
+      return new Response(buffer as ArrayBuffer, {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="zeiterfassung_export_organisation.xlsx"`,
+        },
+      });
+    }
+
+    let userId = ctx.userId;
+    if (scope === "person") {
+      const targetUserId = url?.searchParams?.get?.("userId") ?? "";
+      if (!targetUserId) return NextResponse.json({ error: "userId erforderlich" }, { status: 400 });
+      if (!(await canSeeUser(ctx, targetUserId))) throw new AccessError(403, "Forbidden");
+      userId = targetUserId;
+    }
 
     const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } }, include: { org: true } });
     if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
-
-    const url = new URL(req.url);
-    const type = url?.searchParams?.get?.("type") ?? "month";
-    let startDate: Date;
-    let endDate: Date;
-
-    const now = new Date();
-    const year = parseInt(url?.searchParams?.get?.("year") ?? String(now.getFullYear()));
-    const month = parseInt(url?.searchParams?.get?.("month") ?? String(now.getMonth() + 1));
-
-    // UTC-Grenzen: @db.Date-Werte werden anhand des UTC-Kalendertags gespeichert/verglichen.
-    // Lokale Date-Konstruktoren würden in Zeitzonen ≠ UTC den letzten Tag der Periode abschneiden.
-    if (type === "month") {
-      startDate = new Date(Date.UTC(year, month - 1, 1));
-      endDate = new Date(Date.UTC(year, month, 0));
-    } else if (type === "year") {
-      startDate = new Date(Date.UTC(year, 0, 1));
-      endDate = new Date(Date.UTC(year, 11, 31));
-    } else {
-      const fromStr = url?.searchParams?.get?.("from") ?? "";
-      const toStr = url?.searchParams?.get?.("to") ?? "";
-      startDate = fromStr ? new Date(fromStr) : new Date(Date.UTC(year, 0, 1));
-      endDate = toStr ? new Date(toStr) : new Date(Date.UTC(year, 11, 31));
-    }
 
     const profil = buildProfil(membership);
     const heute = new Date();

@@ -210,6 +210,16 @@ const translations: Record<string, string> = {
   "profile.customerDeleted": "Kunde gelöscht",
   "profile.customerError": "Fehler beim Speichern des Kunden",
   "profile.hourlyRate": "CHF/h",
+  // Erweiterter Export (MIGRATION.md Punkt 7)
+  "profile.exportScopeSelf": "Eigene Daten",
+  "profile.exportScopePerson": "Mitarbeiter/in wählen",
+  "profile.exportScopeOrg": "Ganze Organisation",
+  "profile.exportSelectPerson": "Person wählen",
+  "profile.exportArgControl": "ArG-Kontrollexport",
+  "profile.exportArgControlHint": "Prüffähige Tabelle nach Art. 73 ArGV 1: Beginn/Ende der Arbeitszeit, Pausen, Wochenarbeitszeit, Überzeit, Ruhetage, Nacht-/Sonntagsarbeit.",
+  "profile.exportPayroll": "Lohnexport",
+  "profile.exportPayrollDesc": "CSV mit Stunden, Absenzen und Überstunden pro Person für einen Monat — zur Übernahme in dein Lohnprogramm.",
+  "profile.exportPayrollButton": "Lohnexport (CSV) herunterladen",
   // Projektverwaltung (MIGRATION.md Punkt 5)
   "profile.projects": "Projektverwaltung",
   "profile.projectsDesc": "Projekte je Kunde anlegen, mit Stundensatz und Budget. Im Kalender kannst du Arbeitszeit-Einträgen ein Projekt zuordnen.",

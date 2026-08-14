@@ -825,7 +825,7 @@ Ansicht über mehrere Personen gibt.
 
 ---
 
-### - [ ] 7. Exporte
+### - [x] 7. Exporte
 
 - Bestehenden Excel-Export auf Organisationsebene erweitern: pro Person oder
   gesamte Organisation, Zeitraum frei wählbar.
@@ -837,6 +837,100 @@ Ansicht über mehrere Personen gibt.
 - **Neu: Lohnexport CSV** — Stunden, Absenzen nach Typ, Überstunden pro Person
   und Monat, neutral formatiert zur Übernahme in Swissdec-zertifizierte
   Lohnprogramme. Keine eigene Swissdec-Zertifizierung anstreben.
+
+**Ergebnis:** Alle drei Bullets umgesetzt, keine Schemaänderung nötig (reine
+API-/Berechnungs-/UI-Erweiterung), deshalb keine Prisma-Migration in diesem
+Punkt. Gemeinsame Hilfsfunktionen (`buildProfil`, `mapChanges`, `mapEintraege`,
+`parseExportRange`, Excel-Stil-Helfer) aus `app/api/export/route.ts` nach
+`lib/export-helpers.ts` extrahiert, damit alle drei Export-Routen sie nutzen
+können, ohne dass eine `route.ts`-Datei Hilfsfunktionen aus einer anderen
+`route.ts`-Datei importiert (Next.js App Router erlaubt aus Route-Dateien nur
+HTTP-Handler- und wenige Config-Exports).
+
+- **Bestehender Excel-Export erweitert** (`app/api/export/route.ts`): neuer
+  `scope`-Parameter (`self` | `person` | `org`). `person` prüft `canSeeUser`
+  (dieselbe Berechtigungslogik wie überall sonst); `org` verlangt
+  `requireRole(["owner","admin"])` und liefert bewusst NICHT den vollen
+  3-Sheet-Tagesbericht für jede Person (das wäre bei grösseren Organisationen
+  unhandlich und überschneidet sich mit der noch kommenden Teamsicht, Punkt 8,
+  `teamKennzahlen()`), sondern eine kompakte Ein-Zeile-pro-Mitglied-Übersicht
+  (Soll/Ist/Überstunden/Überzeit/Verrechnungsgrad/Feriensaldo) auf einem
+  eigenen Sheet "Alle Mitarbeitenden", nur aktive Mitgliedschaften.
+- **ArG-Kontrollexport** (neue Route `app/api/export/arg-control/route.ts`,
+  dieselben drei `scope`-Modi): läuft Tag für Tag durch den gewählten
+  Zeitraum (nicht nur über vorhandene Einträge, damit Ruhetage als solche
+  sichtbar sind), ein Sheet pro Person, mit Datum/Wochentag/Beginn/Ende/
+  Pause(Min)/Tagesarbeitszeit/Wochenarbeitszeit/Überzeit/Ruhetag/Nachtarbeit/
+  Sonntagsarbeit. Wochenarbeitszeit und Überzeit kommen aus einer neuen,
+  rein additiven Funktion `wochenUebersicht()` in `lib/calc.ts` (nutzt
+  `kennzahlen()`s bereits vorhandene wochenweise Überzeit-Gruppierung, gibt
+  sie aber pro Woche statt nur als Summe zurück — `kennzahlen()` selbst blieb
+  unverändert). `montagDerWoche()` wurde dafür von privat auf `export`
+  umgestellt, damit Route und `lib/calc.ts` exakt dieselbe
+  Wochendefinition verwenden statt sie zweimal zu implementieren.
+  Nacht-/Sonntagsarbeit kommt aus dem bereits bestehenden `pruefeCompliance()`
+  (Punkt 6d) — anders als im Kalender wird hier zusätzlich der Tag VOR dem
+  gewählten Zeitraum mitgeladen, damit auch für den allerersten Tag des
+  Exports ein Vortag für die Ruhezeitprüfung bekannt ist (die vom Kalender
+  bekannte Monatsgrenzen-Einschränkung aus 6d/6a gilt hier also nicht).
+  **Dokumentierte Vereinfachung:** Art. 73 ArGV 1 verlangt "Dauer UND LAGE"
+  der Pausen; das Schema speichert nur `pauseMin` (Dauer), keine Pausen-Start-/
+  Endzeit — die Spalte heisst deshalb bewusst "Pause (Min)", nicht
+  "Pause (Lage)". Eine Schemaänderung dafür wäre ein eigener Punkt.
+  **Bug beim eigenen Testen gefunden und behoben:** Excel-Sheetnamen müssen
+  innerhalb eines Workbooks eindeutig sein — zwei Mitarbeitende mit
+  identischem Vor-/Nachnamen liessen `scope=org` mit "Worksheet name already
+  exists" abstürzen. Behoben mit einer Kollisions-Zähler-Disambiguierung
+  (` (2)`, ` (3)`, …), inkl. korrekter Berücksichtigung von Excels
+  31-Zeichen-Sheetname-Limit VOR der Kollisionsprüfung, nicht danach.
+- **Lohnexport CSV** (neue Route `app/api/export/payroll/route.ts`, immer
+  organisationsweit, `requireRole(["owner","admin"])`, Query nur `year`+
+  `month`): eine Zeile pro Mitgliedschaft, die im gewählten Monat mindestens
+  einen Tag aktiv war (Ein-/Austritt mitten im Monat zählt noch mit — nicht
+  nur `status: "aktiv"` heute, sonst fehlt ein während des Monats
+  ausgetretenes Mitglied für genau seinen Austrittsmonat). Spalten:
+  Personal-ID, Name, E-Mail, aktuelles Pensum, Sollstunden, Stunden je
+  Absenztyp (Arbeit/Ferien/Krank/Militär/Unbezahlt/Feiertag), Überstunden,
+  Überzeit. **Format-Entscheidungen, dokumentiert weil nicht aus dem
+  Punkt-Text ableitbar:** Semikolon als Trennzeichen mit Komma als
+  Dezimaltrennzeichen (deutsch-/schweizerisches Excel-Standardgebietsschema)
+  und UTF-8-BOM (korrekte Umlaute in Excel) — bewusst KEINE Swissdec-ELM-
+  Zertifizierung (eigener XML-Standard mit eigenem Zertifizierungsprozess),
+  wie im Punkt-Text ausdrücklich nicht verlangt; stattdessen eine generische,
+  klar beschriftete CSV zur manuellen Übernahme.
+- **UI** (`app/(app)/profile/page.tsx`): Rolle jetzt über `useSession()`
+  gelesen (vorher nirgends in dieser Datei vorhanden). Für admin/owner ein
+  neuer "Bereich"-Selektor (Eigene Daten/Mitarbeiter:in wählen/Ganze
+  Organisation) über dem bestehenden Export-Button, Personen-Liste aus dem
+  bereits admin/owner-gated `/api/admin/team` — bewusst KEIN Zugriff für
+  manager auf fremde Exporte, da es dafür noch keine Team-Mitgliederliste
+  gibt (kommt erst mit Punkt 8, Teamsicht); dieselbe Scope-Auswahl gilt auch
+  für den neuen "ArG-Kontrollexport"-Button. Eigene neue Karte "Lohnexport"
+  (Monat+Jahr, CSV-Button), nur für admin/owner sichtbar, da Lohndaten
+  sensibel sind und organisationsweit gelten.
+
+Tests: 5 neue in `lib/calc.test.ts` (`wochenUebersicht`: Woche am Limit ohne
+Überzeit, Woche über dem Limit, mehrere Wochen korrekt getrennt und
+sortiert, Einträge ausserhalb `[from,to]` ignoriert, Absenzen zählen nicht).
+Neues `lib/export-routes.test.ts` (9 Tests, Route-Ebene): für alle drei
+Export-Routen — `scope=self` funktioniert für jede Rolle, `scope=person`
+liefert 403 ohne `canSeeUser`-Berechtigung und 200 mit, `scope=org`/
+Lohnexport sind admin/owner-only (403 sonst); Lohnexport-Test prüft
+zusätzlich den Semikolon-Header und eine korrekt mit Komma formatierte
+Stundenzahl aus einem echten Zeiteintrag. 141 Tests insgesamt grün.
+
+Browser-verifiziert (Playwright, echte Logins): admin sieht den Bereich-
+Selektor, exportiert erfolgreich eigene Daten, die ganze Organisation und
+eine ausgewählte Person (Dropdown zeigt alle vier Demo-Mitglieder korrekt),
+lädt einen ArG-Kontrollexport und einen Lohnexport herunter — dessen CSV
+enthält den erwarteten Semikolon-Header inkl. `Ueberstunden`/`Ueberzeit`.
+Als einfaches Mitglied eingeloggt: Bereich-Selektor und Lohnexport-Karte sind
+korrekt unsichtbar, der eigene ArG-Kontrollexport funktioniert weiterhin.
+Keine Konsolenfehler in beiden Durchläufen. Keine Schreib-Operationen in
+diesem Punkt (alle drei Routen sind reine GET-Exporte) — `TimeEntry`-Baseline
+(66 Zeilen) vor und nach der Verifikation unverändert, keine Aufräumung nötig.
+
+Keine Prisma-Migration nötig — reine Code-/UI-Erweiterung.
 
 ---
 
@@ -1113,3 +1207,28 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   (deaktivierte Buttons) verifiziert — per direktem `fetch()` gegen die API
   unter Umgehung der UI —, um sicherzustellen, dass ein deaktivierter Button
   nicht die einzige Verteidigungslinie ist.
+- Punkt 7: echter Bug beim eigenen Testen gefunden (nicht beim ersten
+  Schreiben, sondern erst durch einen Testfall mit zwei absichtlich
+  gleichnamigen Nutzern) — `scope=org` im ArG-Kontrollexport stürzte mit
+  "Worksheet name already exists" ab, sobald zwei Mitarbeitende denselben
+  Vor-/Nachnamen tragen. Für künftige Punkte relevant, die ebenfalls ein
+  Workbook mit einem Sheet pro Person bauen (denkbar in Punkt 8, Teamsicht,
+  falls dort auch ein Multi-Personen-Export entsteht): Sheetnamen müssen
+  aktiv disambiguiert werden, Personennamen sind in einer echten
+  Organisation KEIN verlässlich eindeutiger Schlüssel — dafür immer die
+  `userId` oder eine andere technische ID heranziehen, nicht den
+  Anzeigenamen. Ausserdem methodisch bestätigt: ein Testfall mit bewusst
+  kollidierenden Fixture-Daten (hier: zwei Nutzer mit identischem Namen)
+  deckte einen Bug auf, den ein Testfall mit "sauberen", eindeutigen
+  Testnamen nie gefunden hätte — für Punkte mit ähnlichen Mehrpersonen-
+  Aggregationen (Punkt 8, Punkt 9) lohnt sich mindestens ein Testfall mit
+  bewusst uneindeutigen/kollidierenden Eingabedaten.
+- Punkt 7, Scope-Entscheidung für später: `scope=person`/`scope=org` in den
+  Export-Routen sind aktuell nur für admin/owner in der UI erreichbar
+  (`/api/admin/team` als Personen-Quelle ist admin/owner-gated). Ein manager
+  kann sein Team serverseitig zwar schon heute exportieren (`canSeeUser`
+  erlaubt es, die Route prüft das korrekt), hat dafür aber noch keine
+  UI-Personenliste. Das ist bewusst nicht in diesem Punkt nachgezogen worden
+  — Punkt 8 (Teamsicht) baut ohnehin eine Team-Mitgliederliste für manager,
+  die dann auch hier wiederverwendet werden kann, statt sie hier vorzeitig
+  und isoliert zu duplizieren.

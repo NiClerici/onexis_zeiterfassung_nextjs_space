@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X } from "lucide-react";
+import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 
@@ -57,8 +57,17 @@ const clampNumInput = (value: string, min: number, max: number): string => {
 };
 
 
+interface TeamMemberOption {
+  userId: string;
+  firstName: string;
+  lastName: string;
+}
+
 export default function ProfilePage() {
   const { t } = useI18n();
+  const { data: session } = useSession() || {};
+  const role = (session?.user as any)?.role as "owner" | "admin" | "manager" | "member" | undefined;
+  const isOrgAdmin = role === "owner" || role === "admin";
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -122,6 +131,17 @@ export default function ProfilePage() {
   const [exportYear, setExportYear] = useState(() => new Date().getFullYear());
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
+  // Bereich (MIGRATION.md Punkt 7) — "person"/"org" nur für admin/owner
+  // sichtbar; Personen-Liste kommt aus /api/admin/team (bereits admin/owner-
+  // gated), deshalb hier bewusst kein Manager-Zugriff auf fremde Exporte —
+  // eine Team-Mitgliederliste für manager gibt es erst mit Punkt 8 (Teamsicht).
+  const [exportScope, setExportScope] = useState<"self" | "person" | "org">("self");
+  const [exportTargetUserId, setExportTargetUserId] = useState("");
+  const [teamMembers, setTeamMembers] = useState<TeamMemberOption[]>([]);
+  const [exportingArgControl, setExportingArgControl] = useState(false);
+  const [payrollYear, setPayrollYear] = useState(() => new Date().getFullYear());
+  const [payrollMonth, setPayrollMonth] = useState(() => new Date().getMonth() + 1);
+  const [exportingPayroll, setExportingPayroll] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     setLoading(true);
@@ -190,7 +210,19 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
+  const fetchTeamMembers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/team");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setTeamMembers((data?.members ?? []).map((m: any) => ({ userId: m.userId, firstName: m.firstName, lastName: m.lastName })));
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers, fetchProjects]);
+
+  useEffect(() => { if (isOrgAdmin) fetchTeamMembers(); }, [isOrgAdmin, fetchTeamMembers]);
 
   // Check if effectiveFrom is in the past
   useEffect(() => {
@@ -459,27 +491,63 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
   };
 
-  const handleExport = async () => {
-    let url = "/api/export?";
+  // Zeitraum-Query-String, gemeinsam für alle drei Export-Endpunkte
+  // (MIGRATION.md Punkt 7) — dieselbe type=month|year|custom-Logik wie schon
+  // vorher, nur extrahiert statt dreimal dupliziert.
+  const buildRangeQuery = () => {
     if (exportType === "month") {
       const [y, m] = (exportMonth ?? "").split("-");
-      url += `type=month&year=${y}&month=${m}`;
+      return `type=month&year=${y}&month=${m}`;
     } else if (exportType === "year") {
-      url += `type=year&year=${exportYear}`;
-    } else {
-      url += `type=custom&from=${exportFrom}&to=${exportTo}`;
+      return `type=year&year=${exportYear}`;
     }
+    return `type=custom&from=${exportFrom}&to=${exportTo}`;
+  };
+
+  // scope=person/org nur für admin/owner sichtbar (siehe exportScope-Deklaration).
+  const buildScopeQuery = () => {
+    if (exportScope === "org") return "&scope=org";
+    if (exportScope === "person" && exportTargetUserId) return `&scope=person&userId=${exportTargetUserId}`;
+    return "";
+  };
+
+  async function downloadBlob(url: string, filename: string, onError?: (msg: string) => void) {
     try {
       const res = await fetch(url);
       if (res?.ok) {
         const blob = await res?.blob?.();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob ?? new Blob());
-        a.download = `zeiterfassung_${exportType}_${Date.now()}.xlsx`;
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(a.href);
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        onError?.(data?.error ?? t("profile.error"));
       }
-    } catch (err: any) { console.error(err); }
+    } catch (err: any) {
+      console.error(err);
+      onError?.(t("profile.error"));
+    }
+  }
+
+  const handleExport = async () => {
+    const url = `/api/export?${buildRangeQuery()}${buildScopeQuery()}`;
+    await downloadBlob(url, `zeiterfassung_${exportType}_${Date.now()}.xlsx`, (msg) => toast.error(msg));
+  };
+
+  const handleArgControlExport = async () => {
+    setExportingArgControl(true);
+    const url = `/api/export/arg-control?${buildRangeQuery()}${buildScopeQuery()}`;
+    await downloadBlob(url, `arg_kontrollexport_${Date.now()}.xlsx`, (msg) => toast.error(msg));
+    setExportingArgControl(false);
+  };
+
+  const handlePayrollExport = async () => {
+    setExportingPayroll(true);
+    const url = `/api/export/payroll?year=${payrollYear}&month=${payrollMonth}`;
+    await downloadBlob(url, `lohnexport_${payrollYear}-${String(payrollMonth).padStart(2, "0")}.csv`, (msg) => toast.error(msg));
+    setExportingPayroll(false);
   };
 
   if (loading) return <div className="text-center py-12 text-muted-foreground text-sm">{t("common.loading")}</div>;
@@ -843,8 +911,55 @@ export default function ProfilePage() {
             </>
           )}
         </div>
+        {isOrgAdmin && (
+          <div className="flex gap-3 flex-wrap mb-3">
+            <select value={exportScope} onChange={(e) => setExportScope(e.target.value as "self" | "person" | "org")} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              <option value="self">{t("profile.exportScopeSelf")}</option>
+              <option value="person">{t("profile.exportScopePerson")}</option>
+              <option value="org">{t("profile.exportScopeOrg")}</option>
+            </select>
+            {exportScope === "person" && (
+              <select value={exportTargetUserId} onChange={(e) => setExportTargetUserId(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+                <option value="">{t("profile.exportSelectPerson")}</option>
+                {teamMembers.map((m) => (
+                  <option key={m.userId} value={m.userId}>{m.firstName} {m.lastName}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
         <button onClick={handleExport} className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition flex items-center justify-center gap-1.5"><Download className="w-4 h-4" /> {t("profile.exportButton")}</button>
+        <button
+          onClick={handleArgControlExport}
+          disabled={exportingArgControl}
+          title={t("profile.exportArgControlHint")}
+          className="w-full mt-2 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+        >
+          <FileSpreadsheet className="w-4 h-4" /> {exportingArgControl ? t("common.loading") : t("profile.exportArgControl")}
+        </button>
       </motion.div>
+
+      {isOrgAdmin && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.27 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+          <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><FileText className="w-4 h-4 text-primary" /> {t("profile.exportPayroll")}</h2>
+          <p className="text-xs text-muted-foreground mb-3">{t("profile.exportPayrollDesc")}</p>
+          <div className="flex gap-3 flex-wrap mb-3">
+            <select value={payrollMonth} onChange={(e) => setPayrollMonth(parseInt(e.target.value))} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
+                <option key={mo} value={mo}>{t(`month.${mo}`)}</option>
+              ))}
+            </select>
+            <input type="number" min="2020" max="2030" value={payrollYear} onChange={(e) => setPayrollYear(parseInt(e?.target?.value) || 2026)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+          <button
+            onClick={handlePayrollExport}
+            disabled={exportingPayroll}
+            className="w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+          >
+            <FileText className="w-4 h-4" /> {exportingPayroll ? t("common.loading") : t("profile.exportPayrollButton")}
+          </button>
+        </motion.div>
+      )}
 
       {/* Logout */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>

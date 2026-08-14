@@ -192,8 +192,10 @@ export function stundenAusEintrag(eintrag: EintragInput, sollStundenDesTages: nu
 
 // Montag der Kalenderwoche (UTC-Mitternacht), in der datum liegt — dieselbe
 // "Woche startet Montag"-Konvention, die auch der Kalender verwendet. Dient
-// als Gruppierungsschlüssel für die wochenweise ArG-Überzeit.
-function montagDerWoche(datum: Date): Date {
+// als Gruppierungsschlüssel für die wochenweise ArG-Überzeit. Exportiert,
+// damit der ArG-Kontrollexport (MIGRATION.md Punkt 7) dieselbe
+// Wochendefinition verwendet statt sie ein zweites Mal zu implementieren.
+export function montagDerWoche(datum: Date): Date {
   const day = datum.getUTCDay(); // 0=So, 1=Mo, ..., 6=Sa
   const diffZuMontag = day === 0 ? -6 : 1 - day;
   const montag = new Date(datum);
@@ -286,6 +288,51 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     totalPrognose: round1(totalPrognose),
     prognoseSaldo: round1(prognoseSaldo),
   };
+}
+
+export interface WochenSummary {
+  // Montag der Kalenderwoche, "YYYY-MM-DD".
+  montag: string;
+  // Tatsächliche Arbeitszeit (nur typ="arbeit") in dieser Woche, innerhalb [from, to].
+  arbeitsstunden: number;
+  // Anteil von arbeitsstunden über profil.maxWeeklyHours (Art. 12/13 ArG) — 0, wenn keine.
+  ueberzeit: number;
+}
+
+// Wochenweise Aufschlüsselung der tatsächlichen Arbeitszeit und der daraus
+// resultierenden Überzeit — dieselbe Wochen-Gruppierung (Montag-Start) und
+// Filterlogik (nur typ="arbeit", nur innerhalb [from, to]) wie der
+// ueberzeit-Teil von kennzahlen() oben, hier aber PRO WOCHE statt nur als
+// Summe zurückgegeben. Gebraucht vom ArG-Kontrollexport (MIGRATION.md
+// Punkt 7), der die wöchentliche Arbeitszeit und die Überzeit separat je
+// Woche ausweisen muss (Art. 73 ArGV 1) — kennzahlen() selbst bleibt
+// unverändert, das ist eine zusätzliche, rein additive Funktion.
+export function wochenUebersicht(
+  eintraege: EintragMitDatum[],
+  profil: Profil,
+  from: Date | string,
+  to: Date | string
+): WochenSummary[] {
+  const fromD = toUTCDate(from);
+  const toD = toUTCDate(to);
+  const map = new Map<number, number>();
+  for (const eintrag of eintraege) {
+    if (eintrag.typ !== "arbeit") continue;
+    const d = toUTCDate(eintrag.date);
+    if (d.getTime() < fromD.getTime() || d.getTime() > toD.getTime()) continue;
+    // sollStundenDesTages ist für typ="arbeit" irrelevant (stundenAusEintrag
+    // nutzt es nur für Absenzen ohne eigene von/bis-Zeit) — 0 ist hier sicher.
+    const stunden = stundenAusEintrag(eintrag, 0);
+    const key = montagDerWoche(d).getTime();
+    map.set(key, (map.get(key) ?? 0) + stunden);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([montagMs, arbeitsstunden]) => ({
+      montag: new Date(montagMs).toISOString().split("T")[0],
+      arbeitsstunden: round1(arbeitsstunden),
+      ueberzeit: round1(Math.max(0, arbeitsstunden - profil.maxWeeklyHours)),
+    }));
 }
 
 export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
