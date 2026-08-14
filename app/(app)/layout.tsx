@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Calendar, BarChart3, UserCircle, Users, CalendarDays } from "lucide-react";
+import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +14,10 @@ const baseTabs = [
   { href: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
   { href: "/profile", icon: UserCircle, labelKey: "nav.profile" },
 ];
+// Teamsicht (MIGRATION.md Punkt 8) — für owner/admin/manager, im Unterschied
+// zur reinen Mitgliederverwaltung (teamTab, /admin/team) rein lesend/
+// Kennzahlen-orientiert und deshalb auch für manager freigegeben.
+const teamsichtTab = { href: "/team", icon: Gauge, labelKey: "nav.teamsicht" };
 const teamTab = { href: "/admin/team", icon: Users, labelKey: "nav.team" };
 const holidaysTab = { href: "/admin/holidays", icon: CalendarDays, labelKey: "nav.holidays" };
 
@@ -28,7 +32,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Passworts zwingen (MIGRATION.md Punkt 2).
   const mustSetPassword = (session?.user as any)?.mustSetPassword;
   const role = (session?.user as any)?.role;
-  const tabs = role === "owner" || role === "admin" ? [...baseTabs, teamTab, holidaysTab] : baseTabs;
+  const tabs =
+    role === "owner" || role === "admin"
+      ? [...baseTabs, teamsichtTab, teamTab, holidaysTab]
+      : role === "manager"
+      ? [...baseTabs, teamsichtTab]
+      : baseTabs;
 
   // router.replace() darf nicht während des Renderns aufgerufen werden — das
   // löst eine setState-Kaskade in einer fremden Komponente (dem Router) aus

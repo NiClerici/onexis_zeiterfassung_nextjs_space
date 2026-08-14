@@ -24,10 +24,14 @@ import {
 // überschneidet sich mit der noch kommenden Teamsicht (MIGRATION.md
 // Punkt 8, teamKennzahlen()), die genau dafür gebaut wird. Diese Sheet
 // bleibt bewusst eine kompakte Übersicht.
-async function buildOrgSummaryWorkbook(orgId: string, startDate: Date, endDate: Date): Promise<ExcelJS.Workbook> {
+// restrictToUserIds (optional): manager exportieren mit scope=org NICHT die
+// ganze Organisation, sondern nur ihr eigenes Team (MIGRATION.md Punkt 8 —
+// dieselbe Lücke, die dort für die Teamsicht geschlossen wurde, gilt auch
+// hier für den Excel-Export der Teamsicht-Tabelle).
+async function buildOrgSummaryWorkbook(orgId: string, startDate: Date, endDate: Date, restrictToUserIds?: string[]): Promise<ExcelJS.Workbook> {
   const heute = new Date();
   const memberships = await prisma.membership.findMany({
-    where: { orgId, status: "aktiv" },
+    where: { orgId, status: "aktiv", ...(restrictToUserIds ? { userId: { in: restrictToUserIds } } : {}) },
     include: { user: { select: { firstName: true, lastName: true, email: true } }, org: true },
     orderBy: [{ user: { lastName: "asc" } }, { user: { firstName: "asc" } }],
   });
@@ -92,13 +96,21 @@ export async function GET(req: Request) {
 
     // scope: "self" (Standard) | "person" (admin/owner/manager exportiert
     // für ein anderes, sichtbares Mitglied — canSeeUser prüft das) | "org"
-    // (nur admin/owner, gesamte Organisation als Übersicht). MIGRATION.md
-    // Punkt 7, erster Bullet: "pro Person oder gesamte Organisation".
+    // (admin/owner: ganze Organisation; manager: nur das eigene Team, siehe
+    // restrictToUserIds unten). MIGRATION.md Punkt 7, erster Bullet:
+    // "pro Person oder gesamte Organisation".
     const scope = url?.searchParams?.get?.("scope") ?? "self";
 
     if (scope === "org") {
-      requireRole(ctx.role, ["owner", "admin"]);
-      const workbook = await buildOrgSummaryWorkbook(orgId, startDate, endDate);
+      requireRole(ctx.role, ["owner", "admin", "manager"]);
+      let restrictToUserIds: string[] | undefined;
+      if (ctx.role === "manager") {
+        const ownMembership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId: ctx.userId } } });
+        if (!ownMembership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
+        const reports = await prisma.membership.findMany({ where: { orgId, managerId: ownMembership.id }, select: { userId: true } });
+        restrictToUserIds = [ctx.userId, ...reports.map((r) => r.userId)];
+      }
+      const workbook = await buildOrgSummaryWorkbook(orgId, startDate, endDate, restrictToUserIds);
       const buffer = await workbook.xlsx.writeBuffer();
       return new Response(buffer as ArrayBuffer, {
         headers: {

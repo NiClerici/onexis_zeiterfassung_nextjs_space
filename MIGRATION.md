@@ -934,7 +934,7 @@ Keine Prisma-Migration nötig — reine Code-/UI-Erweiterung.
 
 ---
 
-### - [ ] 8. Teamsicht — der eigentliche USP
+### - [x] 8. Teamsicht — der eigentliche USP
 
 Neue Seite `/team` für `admin` und `manager` (Manager sieht nur sein Team):
 
@@ -950,6 +950,100 @@ Neue Seite `/team` für `admin` und `manager` (Manager sieht nur sein Team):
 Die Kennzahlen kommen aus `lib/calc.ts`, aggregiert über mehrere Personen. Neue
 reine Funktion `teamKennzahlen()` mit Tests, keine Rechenlogik in Komponenten
 oder Routen.
+
+**Ergebnis:** Vollständig umgesetzt, in drei Commits (8a Berechnungskern,
+8b API-Route, 8c UI + Nav + Export-Erweiterung), keine Schemaänderung nötig
+(reine Aggregation bereits vorhandener Daten).
+
+- **8a — `lib/calc.ts`:** neue reine Funktion `teamKennzahlen()` — ruft für
+  jede Person die bereits verifizierte `kennzahlen()` auf und summiert die
+  Ergebnisse zu Totals; keine eigene Berechnungslogik. `wochenUebersicht()`
+  (aus Punkt 7) erweitert statt eine zweite, fast identische Funktion zu
+  bauen: liefert jetzt DICHT jede Kalenderwoche im Zeitraum (auch ganz ohne
+  Einträge, vorher nur Wochen mit Einträgen — nötig, damit Heatmap/Prognose
+  lückenlose Wochenraster zeigen) sowie zusätzlich `kundenstunden`/
+  `verrechnungsgrad` (Heatmap) und `sollStunden`/`auslastung` (Prognose) je
+  Woche. Eine Funktion für drei Verwendungszwecke (ArG-Kontrollexport,
+  Heatmap, Prognose) statt drei fast identischer — dieselbe
+  Wochen-Gruppierung wird so garantiert nur einmal implementiert.
+  `montagDerWoche()` und `summeSollstunden()` von privat auf `export`
+  umgestellt (bereits bei `montagDerWoche` in Punkt 7 begonnenes Muster),
+  damit keine der beiden Wochen-/Soll-Berechnungen zweimal implementiert
+  wird.
+- **8b — `app/api/team/route.ts`:** owner/admin/manager (member verboten).
+  Sichtbarkeit als Listenfilter — dieselbe Hierarchie wie `canSeeUser()` in
+  `lib/access.ts`, hier aber für eine ganze Liste statt einer Einzelprüfung:
+  manager sehen sich selbst + direkt unterstellte Mitglieder
+  (`Membership.managerId`), admin/owner die ganze Organisation. Liefert pro
+  sichtbarem Mitglied Soll/Ist/Überstunden/Verrechnungsgrad (über
+  `teamKennzahlen()`) plus Feriensaldo (separater `feriensaldo()`-Aufruf,
+  andere Zeitdimension "Jahr" als der gewählte Berichtszeitraum), eine
+  Heatmap-Wochenliste für den gewählten Berichtszeitraum und eine
+  Prognose-Wochenliste für die kommenden 8 Wochen — bewusst ein FIXES,
+  vom gewählten Berichtszeitraum UNABHÄNGIGES Prognosefenster (dokumentierte,
+  aber willkürliche Wahl, kein Gesetzeswert), da die Prognose immer ab der
+  aktuellen Woche in die Zukunft blickt, während der Berichtszeitraum
+  typischerweise ein vergangener/laufender Monat ist. Ein einziger
+  Entries-Fetch pro Person deckt beide Fenster ab (kennzahlen()/
+  wochenUebersicht() filtern intern auf ihr jeweiliges `[from,to]`).
+  Kunden-/Projektsicht: Stunden je aktivem Projekt/Kunde NUR aus den
+  sichtbaren Mitgliedern (bei manager: nur das eigene Team), Umsatz aus dem
+  Stundensatz (Projekt- vor Kunden-Stundensatz als Fallback), Budget-
+  überschreitung markiert — verwendet `Project.hourlyRate`/`budgetHours`
+  erstmals seit ihrer Einführung in Punkt 5 (dort als bewusst offene Lücke
+  dokumentiert).
+- **8c — UI (`app/(app)/team/page.tsx`) und Nachzügler-Fixes:** Rollen-Guard
+  (redirect zu `/calendar` für `member`), neuer Nav-Tab „Teamsicht" für
+  owner/admin/manager (`app/(app)/layout.tsx`) — bewusst getrennt vom
+  bestehenden „Team"-Tab (`/admin/team`, reine Mitgliederverwaltung,
+  weiterhin admin/owner-only). Zeitraum-Selektor (Monat/Jahr/Zeitraum,
+  gleiches Muster wie Analytics/Export), Mitarbeitenden-Tabelle mit
+  Klick-Sortierung (jede Spalte) und Namensfilter, Heatmap- und
+  Prognose-Raster als eingefärbte Tabellen (Farbskala: <50% orange,
+  50–80% gelb, 80–110% grün, >110% rot — "deutlich überbucht"),
+  Kunden-/Projekttabelle mit rot hervorgehobenen Budgetüberschreitungen.
+  Excel-Export der Tabelle nutzt den bereits in Punkt 7 gebauten
+  `/api/export?scope=org`-Endpunkt wieder, statt einen eigenen zu bauen.
+  **Dabei eine in Punkt 7 bereits dokumentierte, bewusst offen gelassene
+  Lücke geschlossen:** `scope=org` in `/api/export` war bisher admin/owner-
+  only — jetzt auch für `manager` erlaubt, dann aber serverseitig auf das
+  eigene Team beschränkt (`restrictToUserIds`), statt versehentlich die
+  ganze Organisation zu exportieren. `/api/team` bekam ausserdem eine kleine
+  Ergänzung: `pensum` (aktueller Vertragswert, gleiche Wahl wie im
+  Lohnexport) wird jetzt pro Mitglied mitgeliefert — für die Tabellenspalte
+  gebraucht, war in der ursprünglichen 8b-Fassung übersehen worden.
+
+Tests: 14 neue in `lib/calc.test.ts` (`wochenUebersicht`: dichte
+Wochenliste, Verrechnungsgrad, Sollstunden/Auslastung; `teamKennzahlen`:
+Konsistenz mit direktem `kennzahlen()`-Aufruf, Totals-Summierung,
+Null-Fälle). Neues `lib/team-route.test.ts` (6 Tests): Berechtigungs-Scoping
+für alle drei erlaubten Rollen (member 403, manager nur eigenes Team,
+admin/owner alle), Budgetüberschreitung + Umsatzberechnung, Feriensaldo/
+Heatmap/Prognose-Struktur pro Mitglied, Totals-Aggregation. 154 Tests
+insgesamt grün.
+
+Browser-verifiziert (Playwright, drei echte Logins): admin sieht alle vier
+Demo-Mitglieder in Tabelle, Heatmap und Prognose, Spalten-Sortierung und
+Namensfilter funktionieren, Excel-Export lädt herunter; manager sieht
+nachweislich nur sich selbst und den einen direkt unterstellten Bericht
+(Mia), nicht Anna (admin) oder John (owner) — sowohl in der Tabelle als
+auch in Heatmap/Prognose; member wird beim Versuch, `/team` direkt
+aufzurufen, zu `/calendar` umgeleitet, und der Nav-Tab „Teamsicht" ist für
+member gar nicht erst sichtbar. Keine Konsolenfehler in allen drei
+Durchläufen. Keine Schreib-Operationen in diesem Punkt (alle Routen sind
+GET) — `TimeEntry`-Baseline (66 Zeilen) vor und nach der Verifikation
+unverändert.
+
+Bewusst NICHT Teil dieses Punktes: eine Team-Mitgliederliste für manager in
+der Profilseiten-Export-UI (dort bei Punkt 7 als offene Lücke dokumentiert)
+— die manager-Sichtbarkeitslogik existiert jetzt serverseitig vollständig
+(`/api/team`, `/api/export?scope=org`), aber `profile/page.tsx`s
+Personen-Picker nutzt weiterhin `/api/admin/team` (admin/owner-only) und
+bietet manager deshalb keine UI, um für ein einzelnes Teammitglied zu
+exportieren. Das bleibt eine bewusst offene, dokumentierte Lücke für einen
+späteren Punkt.
+
+Keine Prisma-Migration nötig — reine Aggregation bereits vorhandener Daten.
 
 ---
 
@@ -1232,3 +1326,37 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   — Punkt 8 (Teamsicht) baut ohnehin eine Team-Mitgliederliste für manager,
   die dann auch hier wiederverwendet werden kann, statt sie hier vorzeitig
   und isoliert zu duplizieren.
+- Punkt 8: `wochenUebersicht()` (Punkt 7) mehrfach wiederverwendet statt
+  einer zweiten/dritten fast identischen Funktion — jetzt Grundlage für
+  ArG-Kontrollexport, Teamsicht-Heatmap UND Teamsicht-Prognose gleichzeitig.
+  Wichtig für künftige Punkte, die ebenfalls eine wochenweise Aufschlüsselung
+  brauchen: zuerst prüfen, ob `wochenUebersicht()` mit einem zusätzlichen
+  Feld erweitert werden kann, bevor eine neue, eigene Wochen-Gruppierung
+  entsteht — die Funktion mutiert dadurch zwar zu einem "Mehrzweck"-Rückgabe-
+  typ mit Feldern, die nicht jeder Aufrufer braucht (ArG-Kontrollexport
+  ignoriert `verrechnungsgrad`/`auslastung`, die Heatmap ignoriert
+  `ueberzeit`), aber das ist der bewusst akzeptierte Kompromiss gegenüber
+  drei separaten, garantiert irgendwann auseinanderdriftenden
+  Wochen-Gruppierungen.
+- Punkt 8, offene Lücke aus Punkt 7 nur TEILWEISE geschlossen: die
+  serverseitige manager-Sichtbarkeit für Exporte ist jetzt vollständig
+  (`/api/team`, `/api/export?scope=org` mit `restrictToUserIds`), aber
+  `profile/page.tsx`s Personen-Picker für `scope=person`-Exporte nutzt
+  weiterhin `/api/admin/team` (admin/owner-only) — ein manager kann also
+  weiterhin nicht gezielt EIN einzelnes Teammitglied exportieren, nur das
+  ganze Team auf einmal über die neue `/team`-Seite. Falls das für Punkt 9
+  oder später gebraucht wird: `/api/team`s bereits vorhandene
+  Sichtbarkeitsliste liesse sich leicht zu einem generischen
+  „sichtbare Mitglieder"-Endpunkt für manager extrahieren, statt
+  `/api/admin/team` nachträglich für manager zu öffnen (das ist bewusst
+  weiterhin eine reine Verwaltungs-Route für admin/owner, siehe Kommentar
+  dort).
+- Punkt 8, Testmethodik: `lib/team-route.test.ts`s Fixture-Zeiteintrag
+  musste bewusst auf ein Datum im ECHTEN aktuellen Monat gelegt werden
+  (nicht auf ein beliebiges Zukunftsdatum wie in früheren Testfiles dieses
+  Loops oft verwendet), weil `kennzahlen()` Einträge nach `heute` als
+  `geplantZukunft` statt als `ist` zählt — ein zunächst rotgelaufener Test
+  (`totals.ist` war 0) deckte das auf. Für künftige Tests, die reale
+  „Ist"-Stunden über `kennzahlen()`/`teamKennzahlen()` prüfen wollen: das
+  Testdatum muss immer vor dem tatsächlichen `new Date()`-Zeitpunkt der
+  Testausführung liegen, nicht nur irgendein plausibles Kalenderdatum.

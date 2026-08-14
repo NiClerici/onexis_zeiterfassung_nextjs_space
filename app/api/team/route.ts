@@ -66,6 +66,11 @@ export async function GET(req: Request) {
     const heatmap: Array<{ userId: string; name: string; weeks: Array<{ montag: string; verrechnungsgrad: number; arbeitsstunden: number }> }> = [];
     const forecast: Array<{ userId: string; name: string; weeks: Array<{ montag: string; auslastung: number; geplantStunden: number; sollStunden: number }> }> = [];
     const feriensaldoByUser: Record<string, { anspruch: number; bezogen: number; geplant: number; offen: number }> = {};
+    // Aktuelles (nicht historisches) Pensum für die Tabellenspalte — gleiche
+    // Wahl wie im Lohnexport (Punkt 7): die Tabelle zeigt den heute gültigen
+    // Vertragswert, nicht die historische Basis, die buildProfil() intern
+    // für sollStundenTag/pensumAt braucht.
+    const pensumByUser: Record<string, number> = {};
     // Für die Kunden-/Projektsicht: alle "arbeit"-Einträge der sichtbaren
     // Mitglieder im Berichtszeitraum, projekt-/kundenbezogen aggregiert.
     const projectHours = new Map<string, number>();
@@ -88,6 +93,7 @@ export async function GET(req: Request) {
 
       const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
       feriensaldoByUser[m.userId] = fs;
+      pensumByUser[m.userId] = m.pensum;
 
       const heatmapWochen = wochenUebersicht(eintraege, profil, changes, holidays, startDate, endDate);
       heatmap.push({
@@ -117,7 +123,7 @@ export async function GET(req: Request) {
     }
 
     const result = teamKennzahlen({ from: startDate, to: endDate, heute, holidays, members: teamMembers });
-    const membersWithFerien = result.members.map((m) => ({ ...m, feriensaldo: feriensaldoByUser[m.userId] }));
+    const membersWithFerien = result.members.map((m) => ({ ...m, pensum: pensumByUser[m.userId], feriensaldo: feriensaldoByUser[m.userId] }));
 
     // Kunden-/Projektsicht (MIGRATION.md Punkt 8, dritter Bullet) — nur
     // Stunden der SICHTBAREN Mitglieder (bei manager: nur das eigene Team),
