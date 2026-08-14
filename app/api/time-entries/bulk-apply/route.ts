@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
-import type { Prisma } from "@prisma/client";
+import { diffTimeEntryFields } from "@/lib/audit";
 
 // Start 08:00, 30min Pause ab 6h Tagesstunden — liefert von/bis für "arbeit"-Einträge
 function buildArbeitszeit(hours: number): { von: string; bis: string; pauseMin: number } {
@@ -94,14 +94,14 @@ export async function POST(req: Request) {
 
     // Bestehende Einträge im Zielzeitraum laden
     const existing = await prisma.timeEntry.findMany({
-      where: { userId, orgId, date: { gte: fromDate, lte: toDate } },
-      select: { id: true, date: true, type: true },
+      where: { userId, orgId, deletedAt: null, date: { gte: fromDate, lte: toDate } },
+      select: { id: true, date: true, type: true, von: true, bis: true, pauseMin: true, hours: true },
     });
-    const existingMap = new Map<string, { id: string; type: string }>();
+    const existingMap = new Map<string, { id: string; type: string; von: string | null; bis: string | null; pauseMin: number; hours: number | null }>();
     for (const e of existing) {
       const d = new Date(e.date);
       const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-      existingMap.set(key, { id: e.id, type: e.type });
+      existingMap.set(key, { id: e.id, type: e.type, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours });
     }
 
     let created = 0;
@@ -111,7 +111,14 @@ export async function POST(req: Request) {
     let skippedProtected = 0; // Ferien/Feiertage werden nie überschrieben
 
     const current = new Date(fromDate);
-    const operations: Prisma.PrismaPromise<any>[] = [];
+    // entryId → alt/neu für den Audit-Trail bei Updates (MIGRATION.md Punkt
+    // 6b) — Erstellungen werden nicht auditiert, nur Änderungen bestehender
+    // Einträge, siehe lib/audit.ts.
+    type ExistingState = { type: string; von: string | null; bis: string | null; pauseMin: number; hours: number | null };
+    type NewState = { type: string; von: string; bis: string; pauseMin: number; hours: null };
+    type PlannedUpdate = { id: string; before: ExistingState; after: NewState };
+    const creates: Array<{ date: Date; von: string; bis: string; pauseMin: number }> = [];
+    const updatesToApply: PlannedUpdate[] = [];
 
     while (current <= toDate) {
       const hours = getTemplateHoursForDay(current, tpl);
@@ -131,30 +138,42 @@ export async function POST(req: Request) {
             skippedExisting++;
           } else {
             const { von, bis, pauseMin } = buildArbeitszeit(hours);
-            operations.push(
-              prisma.timeEntry.update({
-                where: { id: ex.id },
-                data: { type: "arbeit", von, bis, pauseMin, hours: null },
-              })
-            );
+            updatesToApply.push({
+              id: ex.id,
+              before: { type: ex.type, von: ex.von, bis: ex.bis, pauseMin: ex.pauseMin, hours: ex.hours },
+              after: { type: "arbeit", von, bis, pauseMin, hours: null },
+            });
             updated++;
           }
         } else {
           const { von, bis, pauseMin } = buildArbeitszeit(hours);
-          operations.push(
-            prisma.timeEntry.create({
-              data: { userId, orgId, date: dbDate, type: "arbeit", von, bis, pauseMin, hours: null },
-            })
-          );
+          creates.push({ date: dbDate, von, bis, pauseMin });
           created++;
         }
       }
       current.setUTCDate(current.getUTCDate() + 1);
     }
 
-    // Alle Operationen atomar in einer Transaktion ausführen
-    if (operations.length > 0) {
-      await prisma.$transaction(operations);
+    // Alle Operationen atomar in einer Transaktion ausführen, inkl.
+    // Audit-Trail für jedes Update (MIGRATION.md Punkt 6b).
+    if (creates.length > 0 || updatesToApply.length > 0) {
+      await prisma.$transaction(
+        async (tx) => {
+          for (const c of creates) {
+            await tx.timeEntry.create({ data: { userId, orgId, date: c.date, type: "arbeit", von: c.von, bis: c.bis, pauseMin: c.pauseMin, hours: null } });
+          }
+          for (const u of updatesToApply) {
+            await tx.timeEntry.update({ where: { id: u.id }, data: u.after });
+            const changes = diffTimeEntryFields(u.before, u.after);
+            if (changes.length > 0) {
+              await tx.timeEntryAudit.createMany({
+                data: changes.map((c) => ({ entryId: u.id, orgId, changedBy: userId, field: c.field, oldValue: c.oldValue, newValue: c.newValue })),
+              });
+            }
+          }
+        },
+        { timeout: 30000 }
+      );
     }
 
     return NextResponse.json({

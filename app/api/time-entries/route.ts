@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
 import { requireOrg, AccessError } from "@/lib/access";
+import { diffTimeEntryFields } from "@/lib/audit";
 
 function isValidType(type: unknown): type is EintragTyp {
   return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
@@ -64,7 +65,7 @@ export async function GET(req: Request) {
     const endDate = new Date(Date.UTC(year, month, 0));
 
     const entries = await prisma.timeEntry.findMany({
-      where: { userId, orgId, date: { gte: startDate, lte: endDate } },
+      where: { userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } },
       orderBy: [{ date: "asc" }, { von: "asc" }],
     });
 
@@ -147,7 +148,7 @@ export async function PUT(req: Request) {
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId } });
+    const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId, deletedAt: null } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     let parsedDate: Date | undefined;
@@ -178,24 +179,37 @@ export async function PUT(req: Request) {
     const clampedHours =
       hours !== undefined ? (hours === null || hours === "" ? null : Math.max(0, Math.min(24, Number(hours)))) : undefined;
 
-    const entry = await prisma.timeEntry.update({
-      where: { id },
-      data: {
-        date: parsedDate,
-        type: nextType,
-        von: isArbeit ? (von !== undefined ? von || null : existing.von) : null,
-        bis: isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null,
-        pauseMin: isArbeit
-          ? pauseMin !== undefined
-            ? Math.max(0, Math.min(1440, Number(pauseMin) || 0))
-            : existing.pauseMin
-          : 0,
-        notiz: notiz !== undefined ? notiz?.trim?.() || null : undefined,
-        customerId: nextCustomerId,
-        projectId: nextProjectId,
-        billable: billable !== undefined ? Boolean(billable) : defaultBillable,
-        hours: clampedHours,
-      },
+    // Vollständig aufgelöster Zielzustand — Basis sowohl für das Update als
+    // auch für den Feld-Diff gegen "existing" (MIGRATION.md Punkt 6b). Felder,
+    // die nicht mitgeschickt wurden, fallen auf den bestehenden Wert zurück,
+    // damit der Diff nur tatsächliche Änderungen sieht, keine Prisma-"undefined
+    // heisst unverändert"-Semantik.
+    const nextState = {
+      date: parsedDate ?? existing.date,
+      type: nextType,
+      von: isArbeit ? (von !== undefined ? von || null : existing.von) : null,
+      bis: isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null,
+      pauseMin: isArbeit
+        ? pauseMin !== undefined
+          ? Math.max(0, Math.min(1440, Number(pauseMin) || 0))
+          : existing.pauseMin
+        : 0,
+      notiz: notiz !== undefined ? notiz?.trim?.() || null : existing.notiz,
+      customerId: nextCustomerId !== undefined ? nextCustomerId : existing.customerId,
+      projectId: nextProjectId !== undefined ? nextProjectId : existing.projectId,
+      billable: billable !== undefined ? Boolean(billable) : defaultBillable,
+      hours: clampedHours !== undefined ? clampedHours : existing.hours,
+    };
+    const changes = diffTimeEntryFields(existing, nextState);
+
+    const entry = await prisma.$transaction(async (tx) => {
+      const updated = await tx.timeEntry.update({ where: { id }, data: nextState });
+      if (changes.length > 0) {
+        await tx.timeEntryAudit.createMany({
+          data: changes.map((c) => ({ entryId: id, orgId, changedBy: userId, field: c.field, oldValue: c.oldValue, newValue: c.newValue })),
+        });
+      }
+      return updated;
     });
 
     return NextResponse.json({ entry });
@@ -215,10 +229,19 @@ export async function DELETE(req: Request) {
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId } });
+    const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId, deletedAt: null } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    await prisma.timeEntry.delete({ where: { id } });
+    // Soft-Delete statt Hard-Delete (MIGRATION.md Punkt 6b) — die gesetzliche
+    // Aufbewahrungspflicht von 5 Jahren verlangt, dass gelöschte Einträge
+    // rekonstruierbar bleiben.
+    const deletedAt = new Date();
+    await prisma.$transaction([
+      prisma.timeEntry.update({ where: { id }, data: { deletedAt } }),
+      prisma.timeEntryAudit.create({
+        data: { entryId: id, orgId, changedBy: userId, field: "deletedAt", oldValue: null, newValue: deletedAt.toISOString() },
+      }),
+    ]);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });

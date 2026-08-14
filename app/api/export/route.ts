@@ -136,7 +136,7 @@ export async function GET(req: Request) {
     const kundenRaw = await prisma.customer.findMany({ where: { orgId } });
 
     const entries = await prisma.timeEntry.findMany({
-      where: { userId, orgId, date: { gte: startDate, lte: endDate } },
+      where: { userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } },
       orderBy: { date: "asc" },
       include: { customer: { select: { name: true } }, project: { select: { name: true } } },
     });
@@ -169,7 +169,7 @@ export async function GET(req: Request) {
     const yearStart = new Date(Date.UTC(displayYear, 0, 1));
     const yearEnd = new Date(Date.UTC(displayYear, 11, 31));
     const yearFerienRaw = await prisma.timeEntry.findMany({
-      where: { userId, orgId, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
+      where: { userId, orgId, deletedAt: null, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
     });
     const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, eintraege: mapEintraege(yearFerienRaw) });
 

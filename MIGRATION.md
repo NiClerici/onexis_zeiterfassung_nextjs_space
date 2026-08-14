@@ -545,6 +545,61 @@ statt Hard-Delete; alle Queries filtern auf `deletedAt: null`. Ohne das ist
 die gesetzliche Aufbewahrungspflicht von 5 Jahren nicht erfüllt und der Export
 bei einer Kontrolle durch das Arbeitsinspektorat wertlos.
 
+**Ergebnis:** `TimeEntryAudit` genau wie beschrieben angelegt (entryId, orgId,
+changedBy, changedAt, field, oldValue, newValue) — bewusst ohne Prisma-Relation
+auf `TimeEntry`/`User` (gleiches Muster wie `Invitation.invitedByUserId`),
+damit der Audit-Trail lesbar bleibt, auch wenn ein Account später gelöscht
+wird. `TimeEntry.deletedAt` als nullable Spalte ergänzt. Reine additive
+Migration (neue Tabelle + neue nullable Spalte) — direkt angewendet, keine
+Rückfrage nötig (nur destruktive Schemaänderungen wie Spalten-Drops brauchen
+laut Session-Vorgabe die explizite Freigabe).
+
+Neues `lib/audit.ts` mit `diffTimeEntryFields()` als reine, Prisma-freie
+Diff-Funktion (gleiches Trennungsprinzip wie `lib/calc.ts`) — vergleicht zwei
+bereits final aufgelöste Feldzustände und liefert nur tatsächlich geänderte
+Felder, Date-Felder werden dabei auf den UTC-Kalendertag reduziert. Bewusste
+Scope-Entscheidung: protokolliert werden **Änderungen und Löschungen**, wie
+im Punkt-Text gefordert — nicht Erstellungen (ein neu angelegter Eintrag hat
+keinen "alten" Zustand, den ein field/oldValue/newValue-Schema sinnvoll
+abbilden würde).
+
+Verdrahtet in allen fünf Stellen, die TimeEntry mutieren oder lesen:
+`app/api/time-entries/route.ts` (PUT diffed den vollständig aufgelösten
+Zielzustand gegen `existing` und schreibt Audit-Zeilen in einer Transaktion
+mit dem Update; DELETE setzt `deletedAt` statt zu löschen und schreibt eine
+Audit-Zeile mit `field: "deletedAt"`; GET filtert `deletedAt: null`),
+`app/api/time-entries/bulk-vacation/route.ts` und `bulk-apply/route.ts`
+(beide von einem Array vorab gebauter `Prisma.PrismaPromise`-Operationen auf
+eine interaktive `prisma.$transaction(async (tx) => …)` umgestellt, damit vor
+jedem Update der Vorher-Zustand für den Diff bekannt ist — Neuanlagen bleiben
+unauditiert, s.o.; Timeout auf 30s erhöht wegen bis zu 366 sequentiellen
+Operationen), `app/api/analytics/route.ts` und `app/api/export/route.ts`
+(beide TimeEntry-Queries um `deletedAt: null` ergänzt).
+
+Tests: `lib/audit.test.ts` (8 Tests, reine Diff-Logik: keine Änderung, ein
+Feld, mehrere Felder, null↔Wert, Datumsreduktion auf Kalendertag, echte
+Datumsänderung, nicht-auditierte Felder werden ignoriert, boolean-Felder).
+Neues `lib/time-entry-audit.test.ts` (7 Tests, Route-Ebene wie
+`api-isolation.test.ts`: PUT erzeugt genau die geänderten Feld-Audit-Zeilen,
+kein Audit bei echter Nicht-Änderung, mehrere Felder gleichzeitig, DELETE
+setzt `deletedAt` statt Hard-Delete und protokolliert es, ein
+soft-gelöschter Eintrag verschwindet aus GET, ein zweites DELETE auf denselben
+Eintrag liefert 404 ohne Doppel-Audit, PUT auf einen soft-gelöschten Eintrag
+liefert ebenfalls 404).
+
+Browser-verifiziert (manager@onexis.test, Kalender, 20.05.2026 — bewusst über
+den Monats-Picker statt Klick-Navigation angesteuert und der erreichte
+Monat vor dem Klick auf den Tag verifiziert, siehe Lehre aus Punkt 5): Eintrag
+über die UI angelegt, `bis`-Zeit bearbeitet und gespeichert, dann über den
+Papierkorb-Button gelöscht. Direkter DB-Check danach bestätigte: Der Datensatz
+existiert weiterhin (kein Hard-Delete) mit gesetztem `deletedAt`;
+`TimeEntryAudit` enthält genau zwei Zeilen — eine für die `bis`-Änderung
+(alt/neu korrekt) und eine für `deletedAt` (alt `null`, neu der Zeitstempel),
+beide mit korrektem `changedBy`. Der Kalender zeigte den Tag danach korrekt
+als leer ("Keine Einträge für diesen Tag"). Keine Konsolenfehler. Testdaten
+(TimeEntry- und TimeEntryAudit-Zeile) danach vollständig per SQL entfernt
+(Baseline 66 `TimeEntry`- und 0 `TimeEntryAudit`-Zeilen bestätigt).
+
 **6c. Feiertage.** Tabelle `Holiday` (orgId, date, name, canton nullable,
 halfDay). Schweizer Basissatz plus kantonale Feiertage als Seed, pro
 Organisation auswählbar und ergänzbar. `sollStundenTag` gibt an ganzen
@@ -797,3 +852,17 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   OR-„Überstunden" getrennt (Feld, i18n-Label, UI-Karte, Export-Zeile) —
   künftige Compliance-Punkte (v.a. 6d, Pausen-/Ruhezeitprüfung) sollten
   konsequent denselben Begriff verwenden und nicht wieder vermischen.
+- Punkt 6b: die beiden Bulk-Routen (`bulk-vacation`, `bulk-apply`) bauten
+  bisher ein Array von Prisma-Operationen und führten es als
+  Batch-Transaktion (`prisma.$transaction([...])`) aus — das geht nicht mehr,
+  sobald pro Update ein Vorher-Zustand für den Audit-Diff gebraucht wird.
+  Beide auf eine interaktive Transaktion (`prisma.$transaction(async (tx) =>
+  …)`) umgestellt. Wichtig für künftige Punkte, die diese Routen anfassen
+  (z.B. 6c, falls Feiertage auch bulk gesetzt werden): Erstellungen werden
+  bewusst NICHT auditiert, nur Änderungen an bestehenden Zeilen und
+  Löschungen — konsequent so weiterführen, nicht nachträglich doch
+  Create-Audits ergänzen, ohne das explizit zu entscheiden. Ausserdem: jede
+  neue Stelle, die TimeEntry liest, MUSS `deletedAt: null` filtern — leicht
+  zu vergessen, da es keinen DB-Constraint gibt, der das erzwingt (bewusst
+  keine Prisma-Middleware/globalen Filter verwendet, um explizit zu bleiben,
+  welche Query was sieht).

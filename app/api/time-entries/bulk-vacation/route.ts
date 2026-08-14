@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
-import type { Prisma } from "@prisma/client";
+import { diffTimeEntryFields } from "@/lib/audit";
 
 function parseDateYMD(s: string): Date | null {
   if (!s || typeof s !== "string") return null;
@@ -65,14 +65,14 @@ export async function POST(req: Request) {
 
     // Load existing entries in the range
     const existing = await prisma.timeEntry.findMany({
-      where: { userId, orgId, date: { gte: fromDate, lte: toDate } },
-      select: { id: true, date: true, type: true },
+      where: { userId, orgId, deletedAt: null, date: { gte: fromDate, lte: toDate } },
+      select: { id: true, date: true, type: true, hours: true },
     });
-    const existingMap = new Map<string, { id: string; type: string }>();
+    const existingMap = new Map<string, { id: string; type: string; hours: number | null }>();
     for (const e of existing) {
       const d = new Date(e.date);
       const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-      existingMap.set(key, { id: e.id, type: e.type });
+      existingMap.set(key, { id: e.id, type: e.type, hours: e.hours });
     }
 
     let created = 0;
@@ -80,7 +80,12 @@ export async function POST(req: Request) {
     let skipped = 0;
 
     const current = new Date(fromDate);
-    const operations: Prisma.PrismaPromise<any>[] = [];
+    // entryId → alt/neu für den Audit-Trail bei Updates (MIGRATION.md Punkt
+    // 6b) — Erstellungen werden nicht auditiert, nur Änderungen bestehender
+    // Einträge, siehe lib/audit.ts.
+    type PlannedUpdate = { id: string; before: { type: string; hours: number | null }; after: { type: string; hours: number } };
+    const creates: Array<{ date: Date; hours: number }> = [];
+    const updatesToApply: PlannedUpdate[] = [];
 
     while (current <= toDate) {
       const dayOfWeek = current.getUTCDay();
@@ -107,29 +112,37 @@ export async function POST(req: Request) {
         } else if (!overwriteExisting) {
           skipped++;
         } else {
-          operations.push(
-            prisma.timeEntry.update({
-              where: { id: ex.id },
-              data: { hours, type: "ferien" },
-            })
-          );
+          updatesToApply.push({ id: ex.id, before: { type: ex.type, hours: ex.hours }, after: { type: "ferien", hours } });
           updated++;
         }
       } else {
-        operations.push(
-          prisma.timeEntry.create({
-            data: { userId, orgId, date: dbDate, hours, type: "ferien" },
-          })
-        );
+        creates.push({ date: dbDate, hours });
         created++;
       }
 
       current.setUTCDate(current.getUTCDate() + 1);
     }
 
-    // Alle Operationen atomar in einer Transaktion ausführen
-    if (operations.length > 0) {
-      await prisma.$transaction(operations);
+    // Alle Operationen atomar in einer Transaktion ausführen, inkl.
+    // Audit-Trail für jedes Update (MIGRATION.md Punkt 6b).
+    if (creates.length > 0 || updatesToApply.length > 0) {
+      await prisma.$transaction(
+        async (tx) => {
+          for (const c of creates) {
+            await tx.timeEntry.create({ data: { userId, orgId, date: c.date, hours: c.hours, type: "ferien" } });
+          }
+          for (const u of updatesToApply) {
+            await tx.timeEntry.update({ where: { id: u.id }, data: u.after });
+            const changes = diffTimeEntryFields(u.before, u.after);
+            if (changes.length > 0) {
+              await tx.timeEntryAudit.createMany({
+                data: changes.map((c) => ({ entryId: u.id, orgId, changedBy: userId, field: c.field, oldValue: c.oldValue, newValue: c.newValue })),
+              });
+            }
+          }
+        },
+        { timeout: 30000 }
+      );
     }
 
     return NextResponse.json({

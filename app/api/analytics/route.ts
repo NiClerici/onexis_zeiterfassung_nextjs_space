@@ -87,7 +87,7 @@ export async function GET(req: Request) {
     const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
     const changes = mapChanges(pensumChangesRaw);
 
-    const entriesRaw = await prisma.timeEntry.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
+    const entriesRaw = await prisma.timeEntry.findMany({ where: { userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } });
     const eintraege = mapEintraege(entriesRaw);
 
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
@@ -110,7 +110,7 @@ export async function GET(req: Request) {
     const yearStart = new Date(Date.UTC(displayYear, 0, 1));
     const yearEnd = new Date(Date.UTC(displayYear, 11, 31));
     const yearFerienRaw = await prisma.timeEntry.findMany({
-      where: { userId, orgId, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
+      where: { userId, orgId, deletedAt: null, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
     });
     const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, eintraege: mapEintraege(yearFerienRaw) });
 

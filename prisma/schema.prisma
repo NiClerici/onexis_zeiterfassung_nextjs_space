@@ -179,6 +179,10 @@ model TimeEntry {
   // im Tagesdialog überschreibbar. Ersetzt die frühere Kunden-Lookup-Liste in
   // kennzahlen() (MIGRATION.md Punkt 5).
   billable   Boolean  @default(false)
+  // Soft-Delete statt Hard-Delete (MIGRATION.md Punkt 6b) — die gesetzliche
+  // Aufbewahrungspflicht von 5 Jahren verlangt, dass gelöschte Einträge
+  // rekonstruierbar bleiben. Alle lesenden Queries filtern auf deletedAt: null.
+  deletedAt  DateTime?
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -187,6 +191,27 @@ model TimeEntry {
   @@index([userId, date])
   @@index([orgId, date])
   @@index([projectId])
+}
+
+// Feldweises Änderungs- und Löschprotokoll für TimeEntry (MIGRATION.md
+// Punkt 6b) — ohne das ist die gesetzliche Aufbewahrungspflicht von 5 Jahren
+// nicht erfüllt und der Export bei einer Kontrolle durch das
+// Arbeitsinspektorat wertlos. Kein FK auf TimeEntry/User: der Audit-Trail
+// muss auch dann noch lesbar sein, wenn ein Account später gelöscht wird
+// (gleiches Muster wie Invitation.invitedByUserId) — entryId/changedBy sind
+// bewusst reine IDs ohne Relation/Cascade.
+model TimeEntryAudit {
+  id        String   @id @default(cuid())
+  entryId   String
+  orgId     String
+  changedBy String
+  changedAt DateTime @default(now())
+  field     String
+  oldValue  String?
+  newValue  String?
+
+  @@index([entryId])
+  @@index([orgId, changedAt])
 }
 
 // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden
