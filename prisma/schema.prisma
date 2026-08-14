@@ -28,6 +28,7 @@ model User {
   overtimePayouts  OvertimePayout[]
   passwordResetTokens PasswordResetToken[]
   memberships      Membership[]
+  monthLocks       MonthLock[]
 }
 
 model PensumChange {
@@ -64,6 +65,49 @@ model Organization {
   overtimePayouts OvertimePayout[]
   invitations     Invitation[]
   holidays        Holiday[]
+  monthLocks      MonthLock[]
+}
+
+// Monatsabschluss (MIGRATION.md Punkt 6e). Existenz einer Zeile = der Monat
+// ist für diesen Nutzer aktuell gesperrt (member: read-only, siehe
+// lib/access.ts assertMonthEditable()). admin/owner sperren und entsperren
+// über /api/month-locks; ein Entsperren LÖSCHT diese Zeile wieder (kein
+// "unlocked"-Flag hier) — der Verlauf beider Aktionen bleibt stattdessen in
+// MonthLockAudit erhalten, s.u.
+model MonthLock {
+  id       String   @id @default(cuid())
+  orgId    String
+  userId   String
+  year     Int
+  month    Int      // 1-12
+  lockedAt DateTime @default(now())
+  lockedBy String   // userId der sperrenden Person — bewusst keine Relation (gleiches Muster wie TimeEntryAudit.changedBy)
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId, year, month])
+  @@index([orgId, userId])
+}
+
+// Unveränderlicher Verlauf aller Sperr-/Entsperr-Aktionen (MIGRATION.md
+// Punkt 6e, "was im Audit-Trail landet") — eigene Tabelle statt Wieder-
+// verwendung von TimeEntryAudit, weil ein Monatsabschluss kein Feld-Diff
+// eines einzelnen TimeEntry ist, sondern ein Ereignis auf (orgId, userId,
+// year, month). Bleibt bestehen, auch wenn die zugehörige MonthLock-Zeile
+// beim Entsperren gelöscht wird — sonst ginge "wer hat wann entsperrt"
+// verloren. Keine Relation auf User (gleiches Muster wie TimeEntryAudit).
+model MonthLockAudit {
+  id          String   @id @default(cuid())
+  orgId       String
+  userId      String
+  year        Int
+  month       Int
+  action      String   // "locked" | "unlocked"
+  performedBy String
+  performedAt DateTime @default(now())
+
+  @@index([orgId, userId, year, month])
 }
 
 // Feiertage pro Organisation (MIGRATION.md Punkt 6c). Kein fixer

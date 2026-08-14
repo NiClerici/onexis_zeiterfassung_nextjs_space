@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { ChevronLeft, ChevronRight, X, CalendarClock, Palmtree, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, CalendarClock, Palmtree, AlertTriangle, Lock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -41,6 +41,13 @@ interface Holiday {
   halfDay: boolean;
 }
 
+interface MonthLock {
+  id: string;
+  userId: string;
+  year: number;
+  month: number;
+}
+
 const TYPE_DOT_COLOR: Record<string, string> = {
   arbeit: "bg-green-500",
   ferien: "bg-sky-400",
@@ -67,6 +74,7 @@ export default function CalendarPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pensumChanges, setPensumChanges] = useState<PensumChange[]>([]);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [monthLocks, setMonthLocks] = useState<MonthLock[]>([]);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const monthPickerRef = useRef<HTMLDivElement>(null);
 
@@ -85,6 +93,8 @@ export default function CalendarPage() {
   const [vacApplying, setVacApplying] = useState(false);
 
   const firstName = session?.user?.name?.split?.(' ')?.[0] ?? '';
+  const role = (session?.user as any)?.role as "owner" | "admin" | "manager" | "member" | undefined;
+  const isMember = role === "member";
 
   const fetchEntries = useCallback(async () => {
     try {
@@ -157,7 +167,21 @@ export default function CalendarPage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
+  // Monatsabschluss (MIGRATION.md Punkt 6e) — eigene, own-userId-Sperren für
+  // das ganze angezeigte Jahr auf einmal laden (statt pro Monatswechsel neu),
+  // gleiches Kosten/Nutzen-Verhältnis wie bei fetchEntries für ein Jahr.
+  const fetchMonthLocks = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/month-locks?year=${currentDate?.year}`);
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setMonthLocks(data?.locks ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, [currentDate?.year]);
+
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
+  useEffect(() => { fetchMonthLocks(); }, [fetchMonthLocks]);
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchHolidays, fetchCustomers, fetchProjects]);
 
   // Close month picker on outside click
@@ -225,6 +249,11 @@ export default function CalendarPage() {
     const dateStr = buildDateStr(day);
     return holidays.find((h) => h.date === dateStr) ?? null;
   };
+
+  // Monatsabschluss (MIGRATION.md Punkt 6e) — eine Sperre gilt für den
+  // GANZEN angezeigten Monat, nicht pro Tag, deshalb ein einzelner Wert statt
+  // einer Pro-Tag-Lookup-Funktion wie bei Feiertagen/Compliance-Warnungen.
+  const isCurrentMonthLocked = monthLocks.some((l) => l.year === currentDate?.year && l.month === currentDate?.month);
 
   const toEintragMitDatum = (dateStr: string, dayEntries: DayTimeEntry[]): EintragMitDatum[] =>
     dayEntries.map((e) => ({ date: dateStr, typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }));
@@ -301,7 +330,7 @@ export default function CalendarPage() {
       });
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
-        const skipped = (data?.skippedExisting ?? 0) + (data?.skippedProtected ?? 0);
+        const skipped = (data?.skippedExisting ?? 0) + (data?.skippedProtected ?? 0) + (data?.skippedLocked ?? 0);
         toast.success(
           t("calendar.applyResult", {
             created: String(data?.created ?? 0),
@@ -488,6 +517,15 @@ export default function CalendarPage() {
         </button>
       </div>
 
+      {/* Monatsabschluss-Hinweis (MIGRATION.md Punkt 6e) — nur für member,
+          da nur diese Rolle laut Punkt-Text schreibgeschützt ist. */}
+      {isMember && isCurrentMonthLocked && (
+        <div className="flex items-start gap-2 p-3 mb-3 rounded-xl bg-amber-50 border border-amber-200">
+          <Lock className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-800">{t("calendar.monthLocked")}</p>
+        </div>
+      )}
+
       {/* Calendar grid */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-md)" }}>
         {/* Weekday headers */}
@@ -570,6 +608,7 @@ export default function CalendarPage() {
         projects={projects}
         tagesSoll={selectedDayTagesSoll}
         onChanged={fetchEntries}
+        locked={isMember && isCurrentMonthLocked}
       />
 
       {/* Apply Standardwoche Modal */}

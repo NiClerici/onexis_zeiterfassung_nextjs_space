@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Users, UserPlus, ChevronDown, ChevronUp, Trash2, TrendingUp } from "lucide-react";
+import { Users, UserPlus, ChevronDown, ChevronUp, Trash2, TrendingUp, Lock, Unlock } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -41,6 +41,14 @@ interface PensumChange {
   effectiveFrom: string;
 }
 
+interface MonthLockRow {
+  id: string;
+  year: number;
+  month: number;
+  lockedAt: string;
+  lockedBy: string;
+}
+
 const ROLE_OPTIONS = ["owner", "admin", "manager", "member"];
 const ROLE_LABELS: Record<string, string> = { owner: "Owner", admin: "Admin", manager: "Manager", member: "Mitglied" };
 
@@ -70,6 +78,13 @@ export default function TeamPage() {
   const [newWeeklyHours, setNewWeeklyHours] = useState("");
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [savingPensum, setSavingPensum] = useState(false);
+
+  // Monatsabschluss (MIGRATION.md Punkt 6e)
+  const [monthLocksByUser, setMonthLocksByUser] = useState<Record<string, MonthLockRow[]>>({});
+  const now = new Date();
+  const [lockYear, setLockYear] = useState(String(now.getFullYear()));
+  const [lockMonth, setLockMonth] = useState(String(now.getMonth() + 1));
+  const [lockingMonth, setLockingMonth] = useState(false);
 
   useEffect(() => {
     if (sessionStatus === "authenticated" && role && role !== "owner" && role !== "admin") {
@@ -115,10 +130,52 @@ export default function TeamPage() {
     } catch (err: any) { console.error(err); }
   };
 
+  const fetchMonthLocks = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/month-locks?userId=${userId}`);
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setMonthLocksByUser((prev) => ({ ...prev, [userId]: data?.locks ?? [] }));
+      }
+    } catch (err: any) { console.error(err); }
+  };
+
   const toggleExpand = (userId: string) => {
     if (expandedUserId === userId) { setExpandedUserId(null); return; }
     setExpandedUserId(userId);
     if (!pensumByUser[userId]) fetchPensumChanges(userId);
+    if (!monthLocksByUser[userId]) fetchMonthLocks(userId);
+  };
+
+  const submitMonthLock = async (userId: string) => {
+    if (!lockYear || !lockMonth) return;
+    setLockingMonth(true);
+    try {
+      const res = await fetch("/api/month-locks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, year: parseInt(lockYear), month: parseInt(lockMonth) }),
+      });
+      if (res?.ok) {
+        toast.success(t("team.monthLocked"));
+        await fetchMonthLocks(userId);
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error ?? t("profile.error"));
+      }
+    } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setLockingMonth(false); }
+  };
+
+  const unlockMonth = async (userId: string, year: number, month: number) => {
+    try {
+      const res = await fetch("/api/month-locks", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, year, month }),
+      });
+      if (res?.ok) { toast.success(t("team.monthUnlocked")); await fetchMonthLocks(userId); }
+      else { toast.error(t("profile.error")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.error")); }
   };
 
   const updateMember = async (userId: string, patch: Record<string, any>) => {
@@ -336,6 +393,43 @@ export default function TeamPage() {
                           </div>
                         ) : (
                           <p className="text-xs text-muted-foreground">{t("profile.noPensumChanges")}</p>
+                        )}
+                      </div>
+
+                      <div className="pt-2 border-t border-border/50">
+                        <h3 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {t("team.monthLock")}</h3>
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">{t("team.monthLockYear")}</label>
+                            <input type="number" value={isExpanded ? lockYear : ""} onChange={(e) => setLockYear(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground mb-1 block">{t("team.monthLockMonth")}</label>
+                            <select value={isExpanded ? lockMonth : ""} onChange={(e) => setLockMonth(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
+                              {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
+                                <option key={mo} value={mo}>{t(`month.${mo}`)}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex items-end">
+                            <button onClick={() => submitMonthLock(m.userId)} disabled={lockingMonth} className="w-full py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition disabled:opacity-50">
+                              {lockingMonth ? t("common.loading") : t("team.monthLockSubmit")}
+                            </button>
+                          </div>
+                        </div>
+                        {(monthLocksByUser[m.userId]?.length ?? 0) > 0 ? (
+                          <div className="space-y-1">
+                            {monthLocksByUser[m.userId].map((lock) => (
+                              <div key={lock.id} className="flex items-center justify-between bg-card rounded-lg px-2 py-1.5 text-xs">
+                                <span className="flex items-center gap-1.5"><Lock className="w-3 h-3 text-amber-600" /> {t(`month.${lock.month}`)} {lock.year}</span>
+                                <button onClick={() => unlockMonth(m.userId, lock.year, lock.month)} className="flex items-center gap-1 text-muted-foreground hover:text-primary transition" title={t("team.monthUnlock")}>
+                                  <Unlock className="w-3 h-3" /> {t("team.monthUnlock")}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">{t("team.noMonthLocks")}</p>
                         )}
                       </div>
                     </div>

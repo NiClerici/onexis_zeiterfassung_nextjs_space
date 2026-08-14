@@ -20,7 +20,7 @@ function parseDateYMD(s: string): Date | null {
 
 export async function POST(req: Request) {
   try {
-    const { userId, orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const fromStr = body?.fromDate ?? "";
@@ -75,6 +75,16 @@ export async function POST(req: Request) {
       existingMap.set(key, { id: e.id, type: e.type, hours: e.hours });
     }
 
+    // Gesperrte Monate für member read-only (MIGRATION.md Punkt 6e) — als Set
+    // vorab geladen statt pro Tag eine Query, da ein Zeitraum bis zu 366 Tage
+    // umfassen kann.
+    const lockedMonths = role === "member"
+      ? new Set(
+          (await prisma.monthLock.findMany({ where: { orgId, userId }, select: { year: true, month: true } }))
+            .map((l) => `${l.year}-${l.month}`)
+        )
+      : new Set<string>();
+
     let created = 0;
     let updated = 0;
     let skipped = 0;
@@ -95,6 +105,16 @@ export async function POST(req: Request) {
 
       // Skip weekends
       if (dayOfWeek === 0 || dayOfWeek === 6) {
+        current.setUTCDate(current.getUTCDate() + 1);
+        continue;
+      }
+
+      // Gesperrter Monat: für member wie ein Feiertag/Ferien-Tag überspringen
+      // statt den ganzen Aufruf abzulehnen — der Rest des Zeitraums bleibt so
+      // nutzbar, auch wenn er über eine Monatsgrenze in einen gesperrten
+      // Monat hineinreicht.
+      if (lockedMonths.has(`${current.getUTCFullYear()}-${current.getUTCMonth() + 1}`)) {
+        skipped++;
         current.setUTCDate(current.getUTCDate() + 1);
         continue;
       }

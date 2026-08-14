@@ -484,7 +484,7 @@ Migrationsstrategie wie bei Punkt 3.
 
 ---
 
-### - [ ] 6. Compliance nach Arbeitsgesetz
+### - [x] 6. Compliance nach Arbeitsgesetz
 
 **6a. Überzeit von Überstunden trennen.** `kennzahlen()` liefert heute
 `ueberzeit = ist − soll − payouts` — das sind fachlich **Überstunden**
@@ -736,6 +736,92 @@ Keine Prisma-Migration nötig — reine Funktion + UI, kein neues Schema.
 **6e. Monatsabschluss.** Tabelle `MonthLock` (orgId, userId, year, month,
 lockedAt, lockedBy). Gesperrte Monate sind für `member` read-only; `admin` kann
 entsperren, was im Audit-Trail landet.
+
+**Ergebnis:** `MonthLock` genau wie beschrieben (orgId, userId, year, month,
+lockedAt, lockedBy) — Existenz einer Zeile bedeutet "gesperrt", `@@unique([orgId,
+userId, year, month])`. Bewusste Design-Entscheidung, dokumentiert weil nicht
+trivial aus dem Punkt-Text ableitbar: Entsperren **löscht** die `MonthLock`-Zeile
+wieder (kein `unlocked`-Flag), damit "gesperrt?" weiterhin eine reine
+Existenzabfrage bleibt. Der geforderte Audit-Trail ("was im Audit-Trail landet")
+kann deshalb nicht `TimeEntryAudit` wiederverwenden — dessen Schema ist ein
+Feld-Diff eines einzelnen `TimeEntry`, ein Sperr-/Entsperr-Ereignis ist aber ein
+Vorgang auf (orgId, userId, year, month) ohne Feld-Diff. Stattdessen eine neue,
+unveränderliche Tabelle `MonthLockAudit` (orgId, userId, year, month, action
+`"locked"`|`"unlocked"`, performedBy, performedAt) — bleibt bestehen, auch wenn
+die zugehörige `MonthLock`-Zeile beim Entsperren gelöscht wird, sonst ginge "wer
+hat wann entsperrt" verloren. Beide Migrationen additiv, direkt angewendet.
+
+Neuer Helfer `assertMonthEditable(orgId, userId, role, date)` in `lib/access.ts`
+(plus `isMonthLocked()`) — wirft 403, **nur wenn `role === "member"`** und der
+Monat von `date` gesperrt ist. Bewusste, im Punkt-Text nicht explizit
+entschiedene Scope-Frage: der Wortlaut sagt ausdrücklich "Gesperrte Monate sind
+für `member` read-only" und nennt manager/admin/owner nicht — diese drei Rollen
+sind deshalb NICHT eingeschränkt und können auch in gesperrten Monaten weiterhin
+schreiben (z.B. um eine Korrektur vorzunehmen), ohne vorher extra entsperren zu
+müssen. Verdrahtet in `app/api/time-entries/route.ts` (POST prüft das
+Zieldatum; PUT prüft sowohl den bisherigen als auch — falls das Datum geändert
+wird — den neuen Monat, damit sich eine Sperre nicht durch Verschieben eines
+Eintrags umgehen lässt; DELETE prüft den bestehenden Monat) sowie in
+`bulk-vacation`/`bulk-apply`: dort werden gesperrte Tage für `member` wie ein
+Feiertag/Ferien-Tag pro Tag übersprungen statt den ganzen Aufruf abzulehnen —
+der Rest eines Zeitraums bleibt so nutzbar, auch wenn er über eine
+Monatsgrenze in einen gesperrten Monat hineinreicht (`bulk-vacation` zählt das
+in den bestehenden `skipped`-Zähler, `bulk-apply` bekam einen eigenen neuen
+`skippedLocked`-Zähler, da diese Route bereits mehrere Skip-Gründe einzeln
+ausweist).
+
+Neue Route `app/api/month-locks/route.ts`: GET (jedes Org-Mitglied für sich
+selbst, ein fremdes `userId` nur wer laut `canSeeUser` darf — für die
+Kalender-Anzeige und die Team-Verwaltung), POST/DELETE nur admin/owner
+(`requireRole`, gleiches Muster wie bei Feiertagen in 6c). POST ist idempotent
+(erneutes Sperren eines bereits gesperrten Monats liefert die bestehende Zeile
+zurück statt eine zweite `MonthLockAudit`-"locked"-Zeile zu erzeugen).
+
+UI: `/admin/team` bekam pro Mitglied einen neuen "Monatsabschluss"-Abschnitt
+im aufklappbaren Panel (Jahr/Monat wählen, Sperren-Button, Liste gesperrter
+Monate mit Entsperren-Button je Zeile) — strukturell analog zum bestehenden
+Pensumsänderungs-Abschnitt. Kalender (`app/(app)/calendar/page.tsx`) lädt die
+eigenen Sperren für das angezeigte Jahr und zeigt bei einem gesperrten
+aktuellen Monat — nur für `member` — eine gelbe Hinweisleiste über dem
+Kalendergitter; der Tagesdialog (`components/day-entry-dialog.tsx`) bekam eine
+neue optionale `locked`-Prop, die bei `true` dieselbe Hinweisleiste im Dialog
+zeigt und die Buttons "Eintrag hinzufügen", "Speichern" und den
+Löschen-Button deaktiviert. Ausdrücklich nur UI-Komfort: die eigentliche
+Durchsetzung liegt serverseitig in `assertMonthEditable`, nicht im
+deaktivierten Button — mit Playwright verifiziert per direktem `fetch()`-Aufruf
+gegen die API unter Umgehung der UI (s.u.).
+
+Tests: `lib/access.test.ts` (5 neue Tests für `isMonthLocked`/
+`assertMonthEditable`, inkl. dass admin/owner/manager NICHT geblockt werden).
+Neues `lib/month-locks.test.ts` (14 Tests, Route-Ebene wie
+`lib/time-entry-audit.test.ts`): Sperren/Entsperren nur admin/owner,
+Idempotenz beim erneuten Sperren, Audit-Zeilen für beide Aktionen, 404 beim
+Entsperren eines nicht gesperrten Monats; Durchsetzung auf POST/PUT/DELETE in
+`time-entries` (member 403 beim Anlegen/Ändern/Löschen im gesperrten Monat,
+admin unbeschränkt, ein Eintrag lässt sich nicht per Datumsänderung in einen
+gesperrten Monat hinein verschieben); `bulk-vacation`/`bulk-apply` überspringen
+korrekt genau die Tage im gesperrten Monat und legen die übrigen Tage des
+Zeitraums normal an. 127 Tests insgesamt grün.
+
+Browser-verifiziert (Playwright, komplette echte Klickpfade, nicht nur API):
+admin sperrt Dezember 2026 für Mia (member@onexis.test) über `/admin/team` →
+Liste zeigt "Dezember 2026"; als Mia eingeloggt zeigt der Kalender im
+Dezember die gelbe Hinweisleiste, der Tagesdialog zeigt dieselbe Meldung und
+der "Eintrag hinzufügen"-Button ist nachweislich `disabled`; ein direkter
+`fetch()`-POST gegen `/api/time-entries` (unter Umgehung der deaktivierten
+UI) liefert `403` mit der erwarteten Fehlermeldung — die serverseitige Sperre
+wirkt unabhängig vom UI-Zustand. Admin entsperrt danach über `/admin/team`
+wieder → Liste ist leer. Keine echten Konsolenfehler (der einzige geloggte
+Eintrag ist die erwartete `403`-Netzwerkantwort des bewussten Testaufrufs).
+`TimeEntry`-Baseline (66 Zeilen) blieb während des gesamten Laufs unverändert
+— der blockierte POST-Versuch hat nachweislich nichts geschrieben. Testdaten
+(`MonthLock`- und `MonthLockAudit`-Zeilen) danach vollständig per SQL
+entfernt (Baseline 0/0 bestätigt).
+
+Keine UI-Änderung an Punkt 7/8/9 vorgezogen — insbesondere kein
+Team-Kalender, der gesperrte Monate für andere als die eigene Person anzeigt;
+das bleibt Gegenstand von Punkt 8 (Teamsicht), sobald es dort ohnehin eine
+Ansicht über mehrere Personen gibt.
 
 ---
 
@@ -1009,3 +1095,21 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   Punkt einen Jahres- oder Wochenview, sollte die Ruhezeitprüfung an
   Monatsgrenzen (aktuell: 1. eines Monats ungeprüft) nochmals angeschaut
   werden, statt die Einschränkung stillschweigend fortzuschreiben.
+- Punkt 6e (letzter Unterpunkt von Punkt 6, damit ist Punkt 6 komplett
+  abgeschlossen): zwei Design-Entscheidungen, die der Punkt-Text offen liess
+  und die für spätere Punkte relevant sein könnten. Erstens: Entsperren
+  löscht die `MonthLock`-Zeile, statt sie mit einem Flag zu markieren — der
+  geforderte Audit-Trail ("was im Audit-Trail landet") lebt deshalb in einer
+  eigenen, unveränderlichen Tabelle `MonthLockAudit`, nicht in
+  `TimeEntryAudit` (dessen Feld-Diff-Schema für ein Sperr-/Entsperr-Ereignis
+  ohne einzelnen `TimeEntry`-Bezug nicht passt). Zweitens: nur die Rolle
+  `member` ist von einer Sperre betroffen, wörtlich wie im Punkt-Text —
+  manager/admin/owner können auch in gesperrten Monaten weiterhin schreiben.
+  Sollte ein späterer Punkt (z.B. 8, Teamsicht) einen strengeren
+  "wirklich niemand darf mehr schreiben"-Monatsabschluss brauchen, ist das
+  eine bewusste Erweiterung dieser Entscheidung, keine Korrektur eines
+  Fehlers. Ausserdem, methodisch: die serverseitige Durchsetzung
+  (`assertMonthEditable` in den API-Routen) wurde separat vom UI-Zustand
+  (deaktivierte Buttons) verifiziert — per direktem `fetch()` gegen die API
+  unter Umgehung der UI —, um sicherzustellen, dass ein deaktivierter Button
+  nicht die einzige Verteidigungslinie ist.

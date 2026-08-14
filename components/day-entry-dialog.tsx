@@ -93,9 +93,14 @@ interface DayEntryDialogProps {
   projects: DayProject[];
   tagesSoll: number;
   onChanged: () => void;
+  // Monatsabschluss (MIGRATION.md Punkt 6e) — true, wenn der angezeigte Monat
+  // für die aktuelle Rolle gesperrt ist (vom Aufrufer schon auf "member"
+  // eingeschränkt geprüft, siehe calendar/page.tsx). Rein UI-seitig — die
+  // eigentliche Durchsetzung liegt in app/api/time-entries/route.ts.
+  locked?: boolean;
 }
 
-export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged }: DayEntryDialogProps) {
+export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged, locked = false }: DayEntryDialogProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<DraftRow[]>([]);
 
@@ -249,6 +254,12 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
               </button>
             </div>
 
+            {locked && (
+              <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 border border-amber-200">
+                <p className="text-xs text-amber-800">{t("calendar.monthLocked")}</p>
+              </div>
+            )}
+
             {rows.length === 0 && <p className="text-sm text-muted-foreground mb-4">{t("calendar.noEntriesForDay")}</p>}
 
             <div className="space-y-4">
@@ -270,7 +281,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                       </select>
                       <button
                         onClick={() => deleteRow(row)}
-                        disabled={row.saving}
+                        disabled={row.saving || locked}
                         className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition disabled:opacity-50"
                         title={t("calendar.delete")}
                       >
@@ -385,7 +396,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
                     <button
                       onClick={() => saveRow(row)}
-                      disabled={row.saving}
+                      disabled={row.saving || locked}
                       className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
                     >
                       {row.saving ? t("common.loading") : t("calendar.save")}
@@ -397,7 +408,8 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
             <button
               onClick={addRow}
-              className="mt-4 w-full py-2.5 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition flex items-center justify-center gap-1.5"
+              disabled={locked}
+              className="mt-4 w-full py-2.5 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" /> {t("calendar.addEntry")}
             </button>

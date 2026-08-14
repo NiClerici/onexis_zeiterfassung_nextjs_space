@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
-import { requireOrg, AccessError } from "@/lib/access";
+import { requireOrg, assertMonthEditable, AccessError } from "@/lib/access";
 import { diffTimeEntryFields } from "@/lib/audit";
 
 function isValidType(type: unknown): type is EintragTyp {
@@ -93,7 +93,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { userId, orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { date, type, von, bis, pauseMin, notiz, customerId, projectId, billable, hours } = body ?? {};
@@ -105,6 +105,7 @@ export async function POST(req: Request) {
     if (!isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
+    await assertMonthEditable(orgId, userId, role, parsedDate);
 
     const resolved = await resolveProjectAndCustomer(orgId, projectId, customerId);
     if ("error" in resolved) return NextResponse.json({ error: resolved.error }, { status: 400 });
@@ -141,7 +142,7 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
-    const { userId, orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id, date, type, von, bis, pauseMin, notiz, customerId, projectId, billable, hours } = body ?? {};
@@ -160,6 +161,12 @@ export async function PUT(req: Request) {
     if (type !== undefined && !isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
     }
+    // Sowohl der bisherige als auch ein neu gesetzter Monat müssen entsperrt
+    // sein — sonst liesse sich eine gesperrte Zeile durch Verschieben des
+    // Datums umgehen, oder ein Eintrag unbemerkt in einen gesperrten Monat
+    // hinein verschieben (MIGRATION.md Punkt 6e).
+    await assertMonthEditable(orgId, userId, role, existing.date);
+    if (parsedDate) await assertMonthEditable(orgId, userId, role, parsedDate);
 
     // projectId/customerId nur neu auflösen, wenn mindestens eines der beiden
     // Felder im Request mitkommt — sonst bleiben beide unangetastet.
@@ -222,7 +229,7 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { userId, orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id } = body ?? {};
@@ -231,6 +238,7 @@ export async function DELETE(req: Request) {
 
     const existing = await prisma.timeEntry.findFirst({ where: { id, userId, orgId, deletedAt: null } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    await assertMonthEditable(orgId, userId, role, existing.date);
 
     // Soft-Delete statt Hard-Delete (MIGRATION.md Punkt 6b) — die gesetzliche
     // Aufbewahrungspflicht von 5 Jahren verlangt, dass gelöschte Einträge

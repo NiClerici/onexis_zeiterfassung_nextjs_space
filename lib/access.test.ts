@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
-import { canSeeUser, scopeToOrg, requireRole, AccessError, type OrgContext } from "@/lib/access";
+import { canSeeUser, scopeToOrg, requireRole, isMonthLocked, assertMonthEditable, AccessError, type OrgContext } from "@/lib/access";
 import bcrypt from "bcryptjs";
 
 // canSeeUser trifft eine DB-Query (Membership-Lookup) — hier gegen die echte
@@ -103,5 +103,50 @@ describe("canSeeUser", () => {
     const ctx: OrgContext = { userId: ownerId, orgId, role: "owner" };
     expect(await canSeeUser(ctx, reportId)).toBe(true);
     expect(await canSeeUser(ctx, otherMemberId)).toBe(true);
+  });
+});
+
+// MIGRATION.md Punkt 6e — Monatsabschluss.
+describe("isMonthLocked / assertMonthEditable", () => {
+  const orgId = "test_monthlock_access_org";
+  let userId: string;
+
+  beforeAll(async () => {
+    await prisma.organization.create({ data: { id: orgId, name: "MonthLock Access Test Org", slug: "monthlock-access-test-org" } });
+    const u = await prisma.user.create({
+      data: { email: "monthlock-access-test@example.test", password: await bcrypt.hash("irrelevant1234", 10), firstName: "T", lastName: "U" },
+    });
+    userId = u.id;
+    await prisma.membership.create({ data: { orgId, userId, role: "member", entryDate: new Date() } });
+    await prisma.monthLock.create({ data: { orgId, userId, year: 2026, month: 9, lockedBy: userId } });
+  });
+
+  afterAll(async () => {
+    await prisma.monthLock.deleteMany({ where: { orgId } });
+    await prisma.membership.deleteMany({ where: { orgId } });
+    await prisma.user.deleteMany({ where: { id: userId } });
+    await prisma.organization.delete({ where: { id: orgId } });
+  });
+
+  it("isMonthLocked liefert true für einen gesperrten Monat", async () => {
+    expect(await isMonthLocked(orgId, userId, new Date("2026-09-15"))).toBe(true);
+  });
+
+  it("isMonthLocked liefert false für einen nicht gesperrten Monat", async () => {
+    expect(await isMonthLocked(orgId, userId, new Date("2026-10-01"))).toBe(false);
+  });
+
+  it("assertMonthEditable wirft für role member in einem gesperrten Monat", async () => {
+    await expect(assertMonthEditable(orgId, userId, "member", new Date("2026-09-15"))).rejects.toThrow(AccessError);
+  });
+
+  it("assertMonthEditable wirft NICHT für role member ausserhalb eines gesperrten Monats", async () => {
+    await expect(assertMonthEditable(orgId, userId, "member", new Date("2026-10-01"))).resolves.toBeUndefined();
+  });
+
+  it("assertMonthEditable wirft NICHT für admin/owner/manager, auch in einem gesperrten Monat", async () => {
+    await expect(assertMonthEditable(orgId, userId, "admin", new Date("2026-09-15"))).resolves.toBeUndefined();
+    await expect(assertMonthEditable(orgId, userId, "owner", new Date("2026-09-15"))).resolves.toBeUndefined();
+    await expect(assertMonthEditable(orgId, userId, "manager", new Date("2026-09-15"))).resolves.toBeUndefined();
   });
 });

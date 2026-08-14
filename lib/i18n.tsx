@@ -101,6 +101,8 @@ const translations: Record<string, string> = {
   "calendar.noEntries": "Keine Einträge",
   "calendar.deleteConfirm": "Wirklich löschen?",
   "calendar.selectMonth": "Monat wählen",
+  // Monatsabschluss (MIGRATION.md Punkt 6e)
+  "calendar.monthLocked": "Dieser Monat ist abgeschlossen und schreibgeschützt. Bei Korrekturbedarf wende dich an eine admin-berechtigte Person.",
   // Weekdays
   "weekday.mo": "Mo",
   "weekday.tu": "Di",
@@ -236,6 +238,15 @@ const translations: Record<string, string> = {
   "team.noManager": "Keine",
   "team.entryDate": "Eintrittsdatum",
   "team.exitDate": "Austrittsdatum",
+  // Monatsabschluss (MIGRATION.md Punkt 6e)
+  "team.monthLock": "Monatsabschluss",
+  "team.monthLockYear": "Jahr",
+  "team.monthLockMonth": "Monat",
+  "team.monthLockSubmit": "Sperren",
+  "team.monthUnlock": "Entsperren",
+  "team.noMonthLocks": "Keine gesperrten Monate",
+  "team.monthLocked": "Monat gesperrt",
+  "team.monthUnlocked": "Monat entsperrt",
   // Standard-Wochenplan
   "profile.standardWeek": "Standard-Wochenplan",
   "profile.standardWeekDesc": "Hinterlege hier deine typische Arbeitswoche (Stunden pro Wochentag). Du kannst sie danach im Kalender auf beliebige Zeiträume anwenden.",

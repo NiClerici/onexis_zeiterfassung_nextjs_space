@@ -65,6 +65,34 @@ export function scopeToOrg<T extends Record<string, unknown>>(orgId: string, whe
   return { ...(where ?? ({} as T)), orgId };
 }
 
+// Monatsabschluss (MIGRATION.md Punkt 6e). Existenz einer MonthLock-Zeile
+// heisst "gesperrt".
+export async function isMonthLocked(orgId: string, userId: string, date: Date): Promise<boolean> {
+  const lock = await prisma.monthLock.findUnique({
+    where: {
+      orgId_userId_year_month: {
+        orgId,
+        userId,
+        year: date.getUTCFullYear(),
+        month: date.getUTCMonth() + 1,
+      },
+    },
+  });
+  return Boolean(lock);
+}
+
+// Wirft 403, wenn role "member" ist und der Monat von date gesperrt ist.
+// Bewusst nur "member" betroffen — der Punkt-Text sagt ausdrücklich
+// "Gesperrte Monate sind für member read-only" und nennt manager/admin/owner
+// nicht; die sollen weiterhin auch in gesperrten Monaten korrigieren können,
+// ohne vorher extra entsperren zu müssen (siehe Notizen des Loops zu 6e).
+export async function assertMonthEditable(orgId: string, userId: string, role: Role, date: Date): Promise<void> {
+  if (role !== "member") return;
+  if (await isMonthLocked(orgId, userId, date)) {
+    throw new AccessError(403, "Dieser Monat ist abgeschlossen und für dich schreibgeschützt.");
+  }
+}
+
 // member: nur sich selbst. manager: sich selbst + direkt unterstellte
 // Mitglieder (Membership.managerId zeigt auf die eigene Membership).
 // admin/owner: alle in der Organisation.
