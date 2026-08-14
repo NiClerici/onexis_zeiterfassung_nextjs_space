@@ -39,7 +39,7 @@ aus stilistischer Präferenz.
 
 ## Teil A — Logik verifizieren
 
-### - [ ] A1. Referenzwerte und bekannte Grenzfälle nochmals gegenprüfen
+### - [x] A1. Referenzwerte und bekannte Grenzfälle nochmals gegenprüfen
 
 Bevor irgendetwas Neues geprüft wird: alle vier Referenzwerte oben plus die
 in MIGRATION.md dokumentierten Zusatztests (Pensumswechsel-Feriensaldo,
@@ -261,3 +261,43 @@ die konkrete Wahl.
 _(Hier trägt der Loop Blocker, Entscheidungen, Auffälligkeiten und
 Vorschläge für künftige Feature-Punkte ein — letztere ausdrücklich NICHT
 in diesem Loop umsetzen.)_
+
+### Vorbereitung — 14.08.2026
+
+`npm install` bricht ohne `--legacy-peer-deps` ab: `@typescript-eslint/
+eslint-plugin@7.0.0` verlangt als Peer `@typescript-eslint/parser@^6`,
+installiert ist `parser@7.0.0`. Bereits bekannt und in `Dockerfile:15-16`
+dokumentiert, dort wird `npm ci --legacy-peer-deps` verwendet. Diese
+Konvention wurde hier übernommen; der Konflikt selbst wurde nicht
+angefasst (Build-Konfiguration, kein Befund aus einem Punkt dieser Datei).
+
+> Vorschlag für eine künftige Datei: `@typescript-eslint/eslint-plugin` und
+> `-parser` auf ein zusammenpassendes Paar heben (beide `^7.18`), damit
+> `npm install`/`npm ci` ohne Flag durchlaufen.
+
+### A1 — Baseline bestätigt, 14.08.2026
+
+Alle vier Referenzwerte und alle drei MIGRATION.md-Zusatztests laufen grün.
+Isoliert ausgeführt (`npx vitest run lib/calc.test.ts -t "…"`), kein
+Code-Change nötig.
+
+| Referenzwert | Erwartet | Test | Ergebnis |
+|---|---|---|---|
+| Sollstunden/Tag | 4.8 | `lib/calc.test.ts:24` | ✓ |
+| Soll August bis 12.08. | 38.4 | `lib/calc.test.ts:28` | ✓ |
+| Soll August gesamt | 100.8 | `lib/calc.test.ts:42` | ✓ |
+| Ferienanspruch 2026 | 18.8 | `lib/calc.test.ts:56` | ✓ |
+
+Zusatztests aus MIGRATION.md:
+
+| Zusatztest | Ort | Ergebnis |
+|---|---|---|
+| Pensumswechsel-Feriensaldo | `lib/calc.test.ts:415` | ✓ 3/3 |
+| Austrittsdatum (`exitDate`) | `lib/calc.test.ts:145` | ✓ 5/5 |
+| Feiertags-Wochen | `lib/calc.test.ts:474` | ✓ 7/7 |
+
+Gesamtlauf als Baseline für alle folgenden Punkte: **`npm test` →
+15 Dateien, 190 Tests, alle grün. `npm run typecheck` sauber.**
+(Der `Healthcheck failed: connection refused`-Stacktrace im Testlauf ist
+die erwartete Konsolenausgabe des absichtlichen Fehlerpfad-Tests in
+`lib/health.test.ts`, kein Fehlschlag.)
