@@ -6,6 +6,7 @@ import {
   sollStundenTag,
   stundenAusEintrag,
   type Profil,
+  type HolidayInput,
 } from "./calc";
 
 const testProfil: Profil = {
@@ -19,7 +20,7 @@ const testProfil: Profil = {
 
 describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, Stichtag 12.08.2026)", () => {
   it("Sollstunden pro Tag = 4.8h", () => {
-    expect(sollStundenTag("2026-08-12", testProfil, [])).toBeCloseTo(4.8, 5);
+    expect(sollStundenTag("2026-08-12", testProfil, [], [])).toBeCloseTo(4.8, 5);
   });
 
   it("Soll August bis 12.08. = 38.4h", () => {
@@ -30,6 +31,7 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       eintraege: [],
       profil: testProfil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.soll).toBe(38.4);
@@ -43,6 +45,7 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       eintraege: [],
       profil: testProfil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.sollGesamt).toBe(100.8);
@@ -54,6 +57,7 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       heute: "2026-08-12",
       profil: testProfil,
       changes: [],
+      holidays: [],
       eintraege: [],
     });
     expect(result.anspruch).toBe(18.8);
@@ -111,10 +115,10 @@ describe("Pensumwechsel mitten im Monat", () => {
 
   it("Soll splittet korrekt am effectiveFrom (8h vor, 4h nach Wechsel in derselben Woche)", () => {
     // Woche 10.–14.8.2026 (Mo–Fr) vor dem Wechsel: 5 × 8h = 40h
-    expect(sollStundenTag("2026-08-10", profil, changes)).toBeCloseTo(8, 5);
-    expect(sollStundenTag("2026-08-14", profil, changes)).toBeCloseTo(8, 5);
+    expect(sollStundenTag("2026-08-10", profil, changes, [])).toBeCloseTo(8, 5);
+    expect(sollStundenTag("2026-08-14", profil, changes, [])).toBeCloseTo(8, 5);
     // Ab 15.8. (Samstag, zählt nicht) — nächster Wochentag 17.8. mit 50%: 4h
-    expect(sollStundenTag("2026-08-17", profil, changes)).toBeCloseTo(4, 5);
+    expect(sollStundenTag("2026-08-17", profil, changes, [])).toBeCloseTo(4, 5);
   });
 });
 
@@ -128,6 +132,7 @@ describe("Zeitraum komplett vor startDate", () => {
       eintraege: [],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.soll).toBe(0);
@@ -140,11 +145,11 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
   const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: "2026-08-14", maxWeeklyHours: 45 };
 
   it("exitDate selbst zählt noch als normaler Arbeitstag (letzter Arbeitstag)", () => {
-    expect(sollStundenTag("2026-08-14", profil, [])).toBeCloseTo(8, 5);
+    expect(sollStundenTag("2026-08-14", profil, [], [])).toBeCloseTo(8, 5);
   });
 
   it("der erste Werktag nach exitDate hat Tagessoll 0", () => {
-    expect(sollStundenTag("2026-08-17", profil, [])).toBe(0);
+    expect(sollStundenTag("2026-08-17", profil, [], [])).toBe(0);
   });
 
   it("Zeitraum komplett nach exitDate: soll und sollGesamt sind 0", () => {
@@ -155,6 +160,7 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
       eintraege: [],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.soll).toBe(0);
@@ -171,6 +177,7 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
       eintraege: [],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.soll).toBe(40);
@@ -179,7 +186,7 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
 
   it("ohne exitDate (null) bleibt das Verhalten unverändert", () => {
     const profilOhneExit: Profil = { ...profil, exitDate: null, maxWeeklyHours: 45 };
-    expect(sollStundenTag("2026-08-17", profilOhneExit, [])).toBeCloseTo(8, 5);
+    expect(sollStundenTag("2026-08-17", profilOhneExit, [], [])).toBeCloseTo(8, 5);
   });
 });
 
@@ -193,6 +200,7 @@ describe("Zeitraum komplett in der Zukunft", () => {
       eintraege: [],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.soll).toBe(0);
@@ -210,6 +218,7 @@ describe("verrechnungsgrad", () => {
       eintraege: [],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.ist).toBe(0);
@@ -229,6 +238,7 @@ describe("verrechnungsgrad", () => {
       ],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.ist).toBe(16);
@@ -250,6 +260,7 @@ describe("ueberstunden berücksichtigt OvertimePayouts (Art. 321c OR)", () => {
       ],
       profil,
       changes: [],
+      holidays: [],
       payouts: [{ date: "2026-08-11", hours: 3 }],
     });
     // ist = 20h, soll = 16h (2 Tage × 8h), Auszahlung 3h → ueberstunden = 20 - 16 - 3 = 1
@@ -279,6 +290,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       ],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.ueberzeit).toBe(5);
@@ -299,6 +311,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       ],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.ueberzeit).toBe(0);
@@ -321,6 +334,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       ],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.ueberzeit).toBe(0);
@@ -345,6 +359,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       ],
       profil,
       changes: [],
+      holidays: [],
       payouts: [],
     });
     expect(result.ueberzeit).toBe(5);
@@ -361,6 +376,7 @@ describe("feriensaldo", () => {
       heute: "2026-08-12",
       profil,
       changes: [],
+      holidays: [],
       eintraege: [
         { date: "2026-08-10", typ: "ferien", hours: 8 },
         { date: "2026-09-01", typ: "ferien", hours: 8 },
@@ -377,6 +393,7 @@ describe("feriensaldo", () => {
       heute: "2026-08-12",
       profil,
       changes: [],
+      holidays: [],
       eintraege: [{ date: "2026-08-10", typ: "ferien", hours: 4 }],
     });
     expect(result.bezogen).toBe(0.5);
@@ -384,7 +401,7 @@ describe("feriensaldo", () => {
 
   it("Pensum geht nicht in den Anspruch ein", () => {
     const teilzeitProfil: Profil = { ...profil, pensum: 50 };
-    const result = feriensaldo({ jahr: 2026, heute: "2026-08-12", profil: teilzeitProfil, changes: [], eintraege: [] });
+    const result = feriensaldo({ jahr: 2026, heute: "2026-08-12", profil: teilzeitProfil, changes: [], holidays: [], eintraege: [] });
     expect(result.anspruch).toBe(25);
   });
 
@@ -407,6 +424,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
       heute: "2026-12-31",
       profil,
       changes: [{ effectiveFrom: "2026-09-01", pensum: 60, wochenstunden: 40 }],
+      holidays: [],
       eintraege: [
         { date: "2026-08-14", typ: "ferien", hours: 8 }, // Tagessoll 8h (100%)
         { date: "2026-09-01", typ: "ferien", hours: 4.8 }, // Tagessoll 4.8h (60%)
@@ -425,6 +443,7 @@ describe("feriensaldo mit Pensumswechsel", () => {
       heute: "2026-12-31",
       profil,
       changes: [{ effectiveFrom: "2026-09-01", pensum: 100, wochenstunden: 40 }],
+      holidays: [],
       eintraege: [
         { date: "2026-08-14", typ: "ferien", hours: 4.8 }, // Tagessoll 4.8h (60%)
         { date: "2026-09-01", typ: "ferien", hours: 8 }, // Tagessoll 8h (100%)
@@ -442,9 +461,81 @@ describe("feriensaldo mit Pensumswechsel", () => {
       heute: "2026-08-12",
       profil,
       changes: [{ effectiveFrom: "2026-09-01", pensum: 60, wochenstunden: 40 }],
+      holidays: [],
       eintraege: [{ date: "2026-09-01", typ: "ferien", hours: 4.8 }],
     });
     expect(result.geplant).toBe(1);
     expect(result.bezogen).toBe(0);
+  });
+});
+
+describe("Feiertage (MIGRATION.md Punkt 6c)", () => {
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+
+  it("sollStundenTag gibt an Karfreitag (beweglich, 2026-04-03) 0 zurück", () => {
+    const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+    expect(sollStundenTag("2026-04-03", profil, [], holidays)).toBe(0);
+  });
+
+  it("sollStundenTag gibt an Ostermontag (beweglich, 2026-04-06) 0 zurück", () => {
+    const holidays: HolidayInput[] = [{ date: "2026-04-06", halfDay: false }];
+    expect(sollStundenTag("2026-04-06", profil, [], holidays)).toBe(0);
+  });
+
+  it("sollStundenTag gibt an einem Halbtags-Feiertag die Hälfte des Tagessolls zurück", () => {
+    const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: true }];
+    expect(sollStundenTag("2026-04-03", profil, [], holidays)).toBeCloseTo(4, 5);
+  });
+
+  it("ein kantonaler Feiertag (Kantonsfeiertag Jura, 2026-06-23) reduziert das Tagessoll ebenso", () => {
+    const holidays: HolidayInput[] = [{ date: "2026-06-23", halfDay: false }];
+    expect(sollStundenTag("2026-06-23", profil, [], holidays)).toBe(0);
+    // An einem normalen Werktag ohne Feiertag bleibt das Soll unverändert.
+    expect(sollStundenTag("2026-06-24", profil, [], holidays)).toBeCloseTo(8, 5);
+  });
+
+  it("ein Feiertag an einem Wochenende ändert nichts (Tagessoll ist dort ohnehin 0)", () => {
+    // 2026-08-01 (Bundesfeier) ist ein Samstag.
+    const holidays: HolidayInput[] = [{ date: "2026-08-01", halfDay: false }];
+    expect(sollStundenTag("2026-08-01", profil, [], holidays)).toBe(0);
+  });
+
+  it("kennzahlen: soll reduziert sich in einer Woche mit zwei Feiertagen (Karfreitag + Ostermontag) korrekt", () => {
+    // Woche 30.3.–6.4.2026 (Mo–Mo): Werktage sind Mo,Di,Mi,Do,Fr,Mo — davon
+    // Karfreitag (3.4.) und Ostermontag (6.4.) Feiertage → nur 4 Tage à 8h zählen.
+    const holidays: HolidayInput[] = [
+      { date: "2026-04-03", halfDay: false }, // Karfreitag
+      { date: "2026-04-06", halfDay: false }, // Ostermontag
+    ];
+    const result = kennzahlen({
+      from: "2026-03-30",
+      to: "2026-04-06",
+      heute: "2026-04-06",
+      eintraege: [],
+      profil,
+      changes: [],
+      payouts: [],
+      holidays,
+    });
+    expect(result.soll).toBe(32);
+    expect(result.sollGesamt).toBe(32);
+  });
+
+  it("kennzahlen: ein Arbeitseintrag an einem als Feiertag markierten Tag zählt trotzdem als ist (keine automatische Streichung)", () => {
+    // Wer an einem Feiertag dennoch arbeitet, soll das weiterhin als Ist-Stunden
+    // sehen — sollStundenTag beeinflusst nur das Soll, nicht erfasste Einträge.
+    const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+    const result = kennzahlen({
+      from: "2026-04-03",
+      to: "2026-04-03",
+      heute: "2026-04-03",
+      eintraege: [{ date: "2026-04-03", typ: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0 }],
+      profil,
+      changes: [],
+      payouts: [],
+      holidays,
+    });
+    expect(result.soll).toBe(0);
+    expect(result.ist).toBe(4);
   });
 });

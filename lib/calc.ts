@@ -35,6 +35,14 @@ export interface PensumChangeInput {
   wochenstunden: number;
 }
 
+// Feiertag, wie sollStundenTag ihn braucht — nur Datum + Halbtag, canton/name
+// sind reine Verwaltungsinfo der Holiday-Tabelle und für die Berechnung
+// irrelevant (MIGRATION.md Punkt 6c).
+export interface HolidayInput {
+  date: Date | string;
+  halfDay: boolean;
+}
+
 export interface EintragInput {
   typ: EintragTyp;
   von?: string | null;
@@ -65,6 +73,7 @@ export interface KennzahlenInput {
   profil: Profil;
   changes: PensumChangeInput[];
   payouts: PayoutInput[];
+  holidays: HolidayInput[];
 }
 
 export interface KennzahlenResult {
@@ -95,6 +104,7 @@ export interface FeriensaldoInput {
   heute: Date | string;
   profil: Profil;
   changes: PensumChangeInput[];
+  holidays: HolidayInput[];
   eintraege: EintragMitDatum[];
 }
 
@@ -145,7 +155,8 @@ export function pensumAt(
 export function sollStundenTag(
   datum: Date | string,
   profil: Profil,
-  changes: PensumChangeInput[]
+  changes: PensumChangeInput[],
+  holidays: HolidayInput[]
 ): number {
   const d = toUTCDate(datum);
   if (profil.startDate && d.getTime() < toUTCDate(profil.startDate).getTime()) {
@@ -157,7 +168,11 @@ export function sollStundenTag(
   const day = d.getUTCDay();
   if (day === 0 || day === 6) return 0;
   const { pensum, wochenstunden } = pensumAt(d, profil, changes);
-  return (wochenstunden * pensum) / 100 / 5;
+  const basis = (wochenstunden * pensum) / 100 / 5;
+  // Feiertag (MIGRATION.md Punkt 6c): ganzer Tag → 0, Halbtag → halbes Soll.
+  const feiertag = holidays.find((h) => toUTCDate(h.date).getTime() === d.getTime());
+  if (feiertag) return feiertag.halfDay ? basis / 2 : 0;
+  return basis;
 }
 
 export function stundenAusEintrag(eintrag: EintragInput, sollStundenDesTages: number): number {
@@ -190,13 +205,14 @@ function summeSollstunden(
   from: Date,
   to: Date,
   profil: Profil,
-  changes: PensumChangeInput[]
+  changes: PensumChangeInput[],
+  holidays: HolidayInput[]
 ): number {
   if (to.getTime() < from.getTime()) return 0;
   let total = 0;
   const current = new Date(from);
   while (current.getTime() <= to.getTime()) {
-    total += sollStundenTag(current, profil, changes);
+    total += sollStundenTag(current, profil, changes, holidays);
     current.setUTCDate(current.getUTCDate() + 1);
   }
   return total;
@@ -208,8 +224,8 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   const heute = toUTCDate(input.heute);
   const bisHeute = to.getTime() < heute.getTime() ? to : heute;
 
-  const soll = summeSollstunden(from, bisHeute, input.profil, input.changes);
-  const sollGesamt = summeSollstunden(from, to, input.profil, input.changes);
+  const soll = summeSollstunden(from, bisHeute, input.profil, input.changes, input.holidays);
+  const sollGesamt = summeSollstunden(from, to, input.profil, input.changes, input.holidays);
 
   let ist = 0;
   let kundenstunden = 0;
@@ -222,7 +238,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   for (const eintrag of input.eintraege) {
     const d = toUTCDate(eintrag.date);
     if (d.getTime() > to.getTime()) continue;
-    const tagesSoll = sollStundenTag(d, input.profil, input.changes);
+    const tagesSoll = sollStundenTag(d, input.profil, input.changes, input.holidays);
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     if (d.getTime() <= bisHeute.getTime()) {
       ist += stunden;
@@ -273,7 +289,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
 }
 
 export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
-  const { jahr, profil, changes } = input;
+  const { jahr, profil, changes, holidays } = input;
   const heute = toUTCDate(input.heute);
   const startDate = profil.startDate ? toUTCDate(profil.startDate) : null;
 
@@ -297,7 +313,7 @@ export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
     if (eintrag.typ !== "ferien") continue;
     const d = toUTCDate(eintrag.date);
     if (d.getUTCFullYear() !== jahr) continue;
-    const tagesSoll = sollStundenTag(d, profil, changes);
+    const tagesSoll = sollStundenTag(d, profil, changes, holidays);
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     const tage = tagesSoll > 0 ? stunden / tagesSoll : 0;
     if (d.getTime() <= heute.getTime()) bezogen += tage;

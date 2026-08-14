@@ -8,6 +8,7 @@ const translations: Record<string, string> = {
   "nav.analytics": "Analytics",
   "nav.profile": "Profil",
   "nav.team": "Team",
+  "nav.holidays": "Feiertage",
   // Login
   "login.title": "Anmelden",
   "login.email": "E-Mail",

@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, X, CalendarClock, Palmtree } from "lucide-re
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { toast } from "sonner";
-import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput } from "@/lib/calc";
+import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput, type HolidayInput } from "@/lib/calc";
 import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
 
 interface UserProfile {
@@ -30,6 +30,14 @@ interface PensumChange {
   pensum: number;
   weeklyHours: number;
   effectiveFrom: string;
+}
+
+interface Holiday {
+  id: string;
+  date: string;
+  name: string;
+  canton: string | null;
+  halfDay: boolean;
 }
 
 const TYPE_DOT_COLOR: Record<string, string> = {
@@ -57,6 +65,7 @@ export default function CalendarPage() {
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pensumChanges, setPensumChanges] = useState<PensumChange[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const monthPickerRef = useRef<HTMLDivElement>(null);
 
@@ -137,8 +146,18 @@ export default function CalendarPage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
+  const fetchHolidays = useCallback(async () => {
+    try {
+      const res = await fetch("/api/holidays");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setHolidays(data?.holidays ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchCustomers, fetchProjects]);
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchHolidays, fetchCustomers, fetchProjects]);
 
   // Close month picker on outside click
   useEffect(() => {
@@ -199,10 +218,16 @@ export default function CalendarPage() {
       }
     : null;
   const changes: PensumChangeInput[] = pensumChanges.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
+  const holidayInputs: HolidayInput[] = holidays.map((h) => ({ date: h.date, halfDay: h.halfDay }));
+
+  const getHolidayForDay = (day: number): Holiday | null => {
+    const dateStr = buildDateStr(day);
+    return holidays.find((h) => h.date === dateStr) ?? null;
+  };
 
   const getTagesSoll = (day: number): number => {
     if (!profil) return 0;
-    return sollStundenTag(buildDateStr(day), profil, changes);
+    return sollStundenTag(buildDateStr(day), profil, changes, holidayInputs);
   };
 
   const getDayTotalHours = (day: number, dayEntries: DayTimeEntry[], tagesSoll: number): number => {
@@ -473,14 +498,16 @@ export default function CalendarPage() {
               const weekday = new Date(currentDate.year, currentDate.month - 1, day).getDay();
               const isWorkday = weekday !== 0 && weekday !== 6;
               const isMissing = dayEntries.length === 0 && isWorkday && tagesSoll > 0;
+              const holiday = getHolidayForDay(day);
 
               return (
                 <button
                   key={di}
                   onClick={() => openDayModal(day)}
-                  className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm hover:bg-accent cursor-pointer ${isToday(day) ? 'ring-2 ring-primary/30' : ''}`}
+                  title={holiday ? `${holiday.name}${holiday.halfDay ? " (halber Tag)" : ""}` : undefined}
+                  className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm hover:bg-accent cursor-pointer ${isToday(day) ? 'ring-2 ring-primary/30' : ''} ${holiday ? 'bg-purple-50 dark:bg-purple-950/30' : ''}`}
                 >
-                  <span className={`font-medium ${isToday(day) ? 'text-primary font-bold' : di >= 5 ? 'text-muted-foreground/60' : ''}`}>
+                  <span className={`font-medium ${isToday(day) ? 'text-primary font-bold' : holiday ? 'text-purple-600' : di >= 5 ? 'text-muted-foreground/60' : ''}`}>
                     {day}
                   </span>
                   {distinctTypes.length > 0 && (

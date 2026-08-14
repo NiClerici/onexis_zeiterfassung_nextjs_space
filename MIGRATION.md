@@ -607,6 +607,72 @@ Feiertagen 0 zurück, an Halbtagen die Hälfte — `Holiday[]` als zusätzlicher
 Parameter. Tests inklusive Karfreitag/Ostermontag (beweglich) und eines
 kantonalen Feiertags.
 
+**Ergebnis:** `Holiday`-Tabelle genau wie beschrieben (orgId, date, name,
+canton nullable, halfDay), `@@unique([orgId, date, name])` gegen doppelte
+Einträge beim erneuten Generieren. Reine additive Migration — direkt
+angewendet.
+
+Neues `lib/holidays.ts` (kein Prisma, kein DB-Zugriff, gleiches
+Trennungsprinzip wie `lib/calc.ts`): `easterSunday()` per
+Gauss'scher Osterformel (Meeus/Jones/Butcher) für die beweglichen Feste;
+`swissBasisFeiertage(year)` liefert acht kantonsunabhängige Tage (Neujahr,
+Karfreitag, Ostermontag, Auffahrt, Pfingstmontag, Bundesfeier, Weihnachten,
+Stephanstag); `kantonaleFeiertage(year, canton)` liefert eine bewusst nicht
+erschöpfende, aber reale Auswahl (Berchtoldstag für ZH/BE/SO/AG; Fronleichnam,
+Mariä Himmelfahrt, Allerheiligen für LU/UR/SZ/TI/VS; Kantonsfeiertag Jura für
+JU) — volle 26-Kantone-Abdeckung wäre ein eigener, deutlich grösserer Punkt
+und ist bewusst nicht das Ziel hier, da die Tabelle selbst jederzeit weitere
+Zeilen aufnehmen kann ("ergänzbar").
+
+`sollStundenTag` um einen vierten, required Parameter `holidays: HolidayInput[]`
+erweitert (gleiches "required statt optional"-Prinzip wie bei `changes` in
+Punkt 1 und `maxWeeklyHours` in 6a — zwingt `tsc`, jeden Aufrufer zu finden):
+An einem ganztägigen Feiertag liefert die Funktion 0, an einem Halbtag die
+Hälfte des sonst berechneten Tagessolls. Durchgereicht durch `summeSollstunden`
+und beide `KennzahlenInput`/`FeriensaldoInput` (neues Feld `holidays`) bis in
+`kennzahlen()` und `feriensaldo()`. Bewusst NICHT angefasst: `bulk-vacation`
+und `bulk-apply` (deren eigene Datumslogik überspringt nur Wochenenden, nicht
+Feiertage) — ausserhalb des von Punkt 6c geforderten Umfangs (nur
+`sollStundenTag`), wie schon bei 6a mit den Bulk-Routen entschieden.
+
+Neue Route `app/api/holidays/route.ts`: GET (jedes Org-Mitglied, optionaler
+`year`-Filter), POST mit zwei Modi — `{ generateYear, canton? }` generiert über
+`lib/holidays.ts` und schreibt mit `skipDuplicates` (idempotent, wiederholtes
+Generieren legt nichts doppelt an), oder `{ date, name, halfDay, canton? }`
+legt einen einzelnen, manuell erfassten Feiertag an ("ergänzbar") — beide nur
+admin/owner (`requireRole`). DELETE ebenso admin/owner-only, org-scoped.
+
+Neue Seite `app/(app)/admin/holidays/page.tsx` (Nav-Tab „Feiertage" für
+admin/owner, analog zum bestehenden „Team"-Tab): Jahr+Kanton generieren,
+manuell ergänzen, Liste mit Löschen. Kalender (`app/(app)/calendar/page.tsx`)
+lädt die Org-Feiertage, reicht sie an `sollStundenTag` durch (dadurch wird ein
+Feiertag automatisch nicht mehr als "fehlender Eintrag" rot markiert — folgt
+allein aus `tagesSoll === 0`, keine separate Sonderlogik nötig) und markiert
+den Tag zusätzlich violett mit Titel-Tooltip (Feiertagsname). Analytics- und
+Export-Route laden ebenfalls die Org-Feiertage und reichen sie an alle
+`kennzahlen()`/`feriensaldo()`/`sollStundenTag()`-Aufrufe durch.
+
+Tests: `lib/holidays.test.ts` (12 Tests) — Ostersonntag gegen eine unabhängige
+Referenzimplementierung für 5 Jahre verifiziert (nicht nur gegen den eigenen
+Code), Karfreitag/Ostermontag/Auffahrt/Pfingstmontag 2026 auf den Tag genau,
+Basissatz-Vollständigkeit, Kantonsfeiertag Jura, Fronleichnam (beweglich) für
+LU, leere Liste für einen nicht hinterlegten Kanton. `lib/calc.test.ts`
+(7 neue Tests) — `sollStundenTag` an Karfreitag/Ostermontag/einem kantonalen
+Feiertag (Jura) je 0, Halbtag-Feiertag halbiert korrekt, ein Feiertag am
+Wochenende ändert nichts, `kennzahlen()` reduziert `soll` in einer
+Karwoche mit zwei Feiertagen korrekt (32h statt 40h), ein trotz Feiertag
+erfasster Arbeitseintrag zählt weiterhin normal als `ist` (Feiertage
+beeinflussen nur soll, nie erfasste Ist-Stunden).
+
+Browser-verifiziert (admin@onexis.test, „Feiertage"-Admin-Seite): 2026 +
+Kanton Jura generiert → 9 Zeilen (8 Basissatz + Kantonsfeiertag Jura), Toast
+und Liste korrekt; manueller Zusatzfeiertag angelegt und Toast bestätigt.
+Kalender April 2026 zeigt Karfreitag (3.4.) und Ostermontag (6.4.) korrekt
+violett markiert und **nicht** rot als fehlend, während alle übrigen
+Werktage weiterhin korrekt als fehlend markiert sind. Keine Konsolenfehler.
+Testdaten (alle 10 generierten/manuellen Holiday-Zeilen) danach vollständig
+per SQL entfernt (Baseline 0 `Holiday`-Zeilen bestätigt).
+
 **6d. Pausen- und Ruhezeitprüfung.** Reine Funktion `pruefeCompliance(eintraege
 eines Tages, vortag)` in `lib/compliance.ts`, die Verstösse als Liste liefert:
 Pause unter 15 Minuten bei über 5.5h, unter 30 Minuten bei über 7h, unter
@@ -866,3 +932,17 @@ _(Hier trägt der Loop Blocker, Entscheidungen und Auffälligkeiten ein.)_
   zu vergessen, da es keinen DB-Constraint gibt, der das erzwingt (bewusst
   keine Prisma-Middleware/globalen Filter verwendet, um explizit zu bleiben,
   welche Query was sieht).
+- Punkt 6c: bewusst keine Vollabdeckung aller 26 Kantone in
+  `kantonaleFeiertage()` — nur eine reale, aber kleine Auswahl (ZH/BE/SO/AG,
+  LU/UR/SZ/TI/VS, JU). Für Punkt 8/9 oder eine spätere Iteration relevant,
+  falls weitere Kantone gebraucht werden: entweder `lib/holidays.ts` gezielt
+  erweitern (mit Quellenangabe/Verifikation der Daten, nicht aus dem
+  Gedächtnis) oder — meist einfacher und schon jetzt möglich — den fehlenden
+  Feiertag direkt als manuellen Eintrag über `/admin/holidays` anlegen, ohne
+  Code zu ändern ("ergänzbar" ist bewusst so gebaut). Ausserdem wichtig: die
+  bereits bestehenden `TimeEntry`-Einträge vom Typ `feiertag` (manuell vom
+  Nutzer als Feiertag markierte Arbeitstage, z.B. bei individuellen
+  Feiertagsregelungen) sind ein komplett separater Mechanismus von der neuen
+  `Holiday`-Tabelle (org-weiter, automatisch das Soll reduzierender Kalender)
+  — beide bewusst nicht zusammengeführt, da sie unterschiedliche Dinge
+  ausdrücken (persönlicher Eintrag vs. organisationsweiter Fakt).

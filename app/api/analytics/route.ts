@@ -10,6 +10,7 @@ import {
   type PensumChangeInput,
   type EintragMitDatum,
   type PayoutInput,
+  type HolidayInput,
 } from "@/lib/calc";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
@@ -87,13 +88,16 @@ export async function GET(req: Request) {
     const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
     const changes = mapChanges(pensumChangesRaw);
 
+    const holidaysRaw = await prisma.holiday.findMany({ where: { orgId } });
+    const holidays: HolidayInput[] = holidaysRaw.map((h) => ({ date: h.date, halfDay: h.halfDay }));
+
     const entriesRaw = await prisma.timeEntry.findMany({ where: { userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } });
     const eintraege = mapEintraege(entriesRaw);
 
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts });
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
 
     // Feiertagsstunden (bis heute) für die bestehende Feiertags-Karte
     const todayEnd = new Date();
@@ -112,7 +116,7 @@ export async function GET(req: Request) {
     const yearFerienRaw = await prisma.timeEntry.findMany({
       where: { userId, orgId, deletedAt: null, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
     });
-    const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, eintraege: mapEintraege(yearFerienRaw) });
+    const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, holidays, eintraege: mapEintraege(yearFerienRaw) });
 
     // Ausbezahlte Überstunden: kumulierte Gesamtsumme (informativ), unabhängig vom Zeitraum
     const allPayouts = await prisma.overtimePayout.findMany({ where: { userId, orgId } });
@@ -130,9 +134,9 @@ export async function GET(req: Request) {
       const mStart = new Date(Date.UTC(mYear, mMonth - 1, 1));
       const mEndFull = new Date(Date.UTC(mYear, mMonth, 0));
       const mEnd = mEndFull > endDate ? endDate : mEndFull;
-      const mk = kennzahlen({ from: mStart, to: mEnd, heute, eintraege, profil, changes, payouts });
+      const mk = kennzahlen({ from: mStart, to: mEnd, heute, eintraege, profil, changes, payouts, holidays });
       // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im Verlaufs-Chart
-      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [] });
+      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [], holidays });
       monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, work: mkWork.ist, customer: mk.kundenstunden });
       currentMonth.setUTCMonth(currentMonth.getUTCMonth() + 1);
     }

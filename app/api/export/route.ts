@@ -13,6 +13,7 @@ import {
   type PensumChangeInput,
   type EintragMitDatum,
   type PayoutInput,
+  type HolidayInput,
 } from "@/lib/calc";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
@@ -131,6 +132,9 @@ export async function GET(req: Request) {
     const pensumChangesRaw = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
     const changes = mapChanges(pensumChangesRaw);
 
+    const holidaysRaw = await prisma.holiday.findMany({ where: { orgId } });
+    const holidays: HolidayInput[] = holidaysRaw.map((h) => ({ date: h.date, halfDay: h.halfDay }));
+
     // Weiterhin gebraucht für die Kundenstunden-Aufschlüsselung (Sheet 2)
     // unten — unabhängig davon, ob ein Kunde billable ist oder nicht.
     const kundenRaw = await prisma.customer.findMany({ where: { orgId } });
@@ -145,7 +149,7 @@ export async function GET(req: Request) {
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts });
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
 
     const allPayouts = await prisma.overtimePayout.findMany({ where: { userId, orgId } });
     const totalPaidOutHours = allPayouts.reduce((s, p) => s + p.hours, 0);
@@ -158,7 +162,7 @@ export async function GET(req: Request) {
       .map((kd) => {
         const hours = eintraege
           .filter((e) => e.customerId === kd.id && e.typ === "arbeit")
-          .reduce((sum, e) => sum + stundenAusEintrag(e, sollStundenTag(e.date, profil, changes)), 0);
+          .reduce((sum, e) => sum + stundenAusEintrag(e, sollStundenTag(e.date, profil, changes, holidays)), 0);
         return { name: kd.name, billable: kd.billable, hours };
       })
       .filter((c) => c.hours > 0)
@@ -171,7 +175,7 @@ export async function GET(req: Request) {
     const yearFerienRaw = await prisma.timeEntry.findMany({
       where: { userId, orgId, deletedAt: null, type: "ferien", date: { gte: yearStart, lte: yearEnd } },
     });
-    const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, eintraege: mapEintraege(yearFerienRaw) });
+    const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, holidays, eintraege: mapEintraege(yearFerienRaw) });
 
     // ---- Build Excel workbook ----
     const workbook = new ExcelJS.Workbook();
@@ -195,7 +199,7 @@ export async function GET(req: Request) {
     let sheet1TotalHours = 0;
     for (const entry of entries ?? []) {
       const d = new Date(entry.date);
-      const tagesSoll = sollStundenTag(d, profil, changes);
+      const tagesSoll = sollStundenTag(d, profil, changes, holidays);
       const stunden = stundenAusEintrag(
         { typ: entry.type as any, von: entry.von, bis: entry.bis, pauseMin: entry.pauseMin, hours: entry.hours },
         tagesSoll

@@ -63,6 +63,27 @@ model Organization {
   pensumChanges   PensumChange[]
   overtimePayouts OvertimePayout[]
   invitations     Invitation[]
+  holidays        Holiday[]
+}
+
+// Feiertage pro Organisation (MIGRATION.md Punkt 6c). Kein fixer
+// Basissatz-Zwang im Schema — der Schweizer Basissatz und kantonale
+// Feiertage werden über lib/holidays.ts generiert und als normale Zeilen
+// geschrieben ("Seed"); canton dokumentiert nur die Herkunft (null =
+// Basissatz) und lässt sich beliebig um eigene, manuell erfasste Feiertage
+// ergänzen ("auswählbar und ergänzbar").
+model Holiday {
+  id      String   @id @default(cuid())
+  orgId   String
+  date    DateTime @db.Date
+  name    String
+  canton  String?
+  halfDay Boolean  @default(false)
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, date, name])
+  @@index([orgId, date])
 }
 
 // Einladung eines neuen Mitglieds per E-Mail (MIGRATION.md Punkt 4). Nur der
