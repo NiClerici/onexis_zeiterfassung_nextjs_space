@@ -1,0 +1,19 @@
+# Reverse Proxy mit automatischem TLS (Let's Encrypt) — MIGRATION.md
+# Punkt 11. Caddy holt und erneuert das Zertifikat für {$DOMAIN}
+# automatisch, sobald DNS auf diese VM zeigt und Port 80+443 offen sind.
+# Die Sicherheits-Header (CSP, HSTS, X-Frame-Options, ...) setzt bereits
+# die App selbst (next.config.js, MIGRATION.md Punkt 10) — hier deshalb
+# bewusst nicht dupliziert.
+
+{$DOMAIN} {
+	reverse_proxy app:3000
+
+	encode gzip
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}
