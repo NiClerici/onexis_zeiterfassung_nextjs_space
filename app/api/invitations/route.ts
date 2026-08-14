@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { sendMail } from "@/lib/mail";
 import { hashToken, generateToken } from "@/lib/token";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
+import { billing } from "@/lib/billing";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
 const INVITABLE_ROLES = ["admin", "manager", "member"]; // owner wird nie eingeladen
@@ -69,6 +70,21 @@ export async function POST(req: Request) {
 
     const org = await prisma.organization.findUnique({ where: { id: orgId } });
     if (!org) return NextResponse.json({ error: "Organisation nicht gefunden" }, { status: 404 });
+
+    // Nutzerlimit des Plans (MIGRATION.md Punkt 12, lib/billing.ts) — bewusst
+    // beim Einladen geprüft, nicht erst bei der Annahme: verhindert, dass
+    // mehr offene Einladungen verschickt werden, als der Plan noch Plätze
+    // hat. Vereinfachung: mehrere gleichzeitig offene Einladungen könnten
+    // theoretisch in Summe noch über das Limit hinaus angenommen werden
+    // (keine zweite Prüfung beim Annehmen) — für die vorerst rein manuelle
+    // Implementierung bewusst nicht weiter verschärft.
+    const limitCheck = await billing.checkUserLimit(orgId);
+    if (!limitCheck.withinLimit) {
+      return NextResponse.json(
+        { error: `Nutzerlimit erreicht (${limitCheck.currentCount}/${limitCheck.maxUsers} für den ${org.plan}-Plan). Bitte Plan upgraden.` },
+        { status: 403 }
+      );
+    }
 
     const rawToken = generateToken();
     const tokenHash = hashToken(rawToken);

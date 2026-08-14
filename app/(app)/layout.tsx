@@ -5,9 +5,10 @@ import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOff } from "lucide-react";
+import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOff, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { isTrialExpired } from "@/lib/billing-rules";
 
 const baseTabs = [
   { href: "/calendar", icon: Calendar, labelKey: "nav.calendar" },
@@ -36,6 +37,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Passworts zwingen (MIGRATION.md Punkt 2).
   const mustSetPassword = (session?.user as any)?.mustSetPassword;
   const role = (session?.user as any)?.role;
+  const plan = (session?.user as any)?.plan;
+  const trialEndsAt = (session?.user as any)?.trialEndsAt;
+  const trialExpired = isTrialExpired(plan, trialEndsAt);
+  const trialEndsAtDate = trialEndsAt ? new Date(trialEndsAt) : null;
   const tabs =
     role === "owner" || role === "admin"
       ? [...baseTabs, teamsichtTab, teamTab, holidaysTab]
@@ -72,6 +77,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
+      {/* Trial-Hinweis (MIGRATION.md Punkt 12) — sichtbar für alle Rollen,
+          da der Schreibschutz die ganze Organisation betrifft, nicht nur
+          admin/owner. */}
+      {plan === "trial" && (
+        <div className={cn("px-4 py-2 text-xs text-center", trialExpired ? "bg-red-50 text-red-800 dark:bg-red-950/30" : "bg-amber-50 text-amber-800 dark:bg-amber-950/30")}>
+          {trialExpired ? (
+            <span className="flex items-center justify-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> {t("billing.trialExpired")}</span>
+          ) : trialEndsAtDate ? (
+            <span>{t("billing.trialActive", { date: trialEndsAtDate.toLocaleDateString("de-CH") })}</span>
+          ) : null}
+        </div>
+      )}
       <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-4 pb-20 sm:pb-4">{children}</main>
       <nav className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-card/90 backdrop-blur-xl border-t border-border/50 safe-area-pb">
         <div className="flex items-center justify-around h-16 max-w-md mx-auto">

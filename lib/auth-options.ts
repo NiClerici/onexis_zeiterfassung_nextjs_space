@@ -38,6 +38,7 @@ export const authOptions: NextAuthOptions = {
           const membership = await prisma.membership.findFirst({
             where: { userId: user.id, status: "aktiv" },
             orderBy: { createdAt: "asc" },
+            include: { org: true },
           });
 
           return {
@@ -47,6 +48,11 @@ export const authOptions: NextAuthOptions = {
             mustSetPassword: user.mustSetPassword,
             orgId: membership?.orgId ?? null,
             role: membership?.role ?? null,
+            // Für die Trial-Ablauf-Prüfung in middleware.ts (MIGRATION.md
+            // Punkt 12) — die Edge-Runtime dort hat keinen Prisma-Zugriff,
+            // deshalb müssen plan/trialEndsAt bereits im Token stehen.
+            plan: membership?.org?.plan ?? null,
+            trialEndsAt: membership?.org?.trialEndsAt ?? null,
           } as any;
         } catch (error: any) {
           console.error("Auth error:", error);
@@ -67,6 +73,8 @@ export const authOptions: NextAuthOptions = {
         token.mustSetPassword = user?.mustSetPassword ?? false;
         token.orgId = user?.orgId ?? null;
         token.role = user?.role ?? null;
+        token.plan = user?.plan ?? null;
+        token.trialEndsAt = user?.trialEndsAt ?? null;
       }
       // Wird von set-password/page.tsx nach erfolgreichem Setzen des neuen
       // Passworts über useSession().update() ausgelöst, damit die Sperre ohne
@@ -82,6 +90,8 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).mustSetPassword = token?.mustSetPassword ?? false;
         (session.user as any).orgId = token?.orgId ?? null;
         (session.user as any).role = token?.role ?? null;
+        (session.user as any).plan = token?.plan ?? null;
+        (session.user as any).trialEndsAt = token?.trialEndsAt ?? null;
       }
       return session;
     },

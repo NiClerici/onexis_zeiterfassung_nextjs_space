@@ -341,6 +341,9 @@ const translations: Record<string, string> = {
   "absences.teamCalendarHint": "Abwesenheiten im gewählten Monat ({teamSize} sichtbare Mitglieder). Rot markierte Tage: ungewöhnlich viele gleichzeitig abwesend.",
   "absences.warningHint": "Ungewöhnlich viele Mitglieder gleichzeitig abwesend",
   "absences.noAbsences": "Keine Abwesenheiten in diesem Monat",
+  // Billing/Trial (MIGRATION.md Punkt 12)
+  "billing.trialActive": "Testphase läuft bis {date}.",
+  "billing.trialExpired": "Testzeitraum abgelaufen. Diese Organisation ist schreibgeschützt, bis ein Plan gewählt wird.",
   // Common
   "common.loading": "Laden...",
   "common.error": "Ein Fehler ist aufgetreten",
