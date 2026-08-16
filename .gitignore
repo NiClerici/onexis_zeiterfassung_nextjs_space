@@ -23,6 +23,9 @@ yarn-error.log*
 test-results/
 playwright-report/
 
+# vitest coverage (HARDENING.md B1)
+coverage/
+
 # misc
 .DS_Store
 *.pem

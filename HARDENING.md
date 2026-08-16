@@ -106,7 +106,7 @@ damit sich Sperre und Genehmigung nicht widersprechen).
 
 ## Teil B — Testlücken schliessen
 
-### - [ ] B1. Coverage-Bericht erstellen und Lücken auflisten
+### - [x] B1. Coverage-Bericht erstellen und Lücken auflisten
 
 `npx vitest run --coverage`. Ergebnis in dieser Datei als Liste der Dateien
 mit auffällig niedriger Coverage in `lib/` und `app/api/` festhalten —
@@ -513,3 +513,77 @@ weshalb sie den Audit-Trail über `changedBy` auch korrekt mitführt
 > die genehmigende Person sollte es sehen. Das ist ein Feature, kein Fix.
 
 Stand nach A6: 16 Dateien, 230 Tests, typecheck sauber. **Teil A vollständig.**
+
+### B1 — Coverage-Bestandsaufnahme, 16.08.2026
+
+`@vitest/coverage-v8@2.1.9` fehlte und wurde als devDependency ergänzt
+(Version an `vitest@2.1.9` gepinnt). In `vitest.config.ts` ist `all: true`
+mit `include: ["lib/**/*.ts", "app/api/**/*.ts"]` gesetzt — ohne das zählt
+der Bericht nur Dateien, die ein Test importiert hat, und ungetestete Routen
+fehlen komplett statt mit 0% aufzutauchen. Genau die sind hier aber der
+Punkt. Neues Skript: `npm run test:coverage`. `coverage/` ist ignoriert.
+
+**Gesamt: 61.29% Statements, 66.74% Branches.**
+
+**Gar nicht getestet (0%)** — nach Zeilenzahl, die grössten zuerst:
+
+| Datei | Zeilen | Einschätzung |
+|---|---|---|
+| `app/api/analytics/route.ts` | 177 | echte Lücke, rechnet Kennzahlen für die Analytics-Seite |
+| `app/api/profile/route.ts` | 138 | echte Lücke, schreibt Arbeitseinstellungen |
+| `app/api/projects/route.ts` | 133 | echte Lücke, CRUD inkl. Budget/Satz-Validierung |
+| `app/api/admin/team/route.ts` | 131 | echte Lücke, Rollen-/Vorgesetztenzuweisung |
+| `app/api/holidays/route.ts` | 123 | echte Lücke |
+| `app/api/invitations/accept/route.ts` | 123 | echte Lücke, sicherheitsrelevant (Token-Einlösung) |
+| `app/api/signup/route.ts` | 78 | echte Lücke, sicherheitsrelevant |
+| `app/api/auth/forgot-password/route.ts` | 69 | echte Lücke, sicherheitsrelevant |
+| `app/api/auth/reset-password/route.ts` | 61 | echte Lücke, sicherheitsrelevant |
+| `lib/password-policy.ts` | 25 | echte Lücke, reine Funktion — billig nachzuholen |
+| `lib/mail.ts` | 53 | Nebenwirkung (SMTP), Test nur mit Mock sinnvoll |
+| `lib/common-passwords.ts` | 81 | reine Datenliste, kein Testwert |
+| `lib/utils.ts` | 14 | `cn()`-Helfer, kein Testwert |
+| `lib/types.ts` | 23 | nur Deklarationen, kein Testwert |
+| `app/api/auth/[...nextauth]/route.ts` | 5 | reiner Re-Export, kein Testwert |
+
+**Unter 50% Statements:**
+
+| Datei | Stmts |
+|---|---|
+| `lib/rate-limit.ts` | 10.25% |
+| `app/api/pensum-changes/route.ts` | 21.09% |
+| `lib/auth-options.ts` | 31.64% |
+| `app/api/overtime-payouts/route.ts` | 36.36% |
+| `app/api/customers/route.ts` | 38.20% |
+| `app/api/invitations/route.ts` | 45.19% |
+
+**Hohe Statement-, niedrige Branch-Coverage** — der aussagekräftigste
+Befund für B2: diese Routen werden im Happy Path durchlaufen, ihre
+Fehlerpfade aber kaum.
+
+| Datei | Stmts | Branch |
+|---|---|---|
+| `app/api/time-entries/bulk-vacation/route.ts` | 78.78% | **29.41%** |
+| `app/api/time-entries/bulk-apply/route.ts` | 76.07% | **34.09%** |
+| `app/api/admin/organization/export/route.ts` | 86.04% | 52.94% |
+| `app/api/export/route.ts` | 92.63% | 53.57% |
+| `app/api/time-entries/route.ts` | 83.83% | 54.46% |
+| `lib/export-helpers.ts` | 89.15% | 55.55% |
+| `app/api/month-locks/route.ts` | 86.51% | 55.17% |
+
+Gut abgedeckt und hier nur zur Einordnung: `lib/calc.ts` 98.83%,
+`lib/compliance.ts` 97.72%, `lib/access.ts` 97.01%, `app/api/team` 95.53%,
+`app/api/export/arg-control` 96.85%, `lib/holidays.ts`, `lib/org-export.ts`,
+`lib/audit.ts`, `lib/billing-rules.ts` je 100%.
+
+Laut Punkt bewusst **nur Bestandsaufnahme, nichts gefixt**. B2 nimmt die
+Fehlerpfade der genannten Routen; die 0%-Routen ausserhalb von B2s Fokus
+(`analytics`, `profile`, `projects`, `admin/team`, `holidays`, `signup`,
+`invitations/accept`, `auth/*`) bleiben offen.
+
+> Vorschlag für eine künftige Datei: die vier sicherheitsrelevanten
+> 0%-Routen (`signup`, `invitations/accept`, `forgot-password`,
+> `reset-password`) als eigener Testpunkt — Token-Ablauf, Wiederverwendung
+> eines Tokens, Passwortrichtlinie, Enumeration von E-Mail-Adressen. Das
+> geht über „Testlücken schliessen" hinaus und verdient eigene Sorgfalt.
+
+Stand nach B1: 16 Dateien, 230 Tests (unverändert), typecheck sauber.
