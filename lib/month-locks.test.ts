@@ -295,3 +295,109 @@ describe("Monatssperre × Absenzgenehmigung (HARDENING.md A6)", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// HARDENING.md B2 — Fehlerpfade von /api/month-locks. Rollen und Idempotenz
+// sind oben abgedeckt; hier ungültige Eingaben und fremde Ressourcen.
+describe("/api/month-locks — Fehlerpfade (HARDENING.md B2)", () => {
+  it("POST mit month=13 liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: memberId, year: 2026, month: 13 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST mit year ausserhalb 2000–2100 liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: memberId, year: 1999, month: 5 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST ohne userId liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { year: 2026, month: 5 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST für eine userId ohne Membership in dieser Org liefert 404", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: "gibtesnicht", year: 2026, month: 5 }));
+    expect(res.status).toBe(404);
+  });
+
+  it("POST für eine userId aus einer FREMDEN Org liefert 404, und dort entsteht keine Sperre", async () => {
+    const fremdeOrg = "test_monthlock_fremde_org";
+    const fremderUser = await prisma.user.create({
+      data: { email: "monthlock-fremd@example.test", password: "irrelevant", firstName: "Fremd", lastName: "Person" },
+    });
+    await prisma.organization.create({ data: { id: fremdeOrg, name: "Fremde MonthLock Org", slug: "monthlock-fremde-org" } });
+    await prisma.membership.create({ data: { orgId: fremdeOrg, userId: fremderUser.id, role: "member", entryDate: new Date("2026-01-01") } });
+    try {
+      setSession(adminId, ORG, "admin");
+      const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: fremderUser.id, year: 2026, month: 5 }));
+      expect(res.status).toBe(404);
+      const locks = await prisma.monthLock.count({ where: { userId: fremderUser.id } });
+      expect(locks).toBe(0);
+    } finally {
+      await prisma.monthLock.deleteMany({ where: { orgId: fremdeOrg } });
+      await prisma.membership.deleteMany({ where: { orgId: fremdeOrg } });
+      await prisma.organization.deleteMany({ where: { id: fremdeOrg } });
+      await prisma.user.deleteMany({ where: { id: fremderUser.id } });
+    }
+  });
+
+  it("DELETE mit ungültigem Monat liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await mlDelete(jsonReq("/api/month-locks", "DELETE", { userId: memberId, year: 2026, month: 0 }));
+    expect(res.status).toBe(400);
+  });
+});
+
+// HARDENING.md B2 — Fehlerpfade der beiden Bulk-Routen unter
+// app/api/time-entries/. Sie hatten im B1-Bericht die schlechteste
+// Branch-Coverage der ganzen Codebasis (bulk-vacation 29.41%, bulk-apply
+// 34.09%) bei über 75% Statements: der Happy Path lief, die Validierung nie.
+describe("Bulk-Routen — Fehlerpfade (HARDENING.md B2)", () => {
+  const routen: Array<[string, (r: Request) => Promise<Response>, string]> = [
+    ["bulk-vacation", bulkVacationPost, "/api/time-entries/bulk-vacation"],
+    ["bulk-apply", bulkApplyPost, "/api/time-entries/bulk-apply"],
+  ];
+
+  for (const [name, handler, url] of routen) {
+    it(`${name}: unparsbares Datum liefert 400`, async () => {
+      setSession(memberId, ORG, "member");
+      const res = await handler(jsonReq(url, "POST", { fromDate: "kein-datum", toDate: "2026-11-30" }));
+      expect(res.status).toBe(400);
+    });
+
+    it(`${name}: fehlende Datumsangaben liefern 400`, async () => {
+      setSession(memberId, ORG, "member");
+      const res = await handler(jsonReq(url, "POST", {}));
+      expect(res.status).toBe(400);
+    });
+
+    it(`${name}: leerer Body liefert 400 statt eines Absturzes`, async () => {
+      setSession(memberId, ORG, "member");
+      const res = await handler(new Request(`http://localhost${url}`, { method: "POST" }));
+      expect(res.status).toBe(400);
+    });
+
+    it(`${name}: Enddatum vor Startdatum liefert 400`, async () => {
+      setSession(memberId, ORG, "member");
+      const res = await handler(jsonReq(url, "POST", { fromDate: "2026-11-30", toDate: "2026-11-01" }));
+      expect(res.status).toBe(400);
+    });
+
+    it(`${name}: Zeitraum über 366 Tage liefert 400`, async () => {
+      setSession(memberId, ORG, "member");
+      const res = await handler(jsonReq(url, "POST", { fromDate: "2026-01-01", toDate: "2027-12-31" }));
+      expect(res.status).toBe(400);
+    });
+
+    it(`${name}: genau 366 Tage sind noch erlaubt (Grenzfall, kein Overblocking)`, async () => {
+      setSession(memberId, ORG, "member");
+      // 2026-01-01 bis 2027-01-01 = 366 Tage inklusive.
+      const res = await handler(jsonReq(url, "POST", { fromDate: "2026-01-01", toDate: "2027-01-01" }));
+      expect(res.status).toBe(200);
+      await prisma.timeEntry.deleteMany({ where: { orgId: ORG, userId: memberId, date: { gte: new Date("2026-01-01"), lte: new Date("2027-01-01") } } });
+    });
+  }
+});

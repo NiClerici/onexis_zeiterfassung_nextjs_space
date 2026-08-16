@@ -6,6 +6,7 @@
 // wenige Config-Exports exportieren).
 
 import ExcelJS from "exceljs";
+import { AccessError } from "@/lib/access";
 import type { Profil, PensumChangeInput, EintragMitDatum } from "@/lib/calc";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
@@ -41,13 +42,46 @@ export function mapEintraege(entries: any[]): EintragMitDatum[] {
   }));
 }
 
+// Ungültige Zeitraum-Parameter sind ein Eingabefehler des Aufrufers und
+// müssen 400 liefern, nicht 500 (HARDENING.md B2). AccessError ist die
+// Fehlerklasse, die alle vier aufrufenden Routen in ihrem catch bereits auf
+// den passenden Status abbilden — deshalb hier dieselbe statt einer eigenen,
+// die jede Route einzeln behandeln müsste. Der Import verletzt die
+// "Prisma-arm"-Absicht dieser Datei nicht in der Praxis: alle Aufrufer
+// importieren @/lib/access ohnehin.
+function assertGueltigesDatum(d: Date, was: string): Date {
+  if (Number.isNaN(d.getTime())) {
+    throw new AccessError(400, `Ungültiger Zeitraum: ${was} ist kein gültiges Datum.`);
+  }
+  return d;
+}
+
+// year/month aus den Query-Parametern, validiert. Gleiche Grenzen wie
+// parseYearMonth in app/api/month-locks/route.ts:7-15, damit "was ist ein
+// gültiger Monat" nicht an mehreren Stellen unterschiedlich beantwortet wird.
+// Ohne diese Prüfung ergab year=abc ein Invalid Date, das erst in der
+// Prisma-Query als 500 auffiel, und month=99 einen still um Jahre
+// verschobenen Zeitraum (HARDENING.md B2). Zwei Aufrufer: parseExportRange
+// hier und der Lohnexport, der bewusst immer monatsweise arbeitet und
+// deshalb nicht parseExportRange verwendet.
+export function parseYearMonthFromUrl(url: URL): { year: number; month: number } {
+  const now = new Date();
+  const year = parseInt(url?.searchParams?.get?.("year") ?? String(now.getFullYear()));
+  const month = parseInt(url?.searchParams?.get?.("month") ?? String(now.getMonth() + 1));
+  if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+    throw new AccessError(400, "Ungültiger Zeitraum: year muss zwischen 2000 und 2100 liegen.");
+  }
+  if (!Number.isFinite(month) || month < 1 || month > 12) {
+    throw new AccessError(400, "Ungültiger Zeitraum: month muss zwischen 1 und 12 liegen.");
+  }
+  return { year, month };
+}
+
 // type=month|year|custom — identische Zeitraum-Logik für alle drei
 // Export-Routen (vorher nur in /api/export dupliziert vorhanden).
 export function parseExportRange(url: URL): { startDate: Date; endDate: Date } {
   const type = url?.searchParams?.get?.("type") ?? "month";
-  const now = new Date();
-  const year = parseInt(url?.searchParams?.get?.("year") ?? String(now.getFullYear()));
-  const month = parseInt(url?.searchParams?.get?.("month") ?? String(now.getMonth() + 1));
+  const { year, month } = parseYearMonthFromUrl(url);
 
   // UTC-Grenzen: @db.Date-Werte werden anhand des UTC-Kalendertags gespeichert/verglichen.
   // Lokale Date-Konstruktoren würden in Zeitzonen ≠ UTC den letzten Tag der Periode abschneiden.
@@ -59,8 +93,8 @@ export function parseExportRange(url: URL): { startDate: Date; endDate: Date } {
     const fromStr = url?.searchParams?.get?.("from") ?? "";
     const toStr = url?.searchParams?.get?.("to") ?? "";
     return {
-      startDate: fromStr ? new Date(fromStr) : new Date(Date.UTC(year, 0, 1)),
-      endDate: toStr ? new Date(toStr) : new Date(Date.UTC(year, 11, 31)),
+      startDate: fromStr ? assertGueltigesDatum(new Date(fromStr), "from") : new Date(Date.UTC(year, 0, 1)),
+      endDate: toStr ? assertGueltigesDatum(new Date(toStr), "to") : new Date(Date.UTC(year, 11, 31)),
     };
   }
 }

@@ -231,3 +231,83 @@ describe("GET /api/absences/calendar — Team-Kalender mit Warnung", () => {
     expect(day.warning).toBe(false); // 1/4 = 25% < 30%
   });
 });
+
+// HARDENING.md B2 — Fehlerpfade von /api/absence-requests. Der Happy Path und
+// die Rollenprüfungen sind oben abgedeckt; hier die unglücklichen Pfade
+// (unbekannte ID, fremde Org, ungültige Eingabe, falscher scope).
+describe("/api/absence-requests — Fehlerpfade (HARDENING.md B2)", () => {
+  it("PATCH auf eine unbekannte ID liefert 404", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await arPatch(jsonReq("/api/absence-requests", "PATCH", { id: "gibtesnicht", action: "approve" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("PATCH mit unbekannter action liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await arPatch(jsonReq("/api/absence-requests", "PATCH", { id: "egal", action: "vielleicht" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH ohne ID liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await arPatch(jsonReq("/api/absence-requests", "PATCH", { action: "approve" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH auf einen Antrag aus einer FREMDEN Org liefert 404", async () => {
+    const fremdeOrg = "test_absence_fremde_org";
+    const fremderUser = await prisma.user.create({
+      data: { email: "absence-fremd@example.test", password: "irrelevant", firstName: "Fremd", lastName: "Person" },
+    });
+    await prisma.organization.create({ data: { id: fremdeOrg, name: "Fremde Absence Org", slug: "absence-fremde-org" } });
+    await prisma.membership.create({ data: { orgId: fremdeOrg, userId: fremderUser.id, role: "member", entryDate: new Date("2026-01-01") } });
+    const fremderAntrag = await prisma.absenceRequest.create({
+      data: { orgId: fremdeOrg, userId: fremderUser.id, fromDate: new Date("2026-09-07"), toDate: new Date("2026-09-08"), type: "ferien" },
+    });
+    try {
+      setSession(adminId, ORG, "admin");
+      const res = await arPatch(jsonReq("/api/absence-requests", "PATCH", { id: fremderAntrag.id, action: "approve" }));
+      expect(res.status).toBe(404);
+      const unveraendert = await prisma.absenceRequest.findUnique({ where: { id: fremderAntrag.id } });
+      expect(unveraendert?.status).toBe("offen");
+    } finally {
+      await prisma.absenceRequest.deleteMany({ where: { orgId: fremdeOrg } });
+      await prisma.membership.deleteMany({ where: { orgId: fremdeOrg } });
+      await prisma.organization.deleteMany({ where: { id: fremdeOrg } });
+      await prisma.user.deleteMany({ where: { id: fremderUser.id } });
+    }
+  });
+
+  it("DELETE auf eine unbekannte ID liefert 404", async () => {
+    setSession(reportId, ORG, "member");
+    const res = await arDelete(jsonReq("/api/absence-requests", "DELETE", { id: "gibtesnicht" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("POST ohne Datumsangaben liefert 400", async () => {
+    setSession(reportId, ORG, "member");
+    const res = await arPost(jsonReq("/api/absence-requests", "POST", { type: "ferien" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST mit leerem Body liefert 400 statt eines Absturzes", async () => {
+    setSession(reportId, ORG, "member");
+    const res = await arPost(new Request("http://localhost/api/absence-requests", { method: "POST" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("GET scope=team ist für member verboten (403)", async () => {
+    setSession(reportId, ORG, "member");
+    const res = await arGet(req("/api/absence-requests?scope=team"));
+    expect(res.status).toBe(403);
+  });
+
+  it("GET scope=mine liefert jeder Rolle die eigenen Anträge", async () => {
+    setSession(reportId, ORG, "member");
+    const res = await arGet(req("/api/absence-requests?scope=mine"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.requests)).toBe(true);
+    for (const r of body.requests) expect(r.userId).toBe(reportId);
+  });
+});

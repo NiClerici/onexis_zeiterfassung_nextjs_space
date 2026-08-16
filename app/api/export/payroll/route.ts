@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { kennzahlen, sollStundenTag, stundenAusEintrag, type HolidayInput } from "@/lib/calc";
-import { buildProfil, mapChanges, mapEintraege } from "@/lib/export-helpers";
+import { buildProfil, mapChanges, mapEintraege, parseYearMonthFromUrl } from "@/lib/export-helpers";
 
 // Neutrales CSV für die Übernahme in ein Swissdec-zertifiziertes
 // Lohnprogramm (MIGRATION.md Punkt 7, dritter Bullet). Bewusst KEINE
@@ -33,12 +33,11 @@ export async function GET(req: Request) {
     requireRole(role, ["owner", "admin"]);
 
     const url = new URL(req.url);
-    const now = new Date();
-    const year = parseInt(url?.searchParams?.get?.("year") ?? String(now.getFullYear()));
-    const month = parseInt(url?.searchParams?.get?.("month") ?? String(now.getMonth() + 1));
-    if (!year || !month || month < 1 || month > 12) {
-      return NextResponse.json({ error: "Ungültiges Jahr/Monat" }, { status: 400 });
-    }
+    // Der Lohnexport ist bewusst immer monatsweise und verwendet deshalb
+    // nicht parseExportRange (type=month|year|custom), aber dieselbe
+    // Parameter-Validierung — vorher stand hier eine eigene Prüfung ohne
+    // Jahresgrenzen (HARDENING.md B2).
+    const { year, month } = parseYearMonthFromUrl(url);
 
     const startDate = new Date(Date.UTC(year, month - 1, 1));
     const endDate = new Date(Date.UTC(year, month, 0));

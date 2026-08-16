@@ -15,7 +15,7 @@ function setSession(userId: string, orgId: string, role: string) {
   mockSession = { user: { id: userId, orgId, role, mustSetPassword: false } };
 }
 
-import { GET as teGet, PUT as tePut, DELETE as teDelete } from "@/app/api/time-entries/route";
+import { GET as teGet, POST as tePost, PUT as tePut, DELETE as teDelete } from "@/app/api/time-entries/route";
 
 const ORG = "test_audit_org";
 
@@ -113,5 +113,51 @@ describe("TimeEntry Soft-Delete (DELETE)", () => {
   it("ein soft-gelöschter Eintrag liefert bei PUT ebenfalls 404, nicht 200", async () => {
     const res = await tePut(jsonReq("/api/time-entries", "PUT", { id: entryId, hours: 5 }));
     expect(res.status).toBe(404);
+  });
+});
+
+// HARDENING.md B2 — Fehlerpfade von /api/time-entries. Der Coverage-Bericht
+// aus B1 zeigte 83.83% Statements bei 54.46% Branches: die Validierungs- und
+// Not-Found-Zweige liefen nie. Fremde Org-IDs deckt lib/api-isolation.test.ts
+// bereits ab, hier geht es um ungültige Eingaben und unbekannte IDs.
+describe("/api/time-entries — Fehlerpfade (HARDENING.md B2)", () => {
+  it("POST ohne Datum liefert 400", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { type: "arbeit", von: "08:00", bis: "17:00" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST mit unparsbarem Datum liefert 400", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "kein-datum", type: "arbeit" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST mit unbekanntem Typ liefert 400", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-09-01", type: "urlaub" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST mit leerem Body liefert 400 statt eines Absturzes", async () => {
+    const res = await tePost(new Request("http://localhost/api/time-entries", { method: "POST" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("PUT auf eine unbekannte ID liefert 404", async () => {
+    const res = await tePut(jsonReq("/api/time-entries", "PUT", { id: "gibtesnicht", hours: 3 }));
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE auf eine unbekannte ID liefert 404", async () => {
+    const res = await teDelete(jsonReq("/api/time-entries", "DELETE", { id: "gibtesnicht" }));
+    expect(res.status).toBe(404);
+  });
+
+  it("PUT ohne ID liefert 400 oder 404, aber nie 200", async () => {
+    const res = await tePut(jsonReq("/api/time-entries", "PUT", { hours: 3 }));
+    expect([400, 404]).toContain(res.status);
+  });
+
+  it("POST mit einer projectId, die es nicht gibt, liefert 400", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-09-02", type: "arbeit", von: "08:00", bis: "12:00", projectId: "gibtesnicht" }));
+    expect(res.status).toBe(400);
   });
 });

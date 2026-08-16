@@ -144,3 +144,91 @@ describe("GET /api/export/payroll — Lohnexport CSV (immer org-weit, admin/owne
     expect(cols[6]).toBe("8,50"); // Arbeitsstunden-Spalte, Komma als Dezimaltrennzeichen
   });
 });
+
+// HARDENING.md B2 — Fehlerpfade der Export-Routen. Der Coverage-Bericht aus
+// B1 zeigte für /api/export 92.63% Statements bei nur 53.57% Branches: der
+// Happy Path lief, die Eingabevalidierung nicht. Dabei kam heraus, dass
+// fehlerhafte Zeitraum-Parameter 500 statt 400 lieferten.
+describe("Export-Routen — Fehlerpfade (HARDENING.md B2)", () => {
+  it("type=custom mit unparsbarem from liefert 400, nicht 500", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await exportGet(req("/api/export?scope=self&type=custom&from=keinDatum&to=2026-09-30"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("from");
+  });
+
+  it("type=custom mit unparsbarem to liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await exportGet(req("/api/export?scope=self&type=custom&from=2026-09-01&to=auchNicht"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("to");
+  });
+
+  it("year=abc liefert 400, nicht 500", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await exportGet(req("/api/export?scope=self&type=month&year=abc&month=9"));
+    expect(res.status).toBe(400);
+  });
+
+  it("month=99 liefert 400 statt eines still verschobenen Zeitraums", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await exportGet(req("/api/export?scope=self&type=month&year=2026&month=99"));
+    expect(res.status).toBe(400);
+  });
+
+  it("year ausserhalb 2000–2100 liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await exportGet(req("/api/export?scope=self&type=month&year=1899&month=9"));
+    expect(res.status).toBe(400);
+  });
+
+  it("dieselbe Validierung greift in arg-control und payroll", async () => {
+    setSession(adminId, ORG, "admin");
+    const arg = await argControlGet(req("/api/export/arg-control?scope=self&type=month&year=abc&month=9"));
+    expect(arg.status).toBe(400);
+    // payroll ist bewusst immer monatsweise (kein type-Parameter), nutzt aber
+    // seit B2 dieselbe Jahres-/Monatsvalidierung statt einer eigenen ohne
+    // Jahresgrenzen.
+    const payrollJahr = await payrollGet(req("/api/export/payroll?year=abc&month=9"));
+    expect(payrollJahr.status).toBe(400);
+    const payrollGrenze = await payrollGet(req("/api/export/payroll?year=1899&month=9"));
+    expect(payrollGrenze.status).toBe(400);
+    const payrollOk = await payrollGet(req("/api/export/payroll?year=2026&month=9"));
+    expect(payrollOk.status).toBe(200);
+  });
+
+  it("gültige Parameter funktionieren weiterhin (kein Overblocking)", async () => {
+    setSession(adminId, ORG, "admin");
+    const month = await exportGet(req(`/api/export?scope=self&${MONTH_QS}`));
+    expect(month.status).toBe(200);
+    const custom = await exportGet(req("/api/export?scope=self&type=custom&from=2026-09-01&to=2026-09-30"));
+    expect(custom.status).toBe(200);
+    // type=custom ohne from/to fällt bewusst auf das ganze Jahr zurück.
+    const ohneGrenzen = await exportGet(req("/api/export?scope=self&type=custom&year=2026"));
+    expect(ohneGrenzen.status).toBe(200);
+  });
+
+  it("scope=person mit unbekannter userId liefert 404, nicht 500", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await exportGet(req(`/api/export?scope=person&userId=gibtesnicht&${MONTH_QS}`));
+    expect(res.status).toBe(404);
+  });
+
+  it("scope=person mit einer userId aus einer FREMDEN Org liefert 404, nicht deren Daten", async () => {
+    const fremdeOrg = "test_export_fremde_org";
+    const fremderUser = await prisma.user.create({
+      data: { email: "export-fremd@example.test", password: "irrelevant", firstName: "Fremd", lastName: "Person" },
+    });
+    await prisma.organization.create({ data: { id: fremdeOrg, name: "Fremde Org", slug: "export-fremde-org" } });
+    await prisma.membership.create({ data: { orgId: fremdeOrg, userId: fremderUser.id, role: "member", entryDate: new Date("2026-01-01") } });
+    try {
+      setSession(adminId, ORG, "admin");
+      const res = await exportGet(req(`/api/export?scope=person&userId=${fremderUser.id}&${MONTH_QS}`));
+      expect(res.status).toBe(404);
+    } finally {
+      await prisma.membership.deleteMany({ where: { orgId: fremdeOrg } });
+      await prisma.organization.deleteMany({ where: { id: fremdeOrg } });
+      await prisma.user.deleteMany({ where: { id: fremderUser.id } });
+    }
+  });
+});

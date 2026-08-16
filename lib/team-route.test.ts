@@ -229,3 +229,32 @@ describe("GET /api/team — Randfälle (HARDENING.md A4)", () => {
     expect(body.requests).toEqual([]);
   });
 });
+
+// HARDENING.md B2 — Fehlerpfade von /api/team. Die Zeitraum-Parameter laufen
+// über dasselbe parseExportRange wie die Export-Routen, die Validierung aus
+// B2 muss hier also ebenso greifen.
+describe("GET /api/team — Fehlerpfade (HARDENING.md B2)", () => {
+  it("year=abc liefert 400, nicht 500", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req("/api/team?type=month&year=abc&month=8"));
+    expect(res.status).toBe(400);
+  });
+
+  it("month=99 liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req("/api/team?type=month&year=2026&month=99"));
+    expect(res.status).toBe(400);
+  });
+
+  it("type=custom mit unparsbarem from liefert 400", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req("/api/team?type=custom&from=keinDatum&to=2026-08-31"));
+    expect(res.status).toBe(400);
+  });
+
+  it("gültige Parameter funktionieren weiterhin", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+    expect(res.status).toBe(200);
+  });
+});

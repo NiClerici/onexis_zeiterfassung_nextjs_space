@@ -112,7 +112,7 @@ damit sich Sperre und Genehmigung nicht widersprechen).
 mit auffällig niedriger Coverage in `lib/` und `app/api/` festhalten —
 nicht direkt fixen, erst Bestandsaufnahme.
 
-### - [ ] B2. Ungetestete Fehlerpfade in kritischen Routen
+### - [x] B2. Ungetestete Fehlerpfade in kritischen Routen
 
 Fokus auf `time-entries`, `absence-requests`, `month-locks`, `team`,
 `export/*`: für jede Route prüfen, ob es einen Test für den jeweils
@@ -587,3 +587,62 @@ Fehlerpfade der genannten Routen; die 0%-Routen ausserhalb von B2s Fokus
 > geht über „Testlücken schliessen" hinaus und verdient eigene Sorgfalt.
 
 Stand nach B1: 16 Dateien, 230 Tests (unverändert), typecheck sauber.
+
+### B2 — Fehlerpfade in kritischen Routen, 16.08.2026
+
+48 neue Tests, **ein echter Fehler gefunden und gefixt.**
+
+**Der Fund: fehlerhafte Zeitraum-Parameter lieferten 500 statt 400.**
+`parseExportRange` (`lib/export-helpers.ts`) parste `year`/`month` und die
+`custom`-Grenzen ohne jede Prüfung. `?type=month&year=abc` ergab
+`parseInt("abc") = NaN` → `Date.UTC(NaN, …)` → Invalid Date, das erst in der
+Prisma-Query aufschlug: `500 Internal server error`. Dasselbe mit
+`?type=custom&from=keinDatum`. Und `?month=99` lieferte still einen um Jahre
+verschobenen Zeitraum mit Status 200 — schlimmer als ein Fehler, weil
+niemand es merkt.
+
+Betroffen waren alle vier Aufrufer: `/api/export`, `/api/export/arg-control`,
+`/api/team` und `/api/absences/calendar`.
+
+Fix: Validierung in einer neuen, exportierten `parseYearMonthFromUrl` mit
+denselben Grenzen wie `parseYearMonth` in
+`app/api/month-locks/route.ts:7-15` (Jahr 2000–2100, Monat 1–12), plus eine
+Datumsprüfung für die `custom`-Grenzen. Geworfen wird `AccessError(400, …)`,
+weil alle vier Aufrufer diese Klasse in ihrem `catch` bereits auf den
+richtigen Status abbilden — kein Aufrufer musste angefasst werden.
+`/api/export/payroll` hatte eine eigene, gröbere Prüfung ohne Jahresgrenzen
+und nutzt jetzt denselben Helfer; damit ist "was ist ein gültiger Monat"
+nicht mehr an drei Stellen unterschiedlich beantwortet.
+
+**Matrix — was ergänzt wurde:**
+
+| Route | Ergänzte Fälle |
+|---|---|
+| `time-entries` | fehlendes/unparsbares Datum, unbekannter Typ, leerer Body, PUT/DELETE auf unbekannte ID, PUT ohne ID, unbekannte `projectId` |
+| `time-entries/bulk-vacation`, `bulk-apply` | unparsbares Datum, fehlende Daten, leerer Body, Ende vor Start, über 366 Tage, exakt 366 Tage als Grenzfall — je beide Routen |
+| `absence-requests` | PATCH/DELETE auf unbekannte ID, unbekannte `action`, ohne ID, Antrag aus fremder Org (404, bleibt „offen"), POST ohne Daten, leerer Body, `scope=team` als member |
+| `month-locks` | `month=13`, `year=1999`, ohne `userId`, userId ohne Membership, userId aus fremder Org (404, dort entsteht keine Sperre) |
+| `team` | `year=abc`, `month=99`, `custom` mit Müll-`from`, Kontrollfall gültig |
+| `export/*` | die fünf Validierungsfälle über alle drei Routen, `scope=person` mit unbekannter und mit org-fremder userId |
+
+Fremde Org-IDs für `time-entries`, `customers`, `overtime-payouts` und
+`pensum-changes` deckt `lib/api-isolation.test.ts` bereits ab und wurde nicht
+angefasst.
+
+**Branch-Coverage vorher → nachher:**
+
+| Datei | vorher | nachher |
+|---|---|---|
+| `time-entries/bulk-vacation` | 29.41% | **86.20%** |
+| `time-entries/bulk-apply` | 34.09% | **70.00%** |
+| `month-locks` | 55.17% | **80.55%** |
+| `lib/export-helpers` | 55.55% | **83.33%** |
+| `absence-requests` | 71.18% | 80.59% |
+| `export/payroll` | 68.42% | 75.00% |
+| `export` | 53.57% | 62.90% |
+| `time-entries` | 54.46% | 62.69% |
+| `export/arg-control` | 63.82% | 65.30% |
+| `team` | 79.31% | 79.31% (400-Pfad steigt früh aus) |
+| **gesamt** | **66.74%** | **74.23%** |
+
+Stand nach B2: 16 Dateien, 278 Tests, typecheck sauber.
