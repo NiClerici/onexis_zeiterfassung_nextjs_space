@@ -129,7 +129,7 @@ nur invariante Eigenschaften prüft: nie negativ, nie über 24h/Tag, Summe
 `wochenstunden * pensum / 100`. Das fängt Klassen von Bugs, die einzelne
 Beispieltests verfehlen.
 
-### - [ ] B4. Lasttest für Teamsicht und Exporte
+### - [x] B4. Lasttest für Teamsicht und Exporte
 
 `/api/team` und `/api/export?scope=org` mit einer Organisation mit
 50+ Mitgliedern und mehreren tausend TimeEntries seeden (nur lokal, über
@@ -692,3 +692,61 @@ Laufzeit rund 2.9s für 10 Tests — der teure Teil ist die tagweise Iteration
 über 25 × 1827 Tage in der ersten Invariante.
 
 Stand nach B3: 17 Dateien, 288 Tests, typecheck sauber.
+
+### B4 — Lasttest Teamsicht und Exporte, 16.08.2026
+
+Neues Skript `scripts/loadtest-seed.ts` (nicht in `scripts/seed.ts` eingebaut,
+rein lokal): 60 Mitglieder, **31'320 TimeEntries** über zwei Jahre, 10 Kunden,
+30 Projekte, Pensumsänderungen für jede dritte Person, Feiertage. Räumt vor
+jedem Lauf auf; `--clean` entfernt alles wieder.
+
+**Klarer N+1 gefunden und gefixt.** Beide Routen luden vier Datensätze **pro
+Person** in einer `for`-Schleife (`Promise.all` bündelte nur die vier Queries
+einer Person, die Personen liefen nacheinander). Gemessen mit einem
+Prisma-Client mit Query-Events, Route-Handler direkt aufgerufen:
+
+| Route | Queries vorher | Queries nachher | Median vorher | Median nachher |
+|---|---|---|---|---|
+| `/api/team?type=year` | **247** | **11** | 499 ms | 466–483 ms |
+| `/api/export?scope=org` | **244** | **8** | 421 ms | 392 ms |
+
+Fix in `app/api/team/route.ts` und `app/api/export/route.ts`: vier Queries mit
+`userId: { in: … }` über alle sichtbaren Personen, danach in-memory nach
+`userId` gruppiert. Die Gruppierung erhält die Query-Reihenfolge, damit das
+`orderBy: { effectiveFrom: "asc" }` weiterhin gilt, auf das sich `pensumAt`
+bei zwei Änderungen am selben Tag verlässt (A2). Die Berechnung selbst wurde
+nicht angefasst — alle 288 Tests bleiben grün, inklusive der inhaltlichen
+Zusicherungen in `lib/team-route.test.ts` und `lib/export-routes.test.ts`.
+
+**Ehrlich zur Wirkung: die Wanduhr bewegt sich lokal kaum** (rund 5–7%). Der
+Grund steht in der isolierten Gegenprobe des Skripts, das nur die beiden
+Query-Muster vergleicht:
+
+```
+Schleife pro Person  :  765 ms, 243 Queries
+gebündelt (userId in):  257 ms,   3 Queries
+Faktor: 3.0× langsamer, 81.0× mehr Queries
+```
+
+Die Queries selbst sind also durchaus 3× teurer, machen an der
+Gesamt-Antwortzeit aber nur einen kleinen Teil aus: den Rest verbraucht die
+Rechenarbeit in `kennzahlen`/`wochenUebersicht` über 31'320 Einträge. Auf
+einer lokalen Datenbank kostet eine Round-Trip fast nichts — der Gewinn von
+247 auf 11 Round-Trips zahlt sich erst aus, wenn die Datenbank nicht auf
+demselben Host liegt, was beim Docker-/Caddy-Deployment aus MIGRATION.md
+Punkt 11 der Normalfall ist. Der Fix ist deshalb richtig, auch wenn die
+lokale Messung ihn kleinredet.
+
+**Antwortzeiten im akzeptablen Bereich:** rund 0.4–0.5s für eine
+60-Personen-Organisation mit zwei Jahren Daten, ohne Ladezustand-Problematik.
+Kein Performance-Feature gebaut, wie im Punkt gefordert.
+
+> Vorschlag für eine künftige Datei: Falls Organisationen deutlich über 60
+> Personen wachsen, ist der nächste Hebel nicht die Query-Zahl, sondern die
+> Rechenarbeit — `kennzahlen`/`wochenUebersicht` laufen pro Person über alle
+> Einträge des Zeitraums. Ein Cache pro (Person, Monat) oder eine
+> Vorberechnung beim Schreiben wäre der Ansatz. Ausdrücklich erst bei echtem
+> Bedarf, nicht auf Verdacht.
+
+Stand nach B4: 17 Dateien, 288 Tests, typecheck sauber. **Teil A und B
+vollständig.** Offen bleibt Teil C (UI/UX-Begehung, C1–C7f).

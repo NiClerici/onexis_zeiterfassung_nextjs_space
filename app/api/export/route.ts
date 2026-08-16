@@ -54,14 +54,42 @@ async function buildOrgSummaryWorkbook(orgId: string, startDate: Date, endDate: 
   ];
   styleHeaderRow(ws.getRow(1), 8);
 
+  // Vier Queries für ALLE Mitglieder statt vier je Mitglied (HARDENING.md
+  // B4) — bei 60 Mitgliedern sonst 244 Queries in 60 nacheinander
+  // abgearbeiteten Runden. Gleiche Bündelung wie in app/api/team/route.ts,
+  // die Berechnung darunter ist unverändert.
+  const alleUserIds = memberships.map((m) => m.userId);
+  const jahrStart = new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1));
+  const jahrEnde = new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31));
+  const [alleChanges, alleEntries, allePayouts, alleFerien] = await Promise.all([
+    prisma.pensumChange.findMany({ where: { userId: { in: alleUserIds }, orgId }, orderBy: { effectiveFrom: "asc" } }),
+    prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
+    prisma.overtimePayout.findMany({ where: { userId: { in: alleUserIds }, orgId, date: { gte: startDate, lte: endDate } } }),
+    prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, type: "ferien", date: { gte: jahrStart, lte: jahrEnde } } }),
+  ]);
+  // Gruppierung erhält die Query-Reihenfolge — für pensumChange also das
+  // orderBy effectiveFrom asc, auf das sich pensumAt bei zwei Änderungen am
+  // selben Tag verlässt (HARDENING.md A2).
+  function nachUser<T extends { userId: string }>(rows: T[]): Map<string, T[]> {
+    const map = new Map<string, T[]>();
+    for (const row of rows) {
+      const liste = map.get(row.userId);
+      if (liste) liste.push(row);
+      else map.set(row.userId, [row]);
+    }
+    return map;
+  }
+  const changesByUser = nachUser(alleChanges);
+  const entriesByUser = nachUser(alleEntries);
+  const payoutsByUser = nachUser(allePayouts);
+  const ferienByUser = nachUser(alleFerien);
+
   for (const m of memberships) {
     const profil = buildProfil(m);
-    const [pensumChangesRaw, entries, payoutsRaw, ferienRaw] = await Promise.all([
-      prisma.pensumChange.findMany({ where: { userId: m.userId, orgId }, orderBy: { effectiveFrom: "asc" } }),
-      prisma.timeEntry.findMany({ where: { userId: m.userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
-      prisma.overtimePayout.findMany({ where: { userId: m.userId, orgId, date: { gte: startDate, lte: endDate } } }),
-      prisma.timeEntry.findMany({ where: { userId: m.userId, orgId, deletedAt: null, type: "ferien", date: { gte: new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1)), lte: new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31)) } } }),
-    ]);
+    const pensumChangesRaw = changesByUser.get(m.userId) ?? [];
+    const entries = entriesByUser.get(m.userId) ?? [];
+    const payoutsRaw = payoutsByUser.get(m.userId) ?? [];
+    const ferienRaw = ferienByUser.get(m.userId) ?? [];
     const changes = mapChanges(pensumChangesRaw);
     const eintraege = mapEintraege(entries);
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
