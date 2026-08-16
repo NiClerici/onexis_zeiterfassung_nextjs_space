@@ -120,7 +120,7 @@ Fokus auf `time-entries`, `absence-requests`, `month-locks`, `team`,
 Org-Ressource referenziert, gesperrter Monat, doppelte Anfrage). Fehlende
 Fälle ergänzen. Kein Rewrite bestehender Tests ohne Befund.
 
-### - [ ] B3. Property-basierter Test für sollStundenTag
+### - [x] B3. Property-basierter Test für sollStundenTag
 
 Ein Vitest-Test, der `sollStundenTag` über einen langen zufälligen
 Zeitraum (z.B. 5 Jahre) mit zufälligen Pensumsänderungen laufen lässt und
@@ -646,3 +646,49 @@ angefasst.
 | **gesamt** | **66.74%** | **74.23%** |
 
 Stand nach B2: 16 Dateien, 278 Tests, typecheck sauber.
+
+### B3 — Property-Test für sollStundenTag, 16.08.2026
+
+Neue Datei `lib/calc.property.test.ts`. **Kein `fast-check` als
+Abhängigkeit** — ein geseedeter mulberry32-PRNG reicht und hält jeden
+Fehlschlag exakt reproduzierbar; jede Assertion trägt Seed und Tag in ihrer
+Meldung, ein roter Test benennt den Fall also selbst.
+
+25 Zufallsszenarien über 5 Jahre (2024–2028, 1827 Tage), je mit zufälligen
+Wochenstunden (20–50), Pensum (10–100), Eintritt, in der Hälfte der Fälle
+einem Austritt, 0–5 Pensumsänderungen und 0–12 Feiertagen. Geprüfte
+Invarianten:
+
+| Invariante | Umfang |
+|---|---|
+| endlich, ≥ 0, ≤ 24 | jeder einzelne Tag, alle Szenarien |
+| Wochenende immer 0 | jeder Sa/So, unabhängig von Pensum/Feiertag |
+| vor Eintritt und nach Austritt 0 | alle Tage ausserhalb der Anstellung |
+| deterministisch, reihenfolgeunabhängig | Changes und Feiertage auch umgekehrt übergeben |
+| Arbeitstag = `wochenstunden × pensum / 100 / 5` | exakt, `toBeCloseTo(…, 10)` |
+| Halbtags-Feiertag halbiert, ganzer setzt auf 0 | jeder Feiertag im Szenario |
+| volle Mo–So-Woche = `wochenstunden × pensum / 100` | 20 zufällige Wochen je Seed |
+| monoton im Pensum | 0/10/20/40/60/80/100 über 30 Tage |
+| additiv über angrenzende Zeiträume | 90 + 90 Tage vs. 180 Tage |
+| umgekehrter Zeitraum ergibt 0 | `bis` vor `von` |
+
+Die Wocheninvariante stellt ihre **Vorbedingung ausdrücklich her** (keine
+Pensumsänderung, keine Feiertage, Woche vollständig innerhalb der
+Anstellung). Ohne diese drei Bedingungen ist sie per Definition verletzt,
+weil `sollStundenTag` genau in dieser Reihenfolge prüft — eine Invariante
+ohne ihre Vorbedingung zu behaupten hiesse, das Falsche festzuschreiben.
+
+**Kein Fehler gefunden.** Damit die Tests nicht bloss leerlaufen, wurden sie
+gegen drei absichtliche Mutationen in `lib/calc.ts` gehalten — alle drei
+wurden gefangen, `lib/calc.ts` danach unverändert:
+
+| Mutation | gefangen von |
+|---|---|
+| Samstag zählt als Arbeitstag | Wochenend-Invariante + Wocheninvariante |
+| Halbtags-Feiertag gibt volles Soll | Feiertags-Invariante |
+| `exitDate` wird ignoriert | Eintritts-/Austritts-Invariante |
+
+Laufzeit rund 2.9s für 10 Tests — der teure Teil ist die tagweise Iteration
+über 25 × 1827 Tage in der ersten Invariante.
+
+Stand nach B3: 17 Dateien, 288 Tests, typecheck sauber.
