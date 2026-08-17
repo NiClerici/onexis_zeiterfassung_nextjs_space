@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { CalendarOff, Check, X, Trash2, AlertTriangle, Users } from "lucide-react";
+import { CalendarOff, Check, X, Trash2, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -24,15 +24,44 @@ interface AbsenceRequestRow {
   createdAt: string;
 }
 
-interface CalendarDay {
-  date: string;
-  absent: Array<{ userId: string; name: string; type: string }>;
-  warning: boolean;
+// Raster statt Datumsliste (HARDENING.md C7c) — dieselbe Form wie die
+// Teamsicht-Heatmap: eine dichte Tagesliste als Spaltenköpfe, pro Person
+// eine Zeile mit einer darauf ausgerichteten Zell-Liste.
+interface CalendarMember {
+  userId: string;
+  name: string;
+  days: Array<{ date: string; type: string | null }>;
 }
+
+// Zusammengefasste Bereiche (HARDENING.md C7b, lib/absence-ranges.ts) für
+// eine kompakte, exakt lesbare Liste neben dem Raster.
+interface AbsenceRangeRow {
+  userId: string;
+  name: string;
+  type: string;
+  from: string;
+  to: string;
+  days: number;
+}
+
+// Dieselben Farben wie im persönlichen Kalender (app/(app)/calendar/
+// page.tsx TYPE_DOT_COLOR) — eine Absenzfarbe bedeutet in der ganzen App
+// dasselbe (HARDENING.md C1).
+const TYPE_CELL_COLOR: Record<string, string> = {
+  ferien: "bg-sky-400",
+  krank: "bg-red-400",
+  militaer: "bg-orange-400",
+  unbezahlt: "bg-gray-400",
+};
 
 function fmtDate(d: string): string {
   const [y, m, day] = d.split("-");
   return `${day}.${m}.${y}`;
+}
+
+function fmtDayMonth(d: string): string {
+  const [, m, day] = d.split("-");
+  return `${day}.${m}.`;
 }
 
 function statusBadgeClass(status: string): string {
@@ -58,7 +87,10 @@ export default function AbsencesPage() {
   const [decidingId, setDecidingId] = useState<string | null>(null);
 
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
-  const [calendarDays, setCalendarDays] = useState<CalendarDay[]>([]);
+  const [calendarDays, setCalendarDays] = useState<string[]>([]);
+  const [calendarMembers, setCalendarMembers] = useState<CalendarMember[]>([]);
+  const [calendarRanges, setCalendarRanges] = useState<AbsenceRangeRow[]>([]);
+  const [dayWarning, setDayWarning] = useState<Record<string, boolean>>({});
   const [teamSize, setTeamSize] = useState(0);
 
   const fetchMine = useCallback(async () => {
@@ -84,6 +116,9 @@ export default function AbsencesPage() {
       if (res?.ok) {
         const d = await res?.json?.().catch(() => ({}));
         setCalendarDays(d?.days ?? []);
+        setCalendarMembers(d?.members ?? []);
+        setCalendarRanges(d?.ranges ?? []);
+        setDayWarning(d?.dayWarning ?? {});
         setTeamSize(d?.teamSize ?? 0);
       }
     } catch (err: any) { console.error(err); }
@@ -254,25 +289,78 @@ export default function AbsencesPage() {
               />
             </div>
             <p className="text-xs text-muted-foreground mb-3">{t("absences.teamCalendarHint", { teamSize: String(teamSize) })}</p>
-            {calendarDays.length === 0 ? (
+            {calendarMembers.length === 0 || calendarDays.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t("absences.noAbsences")}</p>
             ) : (
-              <div className="space-y-1.5">
-                {calendarDays.map((d) => (
-                  <div key={d.date} className={`flex items-start gap-2 rounded-xl px-3 py-2 text-sm ${d.warning ? "bg-red-50 dark:bg-red-950/20" : "bg-secondary/60"}`}>
-                    {d.warning && <span title={t("absences.warningHint")}><AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" /></span>}
-                    <div>
-                      <span className="font-medium">{fmtDate(d.date)}</span>{" "}
-                      <span className="text-xs text-muted-foreground">({d.absent.length}/{teamSize})</span>
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {d.absent.map((a, i) => (
-                          <span key={`${a.userId}-${i}`} className="text-xs px-2 py-0.5 rounded-full bg-card">{a.name} · {t(`calendar.type.${a.type}`)}</span>
+              <>
+                {/* Raster: Personen als Zeilen, Tage als Spalten — dasselbe
+                    Muster wie die Teamsicht-Heatmap (HARDENING.md C7c).
+                    overflow-x-auto macht das Raster auf Mobile scrollbar,
+                    dasselbe Muster wie die Team-Tabelle (HARDENING.md C2). */}
+                <div className="overflow-x-auto">
+                  <table className="text-xs border-separate" style={{ borderSpacing: "3px" }}>
+                    <thead>
+                      <tr>
+                        <th className="text-left font-medium text-muted-foreground pr-2 sticky left-0 bg-card">{t("teamsicht.colName")}</th>
+                        {calendarDays.map((date) => (
+                          <th
+                            key={date}
+                            className={`font-medium px-1 whitespace-nowrap ${dayWarning[date] ? "text-red-600" : "text-muted-foreground"}`}
+                            title={dayWarning[date] ? t("absences.warningHint") : undefined}
+                          >
+                            {fmtDayMonth(date)}
+                          </th>
                         ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {calendarMembers.map((member) => (
+                        <tr key={member.userId}>
+                          <td className="text-left pr-2 font-medium whitespace-nowrap sticky left-0 bg-card">{member.name}</td>
+                          {member.days.map((cell) => (
+                            <td
+                              key={cell.date}
+                              className={`w-6 h-6 rounded-md ${cell.type ? TYPE_CELL_COLOR[cell.type] ?? "bg-gray-300" : "bg-secondary/40"} ${dayWarning[cell.date] ? "ring-2 ring-red-400" : ""}`}
+                              title={cell.type ? `${member.name}, ${fmtDate(cell.date)}: ${t(`calendar.type.${cell.type}`)}` : undefined}
+                            />
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Legende — Farbe ist im Raster nie alleiniger Informations-
+                    träger (HARDENING.md C6): jede Zelle hat zusätzlich einen
+                    Text-Tooltip, hier zusätzlich die Zuordnung Farbe→Text. */}
+                <div className="flex flex-wrap gap-3 mt-3 text-xs text-muted-foreground">
+                  {Object.entries(TYPE_CELL_COLOR).map(([typ, cls]) => (
+                    <span key={typ} className="flex items-center gap-1.5">
+                      <span className={`w-2.5 h-2.5 rounded-sm ${cls}`} /> {t(`calendar.type.${typ}`)}
+                    </span>
+                  ))}
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm ring-2 ring-red-400" /> {t("absences.warningHint")}
+                  </span>
+                </div>
+
+                {/* Zusammengefasste Bereiche (HARDENING.md C7b) — kompakte,
+                    exakt lesbare Liste zusätzlich zum Raster: eine Ferienwoche
+                    ist hier eine Zeile, nicht fünf. */}
+                {calendarRanges.length > 0 && (
+                  <div className="space-y-1 mt-3 pt-3 border-t border-border/50">
+                    {calendarRanges.map((r) => (
+                      <div key={`${r.userId}-${r.type}-${r.from}`} className="flex items-center gap-2 text-xs">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${TYPE_CELL_COLOR[r.type] ?? "bg-gray-300"}`} />
+                        <span className="font-medium">{r.name}</span>
+                        <span className="text-muted-foreground">
+                          {r.from === r.to ? fmtDate(r.from) : `${fmtDate(r.from)} – ${fmtDate(r.to)}`} · {t(`calendar.type.${r.type}`)} · {r.days} {r.days === 1 ? t("absences.dayOne") : t("absences.dayMany")}
+                        </span>
                       </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </motion.div>
         </>

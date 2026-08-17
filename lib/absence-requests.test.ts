@@ -215,20 +215,92 @@ describe("GET /api/absences/calendar — Team-Kalender mit Warnung", () => {
     expect(res.status).toBe(403);
   });
 
-  it("zeigt genehmigte Abwesenheiten und markiert eine Warnung, wenn der Anteil die Schwelle erreicht", async () => {
+  it("zeigt genehmigte Abwesenheiten im Raster und markiert eine Warnung, wenn der Anteil die Schwelle erreicht", async () => {
     // otherMemberId hat kein Team (kein manager) — Warnung testen wir über
     // den admin-Blick auf die ganze Organisation (4 aktive Mitglieder:
     // admin, manager, report, other). report ist ab 05./06.10. krank
     // (aus dem vorigen describe-Block bereits genehmigt und als TimeEntry
     // vorhanden) — 1 von 4 Mitgliedern = 25%, UNTER der 30%-Schwelle.
+    // Antwortform seit HARDENING.md C7c: Raster (members[].days[]) statt
+    // Datumsliste, days ist eine dichte Liste aller Tage im Zeitraum.
     setSession(adminId, ORG, "admin");
     const res = await calendarGet(req("/api/absences/calendar?type=month&year=2026&month=10"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    const day = body.days.find((d: any) => d.date === "2026-10-05");
-    expect(day).toBeTruthy();
-    expect(day.absent.some((a: any) => a.userId === reportId)).toBe(true);
-    expect(day.warning).toBe(false); // 1/4 = 25% < 30%
+    expect(body.days).toContain("2026-10-05");
+    const reportRow = body.members.find((m: any) => m.userId === reportId);
+    expect(reportRow).toBeTruthy();
+    const cell = reportRow.days.find((d: any) => d.date === "2026-10-05");
+    expect(cell.type).toBe("krank");
+    expect(body.dayWarning["2026-10-05"]).toBe(false); // 1/4 = 25% < 30%
+  });
+
+  it("gruppiert zusammenhängende Absenztage zu einem Bereich (HARDENING.md C7b)", async () => {
+    // 05./06.10. krank ist eine ununterbrochene Zwei-Tage-Folge derselben
+    // Person — muss als EIN Bereich erscheinen, nicht als zwei Einträge.
+    setSession(adminId, ORG, "admin");
+    const res = await calendarGet(req("/api/absences/calendar?type=month&year=2026&month=10"));
+    const body = await res.json();
+    const range = body.ranges.find((r: any) => r.userId === reportId && r.from === "2026-10-05");
+    expect(range).toBeTruthy();
+    expect(range.to).toBe("2026-10-06");
+    expect(range.days).toBe(2);
+  });
+});
+
+// HARDENING.md C7a — der Test oben deckt nie den eigentlichen Bug ab: bei 4
+// Mitgliedern liegt 1/4 = 25% ohnehin unter der 30%-Schwelle, ob die
+// Untergrenze existiert oder nicht ändert daran nichts. Der Bug zeigt sich
+// erst in einem kleinen Team, wo EINE Person bereits ≥30% ausmacht — dafür
+// eine eigene, dediziert kleine Organisation (3 Mitglieder).
+describe("GET /api/absences/calendar — Warnschwelle in kleinen Teams (HARDENING.md C7a)", () => {
+  const SMALL_ORG = "test_absence_small_org";
+  let smallAdminId: string, smallMemberAId: string, smallMemberBId: string;
+
+  beforeAll(async () => {
+    await prisma.organization.create({ data: { id: SMALL_ORG, name: "Small Absence Org", slug: "absence-small-org" } });
+    const mkUser = async (email: string, firstName: string) => {
+      const u = await prisma.user.create({ data: { email, password: "irrelevant", firstName, lastName: "Test" } });
+      return u.id;
+    };
+    smallAdminId = await mkUser("small-admin@example.test", "SmallAdmin");
+    smallMemberAId = await mkUser("small-a@example.test", "SmallA");
+    smallMemberBId = await mkUser("small-b@example.test", "SmallB");
+    await prisma.membership.create({ data: { orgId: SMALL_ORG, userId: smallAdminId, role: "admin", entryDate: new Date("2026-01-01") } });
+    await prisma.membership.create({ data: { orgId: SMALL_ORG, userId: smallMemberAId, role: "member", entryDate: new Date("2026-01-01") } });
+    await prisma.membership.create({ data: { orgId: SMALL_ORG, userId: smallMemberBId, role: "member", entryDate: new Date("2026-01-01") } });
+    // 1/3 = 33.3% am 03.11. — über der 30%-Anteilsschwelle, aber nur EINE Person.
+    await prisma.timeEntry.create({ data: { userId: smallMemberAId, orgId: SMALL_ORG, date: new Date("2026-11-03"), type: "ferien", hours: 8 } });
+    // 2/3 = 66.7% am 10.11. — echte Häufung, zwei Personen gleichzeitig.
+    await prisma.timeEntry.create({ data: { userId: smallMemberAId, orgId: SMALL_ORG, date: new Date("2026-11-10"), type: "ferien", hours: 8 } });
+    await prisma.timeEntry.create({ data: { userId: smallMemberBId, orgId: SMALL_ORG, date: new Date("2026-11-10"), type: "krank", hours: 8 } });
+  });
+
+  afterAll(async () => {
+    await prisma.timeEntry.deleteMany({ where: { orgId: SMALL_ORG } });
+    await prisma.membership.deleteMany({ where: { orgId: SMALL_ORG } });
+    await prisma.user.deleteMany({ where: { id: { in: [smallAdminId, smallMemberAId, smallMemberBId] } } });
+    await prisma.organization.deleteMany({ where: { id: SMALL_ORG } });
+  });
+
+  it("EINE abwesende Person löst nie eine Warnung aus, auch wenn ihr Anteil ≥30% beträgt", async () => {
+    setSession(smallAdminId, SMALL_ORG, "admin");
+    const res = await calendarGet(req("/api/absences/calendar?type=month&year=2026&month=11"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.days).toContain("2026-11-03");
+    const absentCount = body.members.filter((m: any) => m.days.find((d: any) => d.date === "2026-11-03")?.type).length;
+    expect(absentCount).toBe(1);
+    expect(body.dayWarning["2026-11-03"]).toBe(false); // 1/3 = 33.3% ≥ 30%, aber nur 1 Person — keine Warnung
+  });
+
+  it("ZWEI gleichzeitig abwesende Personen lösen bei ausreichendem Anteil weiterhin eine Warnung aus", async () => {
+    setSession(smallAdminId, SMALL_ORG, "admin");
+    const res = await calendarGet(req("/api/absences/calendar?type=month&year=2026&month=11"));
+    const body = await res.json();
+    const absentCount = body.members.filter((m: any) => m.days.find((d: any) => d.date === "2026-11-10")?.type).length;
+    expect(absentCount).toBe(2);
+    expect(body.dayWarning["2026-11-10"]).toBe(true); // 2/3 = 66.7% ≥ 30% UND ≥ 2 Personen
   });
 });
 

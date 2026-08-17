@@ -201,7 +201,7 @@ Text-Tooltip — prüfen, ob auch Status-Badges wie "gesperrt"/"offen" Text
 und nicht nur Farbe zeigen). Kein volles WCAG-Audit, nur die
 offensichtlichen Lücken.
 
-### - [ ] C7. Verdichtung: Listen zu Übersichten machen
+### - [x] C7. Verdichtung: Listen zu Übersichten machen
 
 Symptom (belegt per Screenshot, Absenzen-Seite): der Team-Kalender rendert
 eine Zeile pro Tag pro Person. Eine Ferienwoche einer Person erzeugt fünf
@@ -613,6 +613,74 @@ hat exakt den vom Punkt behaupteten Text-Tooltip
 `app/(app)/calendar/page.tsx:565`) — verifiziert, nicht nur angenommen.
 
 Stand nach C6: 17 Dateien, 288 Tests, typecheck sauber.
+
+### C7 — Verdichtung, 17.08.2026
+
+Alle sechs Unterpunkte abgearbeitet. C7f war bereits vor C1 erledigt (siehe
+oben); die übrigen fünf hier.
+
+**C7a — Warnschwelle korrigiert.** `app/api/absences/calendar/route.ts`:
+zusätzliche absolute Untergrenze `WARNING_MIN_ABSENT = 2` neben dem
+30%-Anteil — beide Bedingungen müssen gelten. Zwei neue Tests in einer
+eigenen kleinen 3-Personen-Organisation (die bestehende 4-Personen-
+Testorganisation kann den Bug strukturell nie zeigen, weil 1/4 = 25% so
+oder so unter 30% liegt): 1/3 = 33.3% mit nur einer Person → keine Warnung
+mehr; 2/3 = 66.7% mit zwei Personen → Warnung weiterhin korrekt.
+
+**C7b — Zusammenhängende Tage gruppiert.** Neue, reine Funktion
+`lib/absence-ranges.ts` (`groupAbsenceRanges`), 11 Tests. Fasst
+aufeinanderfolgende Tage derselben Person mit demselben Absenztyp zu einem
+Bereich zusammen; Wochenenden UND als solche übergebene Feiertage
+überbrücken eine Lücke, ein echter Werktag ohne Eintrag dazwischen beendet
+den Bereich. Sortierung/Duplikate der Eingabe sind der Funktion egal, sie
+normalisiert selbst.
+
+**C7c — Team-Kalender als Raster statt Liste.** `/api/absences/calendar`
+liefert jetzt `{ days, members: [{userId, name, days: [{date, type}]}],
+ranges, dayWarning, teamSize, warningThreshold, warningMinAbsent }` statt
+einer Liste von Tagesobjekten — dieselbe Form wie `heatmap` in
+`app/api/team/route.ts` (Personen-Zeilen × dichte Tages-Spalten). Frontend
+(`app/(app)/absences/page.tsx`) rendert das exakt im Heatmap-Muster nach:
+`overflow-x-auto`-Tabelle, `border-separate`/`borderSpacing`, sticky erste
+Spalte, farbige Zellen mit Text-Tooltip. Dieselben Absenzfarben wie im
+persönlichen Kalender (`TYPE_DOT_COLOR` aus `calendar/page.tsx`, hier als
+`TYPE_CELL_COLOR` übernommen — eine Farbe bedeutet app-weit dasselbe, C1).
+Warnungstage sind als Spaltenkopf-Hervorhebung UND als Zell-Ring markiert.
+Legende mit Text pro Farbe, weil Farbe sonst alleiniger Informationsträger
+wäre (C6). Auf Mobile scrollbar wie die Team-Tabelle (C2) — mit Playwright
+bei 375px verifiziert: `scrollWidth` bleibt exakt 375, keine Konsolenfehler.
+Zusätzlich zum Raster eine kompakte, aus C7b gespeiste Bereichs-Liste
+darunter ("13.–17.07. · Ferien · 5 Tage") für exaktes Lesen der Daten, die
+das Raster fürs Muster-Erkennen nicht so gut leistet.
+
+Fünf bestehende Tests auf die neue Antwortform umgestellt (drei davon aus
+A/C7a bereits in dieser Datei entstanden), ein neuer Test für die
+Bereichsgruppierung über die echte Route ergänzt.
+
+**C7d — Systematisch nach demselben Muster gesucht.** Alle vier im Punkt
+genannten Stellen geprüft: Pensumsänderungen und Monatssperren in
+`/admin/team` (`"01.09.2026: 80% / 40h"`, `"🔒 September 2026"`),
+Feiertagsliste in `/admin/holidays` (`"01.01.2026 Neujahr [Basissatz]"`),
+Kundenliste im Profil (`"ABB · 140 CHF/h"`), Überstunden-Auszahlungen
+(`"01.09.2026 · 8h"`) — **alle bereits einzeilige `px-3 py-2`-Zeilen**, keine
+volle Karte pro Datensatz. Die Projektliste im Profil ist zweizeilig
+(Name + Kunde/Satz/Budget), aber das trägt vier echte Werte in einer
+kompakten Zeile ohne eigene Kartenumrandung — kein Fall des beschriebenen
+Anti-Musters. **Keine Fundstelle, kein Fix nötig** — dieselbe Art Befund
+wie schon bei C3/C7e/C7f: die App war an diesen Stellen bereits dicht
+gebaut.
+
+**C7e — Leere Zustände verdichten.** Bereits bei C3 vollständig geprüft:
+alle zehn Listen zeigen ihren leeren Zustand schon als einzelne Textzeile
+innerhalb der bestehenden Karte, keine eigene Karte mit Titel/Padding/
+Schatten. Die im Punkt unterstellte Prämisse ("volle Karte für 'Keine
+Anträge gestellt'") trifft nicht zu — kein Fix nötig, siehe C3-Eintrag oben
+für die vollständige Liste.
+
+**C7f — bereits vor C1 erledigt**, siehe eigener Eintrag oben.
+
+Stand nach C7: 20 Dateien, 302 Tests, typecheck sauber. **Teil C
+vollständig — alle drei Teile (A, B, C) der Datei sind damit abgeschlossen.**
 
 ### Vorbereitung — 14.08.2026
 
