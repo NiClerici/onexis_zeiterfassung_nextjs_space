@@ -41,6 +41,29 @@ services:
     # Kein "ports:" — nur Caddy ist von aussen erreichbar, die App selbst
     # ist nur im internen Compose-Netzwerk sichtbar.
 
+  migrate:
+    # Einmal-Container für "prisma migrate deploy" (deploy/README.md
+    # Abschnitt 2 und 3). Läuft bewusst gegen die "builder"-Stage statt
+    # gegen das Laufzeit-Image: der Next.js-Standalone-Output im runner
+    # enthält weder das prisma-CLI (devDependency, wird vom Tracing nicht
+    # mitgenommen) noch prisma/schema.prisma und prisma/migrations/ — ein
+    # "docker compose exec app npx prisma migrate deploy" scheitert dort
+    # zwangsläufig. Die builder-Stage hat beides und liegt nach
+    # "up -d --build" ohnehin schon im Build-Cache.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    # Startet nicht bei "docker compose up -d" mit; "docker compose run"
+    # aktiviert das Profil für diesen einen Aufruf automatisch.
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-zeiterfassung}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-zeiterfassung}"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npx", "prisma", "migrate", "deploy"]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

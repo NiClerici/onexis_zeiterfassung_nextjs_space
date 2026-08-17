@@ -58,8 +58,10 @@ echo 'S3_BUCKET="zeiterfassung-backups"' >> .env
 docker compose up -d --build
 
 # Datenbankschema anlegen (einmalig, danach nach jedem Deploy mit neuen
-# Migrationen wiederholen)
-docker compose exec app npx prisma migrate deploy
+# Migrationen wiederholen). Läuft im "migrate"-Container, nicht im "app"-
+# Container: das schlanke Laufzeit-Image enthält weder das prisma-CLI noch
+# prisma/migrations/ (siehe docker-compose.yml, Service "migrate").
+docker compose run --rm migrate
 
 # Healthcheck prüfen
 curl -f https://<deine-domain>/api/health
@@ -75,7 +77,7 @@ Minuten. `docker compose logs -f caddy` zeigt den Fortschritt.
 ```bash
 git pull
 docker compose up -d --build
-docker compose exec app npx prisma migrate deploy
+docker compose run --rm migrate
 ```
 
 `prisma migrate deploy` ist ohne neue Migrationen ein No-op — gefahrlos bei
@@ -139,9 +141,13 @@ sonst.
 - **Caddy bekommt kein Zertifikat**: DNS-A-Record auf die VM-IP prüfen
   (`dig +short <domain>`), Port 80 muss von aussen erreichbar sein (Caddy
   braucht ihn für die ACME-HTTP-01-Challenge, nicht nur 443).
-- **`prisma migrate deploy` schlägt fehl**: `docker compose logs app`
-  prüfen — meistens ein `DATABASE_URL`-Tippfehler in `.env` oder die
-  `db`-Container ist noch nicht healthy (`docker compose ps`).
+- **`docker compose run --rm migrate` schlägt fehl**: `docker compose ps`
+  prüfen — meistens ist der `db`-Container noch nicht healthy oder
+  `POSTGRES_PASSWORD` in `.env` passt nicht zu dem, mit dem das
+  `db_data`-Volume ursprünglich initialisiert wurde. Fehler wie
+  "Could not find a schema.prisma file" bedeuten dagegen, dass der Befehl
+  im falschen Container gelaufen ist (`exec app` statt `run --rm
+  migrate`) — das Laufzeit-Image enthält das Prisma-Schema bewusst nicht.
 - **App startet, aber `/api/health` liefert 503**: Datenbankverbindung
   prüfen, `docker compose exec app node -e "process.exit(0)"` als
   minimaler Container-Lebendigkeitstest, danach `docker compose logs app`.

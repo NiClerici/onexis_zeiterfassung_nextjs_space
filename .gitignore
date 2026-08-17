@@ -26,6 +26,10 @@ playwright-report/
 # vitest coverage (HARDENING.md B1)
 coverage/
 
+# Fortschrittsstand des Deployment-Loops (.claude/commands/oracle.md) —
+# enthält SSH-Ziel und Domain der produktiven VM
+DEPLOY_STATE.md
+
 # misc
 .DS_Store
 *.pem
