@@ -146,7 +146,7 @@ Befund dokumentieren, nur bei klarem N+1 minimal fixen (z.B. fehlendes
 Für jeden Punkt: mit Playwright durch die echte UI klicken, nicht nur den
 Code lesen. Für jede Rolle (member, manager, admin, owner) einmal.
 
-### - [ ] C1. Konsistenz-Pass über alle Seiten
+### - [x] C1. Konsistenz-Pass über alle Seiten
 
 Kalender, Analytics, Team, Absenzen, Admin/Team, Admin/Feiertage,
 Admin/Legal, Profil: Abstände, Kartenstile, Button-Grössen, Formular-Layout,
@@ -324,6 +324,38 @@ Committet vor C1, da vollständig eigenständig verifizierbar
 (`npm run typecheck`, `npm test`, Playwright mit `en-US`-Locale). Die Box
 zu C7 bleibt trotzdem offen, bis C7a–e ebenfalls erledigt sind — C7 ist im
 Dateikopf EIN Punkt, keine sechs.
+
+### C1 — Konsistenz-Pass, 17.08.2026
+
+Playwright-Screenshots von Kalender, Analytics, Team(sicht), Absenzen,
+Admin/Team, Admin/Feiertage, Admin/Legal, Profil — für member, manager,
+admin, owner, alle vier bei 1440×900. **Keine Konsolenfehler in keiner
+Rolle auf keiner Seite** (`page.on("console"/"pageerror")` über alle 32
+Kombinationen mitgeschnitten).
+
+Ergebnis: durchgehend konsistent. Alle Karten `bg-card rounded-2xl p-4`
+(bzw. `p-6`) mit `boxShadow: var(--shadow-sm)`/`var(--shadow-md)`, ein
+einziger Blauton als Primäraktion (`bg-primary`/`bg-blue-500`-Familie),
+Formularfelder durchgehend `bg-secondary rounded-xl`. Statusfarben folgen
+einem Muster über die ganze App: Grün = positiv/aktiv/genehmigt, Rot =
+negativ/abgelehnt/Warnung/überzogen, Gelb/Orange als Zwischenstufe
+(`app/(app)/team/page.tsx:79-82` Auslastungs-Heatmap-Skala,
+`app/(app)/absences/page.tsx:38-40` Antragsstatus, `app/(app)/admin/
+team/page.tsx:309` Mitgliedschaftsstatus). Rollenbasierte Navigation
+korrekt: manager sieht "Teamsicht" (scoped auf die eigenen Berichte) aber
+nicht "Team"/"Feiertage"/"Rechtliches" (admin/owner-only), member sieht
+nur Kalender/Absenzen/Analytics/Profil — in keinem Fall ein Rest der
+verwehrten Navigation oder ein kaputter Redirect.
+
+**Einziger echter Fund:** die Monatsauswahl, fünf verschiedene
+Implementierungen derselben Interaktion — bereits als C7f behoben (siehe
+oben, vorgezogen). Keine weiteren Abweichungen, die einen Fix
+rechtfertigen; explizit nicht jede Pixel-Differenz gejagt, wie im Punkt
+verlangt.
+
+Stand nach C1: 17 Dateien, 288 Tests, typecheck sauber (unverändert
+gegenüber B4 — C1 selbst hat ausser der bereits committeten C7f-Arbeit
+keinen Code-Fix ausgelöst).
 
 ### Vorbereitung — 14.08.2026
 
