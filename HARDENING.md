@@ -162,7 +162,7 @@ Tabelle, Heatmap, Feiertags-Admin, Exporte. Tabellen mit vielen Spalten
 Scrollen oder Karten-Layout als Fix, je nachdem was mit den vorhandenen
 Tailwind-Klassen am wenigsten Aufwand macht.
 
-### - [ ] C3. Leere Zustände
+### - [x] C3. Leere Zustände
 
 Für jede Liste/Tabelle in der App (Team, Absenzanträge, Feiertage,
 Kunden, Projekte, Pensumsänderungen, Überstunden-Auszahlungen,
@@ -412,6 +412,52 @@ Kalender-Tagesdialog bei 375px separat geprüft: zentriert, lesbar, kein
 Überlauf.
 
 Stand nach C2: 17 Dateien, 288 Tests, typecheck sauber.
+
+### C3 — Leere Zustände, 17.08.2026
+
+Wie im Punkt verlangt: eine komplett frische Organisation über `/register`
+angelegt (kein Seed-Bezug), dann alle acht genannten Listen ohne jedes
+Vorwissen durchgeklickt. Keine Konsolenfehler bei Registrierung oder auf
+irgendeiner der Folgeseiten. Danach den Test-User wieder aus der
+Dev-Datenbank entfernt.
+
+**Kein Fix nötig — jede der acht Listen hat bereits einen sinnvollen,
+kompakten leeren Zustand**, keine einzige zeigt eine blanke Tabelle oder
+"undefined":
+
+| Liste | Leerer Zustand |
+|---|---|
+| Team (Mitglieder) | entfällt faktisch — die registrierende Person ist immer als erstes Mitglied vorhanden |
+| Absenzanträge — Meine Anträge | „Keine Anträge gestellt" |
+| Absenzanträge — Zu genehmigen | „Keine offenen Anträge" |
+| Absenzanträge — Team-Kalender | „Keine Abwesenheiten in diesem Monat" |
+| Feiertage | „Noch keine Feiertage angelegt." |
+| Kunden (Profil) | „Keine Kunden erfasst" |
+| Projekte (Profil) | „Keine Projekte erfasst" |
+| Überstunden-Auszahlungen (Profil) | „Keine Auszahlungen erfasst" |
+| Pensumsänderungen (Admin/Team, pro Mitglied) | „Keine Pensumsänderungen erfasst" |
+| Monatssperren (Admin/Team, pro Mitglied) | „Keine gesperrten Monate" |
+| Teamsicht — Kunden-/Projektsicht | „Keine Daten für diesen Zeitraum" |
+
+Alle als EINE Textzeile innerhalb der bestehenden Karte, nicht als eigene
+Karte mit Titel/Padding/Schatten — genau das Muster, das C7e als fehlend
+unterstellt. **Korrektur der Prämisse in C7e:** der dort beschriebene
+Missstand ("volle Karte für 'Keine Anträge gestellt'") existiert nicht,
+weder bei Absenzanträgen noch anderswo — wird bei C7 entsprechend
+vermerkt, damit dort keine Zeit auf einen bereits gelösten Punkt verwendet
+wird.
+
+Einzige Beobachtung ohne Handlungsbedarf: keiner der Texte sagt, WAS zu tun
+ist (z.B. „Kunde im Profil anlegen, um hier Auswertungen zu sehen"), nur
+DASS die Liste leer ist. Der Punkt verlangt „eine Erklärung, was zu tun
+ist, ODER nur eine leere Tabelle" als Unterscheidung — die App liegt klar
+auf der besseren Seite dieser Alternative (kurze, verständliche Meldung),
+und bei sieben von zehn Listen ergibt sich der nächste Schritt ohnehin aus
+der Karte selbst (das Formular für genau diese Liste steht direkt
+darüber). Keine künftige Datei nötig, kein Fix hier.
+
+Stand nach C3: 17 Dateien, 288 Tests, typecheck sauber (kein Code-Fix
+ausgelöst).
 
 ### Vorbereitung — 14.08.2026
 
