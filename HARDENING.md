@@ -180,7 +180,7 @@ die UI eine verständliche Fehlermeldung zeigt statt zu hängen oder still zu
 scheitern. Ladezustände (Skeleton/Spinner) bei langsamen Requests (Team-
 Übersicht mit vielen Mitgliedern, Export-Download) prüfen.
 
-### - [ ] C5. Onboarding-Flow als Aussenstehender
+### - [x] C5. Onboarding-Flow als Aussenstehender
 
 Kompletter Durchlauf ohne jedes Vorwissen: Registrierung → Firma anlegen →
 erste Einladung verschicken → als eingeladene Person Passwort setzen →
@@ -501,6 +501,51 @@ irgendwo in der App, aber jede geprüfte Ladeoperation hat einen sichtbaren
 Text-Indikator statt nichts.
 
 Stand nach C4: 17 Dateien, 288 Tests, typecheck sauber.
+
+### C5 — Onboarding-Flow, 17.08.2026
+
+Kompletter Durchlauf per Playwright, zwei getrennte Browser-Kontexte
+(niemand teilt Cookies/Login): Registrierung → erste Einladung → Invite-
+Link aus dem Server-Log geholt (lokal ist kein SMTP konfiguriert,
+`lib/mail.ts` loggt die Mail dann nur, statt sie zu verschicken — genau
+der dokumentierte lokale Testweg) → als eingeladene Person im komplett
+neuen Kontext geöffnet → Konto erstellt → erster Zeiteintrag → Profil
+aufgerufen. Test-User danach aus der Dev-DB entfernt.
+
+**Kein Fix nötig — der Flow ist durchgehend sauber:**
+
+- Registrierung landet direkt auf `/calendar`, kein Zwischenschritt.
+- Die Einladungsseite (`/invite?token=…`) zeigt sofort und unmissverständlich,
+  wem gilt die Einladung: „Du wurdest zu [Firmenname] eingeladen (Rolle:
+  Mitglied)." plus die (schreibgeschützte) E-Mail-Adresse als Feldwert —
+  niemand muss raten, ob der Link noch für sie bestimmt ist.
+- Nach dem Setzen von Passwort/Namen loggt `signIn("credentials", …)` die
+  Person automatisch ein und leitet direkt auf `/calendar` weiter — kein
+  zusätzlicher manueller Login-Schritt.
+- Der Tagesdialog defaultet neue Arbeitszeit-Einträge sinnvoll auf
+  08:00–17:00 statt leerer Felder — eine kleine, aber spürbare
+  Erleichterung für den allerersten Eintrag ohne jede Anleitung.
+- Navigation korrekt auf die Mitglied-Rolle beschränkt (4 Tabs), Profil mit
+  Kundenverwaltung sofort erreichbar.
+- Keine Konsolenfehler, weder beim Registrieren noch bei der eingeladenen
+  Person.
+
+Zwei vermeintliche Befunde stellten sich bei genauerem Hinsehen als
+Artefakte der eigenen Testmethode heraus, nicht als App-Fehler: (1) ein
+`document.body.innerText`-Check auf die E-Mail-Adresse schlug fehl, weil
+`innerText` keine Werte deaktivierter `<input>`-Felder erfasst — der Wert
+war korrekt gesetzt, nur mein Selektor falsch. (2) Ein zweiter Testlauf
+griff sich über ein zu grosszügiges Log-Tail-Fenster einen NOCH GÜLTIGEN
+Einladungslink aus einem vorherigen, wegen fehlender Pflichtfelder
+abgebrochenen Lauf — die native Browser-Validierung ("Please fill out this
+field", Chromium-Standardsprache in der Testumgebung, kein App-Text) hatte
+den ersten Kontoerstellungs-Versuch korrekt blockiert, der Token blieb
+gültig, und ein späterer Lauf verwendete ihn gültig weiter. Kein
+Wiederverwendungs-Bug — Tokens werden erst bei tatsächlich erfolgreicher
+Kontoerstellung verbraucht, genau wie erwartet.
+
+Stand nach C5: 17 Dateien, 288 Tests, typecheck sauber (kein Code-Fix
+ausgelöst).
 
 ### Vorbereitung — 14.08.2026
 
