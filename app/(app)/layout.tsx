@@ -92,8 +92,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
       <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-4 pb-20 sm:pb-4">{children}</main>
       <nav className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-card/90 backdrop-blur-xl border-t border-border/50 safe-area-pb">
-        <div className="flex items-center justify-around h-16 max-w-md mx-auto">
-          {tabs?.map?.((tab: any) => { const Icon = tab?.icon; const isActive = pathname?.startsWith?.(tab?.href); return (<Link key={tab?.href} href={tab?.href} className={cn("flex flex-col items-center gap-0.5 py-1 px-3 rounded-lg transition", isActive ? "text-primary" : "text-muted-foreground")}>{Icon && <Icon className="w-5 h-5" />}<span className="text-[10px] font-medium">{t(tab?.labelKey ?? "")}</span></Link>); })}
+        {/* HARDENING.md C2: bei 8 Tabs (owner/admin) ergab justify-around
+            ohne Scroll-Möglichkeit ~520px Breite in 375px Viewport —
+            "Feiertage"/"Rechtliches" liefen über den rechten Rand hinaus
+            und waren nicht erreichbar. overflow-x-auto macht die Leiste
+            horizontal scrollbar (dasselbe Muster wie die Team-Tabelle);
+            justify-around bleibt für die kurzen Tab-Listen (member/manager)
+            erhalten, wo es ohnehin nicht überläuft. */}
+        <div className={cn("flex items-center h-16 max-w-md mx-auto overflow-x-auto", (tabs?.length ?? 0) > 5 ? "justify-start px-2" : "justify-around")}>
+          {tabs?.map?.((tab: any) => { const Icon = tab?.icon; const isActive = pathname?.startsWith?.(tab?.href); return (<Link key={tab?.href} href={tab?.href} className={cn("flex flex-col items-center gap-0.5 py-1 px-3 rounded-lg transition shrink-0", isActive ? "text-primary" : "text-muted-foreground")}>{Icon && <Icon className="w-5 h-5" />}<span className="text-[10px] font-medium">{t(tab?.labelKey ?? "")}</span></Link>); })}
         </div>
       </nav>
     </div>

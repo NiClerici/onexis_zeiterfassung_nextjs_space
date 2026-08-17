@@ -266,8 +266,11 @@ export default function TeamPage() {
     <div className="space-y-4 pb-6">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><UserPlus className="w-4 h-4 text-primary" /> {t("team.invite")}</h2>
-        <div className="flex gap-2">
-          <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder={t("login.emailPlaceholder")} className="flex-1 px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+        {/* HARDENING.md C2: E-Mail-Feld + Rollen-Select + Button liefen bei
+            375px auf ~407px über den Viewport — dieselbe fehlende
+            flex-wrap wie bei der Kunde-hinzufügen-Zeile in profile/page.tsx. */}
+        <div className="flex flex-wrap gap-2">
+          <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder={t("login.emailPlaceholder")} className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
           <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
             {ROLE_OPTIONS.filter((r) => r !== "owner" || role === "owner").filter((r) => r !== "owner").map((r) => (
               <option key={r} value={r}>{ROLE_LABELS[r]}</option>

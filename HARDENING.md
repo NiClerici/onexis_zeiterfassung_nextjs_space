@@ -154,7 +154,7 @@ Farbverwendung für Status (offen/genehmigt/abgelehnt, gesperrt/offen,
 Compliance-Warnung) auf Einheitlichkeit prüfen. Abweichungen notieren und
 nur die auffälligsten (nicht jede Pixel-Differenz) beheben.
 
-### - [ ] C2. Mobile-Tauglichkeit
+### - [x] C2. Mobile-Tauglichkeit
 
 Jede Seite bei 375px Breite (iPhone SE) durchklicken: Tagesdialog, Team-
 Tabelle, Heatmap, Feiertags-Admin, Exporte. Tabellen mit vielen Spalten
@@ -356,6 +356,62 @@ verlangt.
 Stand nach C1: 17 Dateien, 288 Tests, typecheck sauber (unverändert
 gegenüber B4 — C1 selbst hat ausser der bereits committeten C7f-Arbeit
 keinen Code-Fix ausgelöst).
+
+### C2 — Mobile-Tauglichkeit bei 375px, 17.08.2026
+
+Automatisierte Überprüfung statt manuellem Durchklicken: ein Playwright-Skript
+misst `document.documentElement.scrollWidth` bei 375px Viewportbreite auf
+allen acht Seiten und listet zusätzlich jedes einzelne Element, dessen
+eigener `scrollWidth` den Viewport überschreitet — das findet auch
+Überläufe, die keine sichtbare horizontale Scrollbar erzeugen (z.B. ein
+`fixed`-positioniertes Element, dessen Inhalt einfach über den Rand hinaus
+verschwindet, ohne dass die Seite selbst scrollt).
+
+**Zwei echte Befunde, beide gefixt:**
+
+1. **Bottom-Nav für owner/admin nicht vollständig erreichbar.** 8 Tabs
+   (Kalender/Absenzen/Analytics/Profil/Teamsicht/Team/Feiertage/Rechtliches)
+   in einer `justify-around`-Leiste ohne Scroll-Möglichkeit ergaben ~536px
+   Breite in 375px Viewport — "Feiertage" lief über den rechten Rand,
+   "Rechtliches" war komplett unerreichbar (kein Fehler in
+   `document.scrollWidth`, weil `fixed inset-x-0` das nicht durchreicht,
+   aber ein echter Redirect-freier Dead End für die Navigation). Fix in
+   `app/(app)/layout.tsx`: `overflow-x-auto` auf die Tab-Leiste, dasselbe
+   Muster, das die Team-Tabelle bereits für ihre Spalten verwendet.
+   `justify-around` bleibt für die kurzen Tab-Listen (member: 4, manager: 5)
+   erhalten, nur ab mehr als 5 Tabs wechselt die Ausrichtung auf
+   `justify-start`. Verifiziert: "Rechtliches" ist nach Scroll
+   (`scrollIntoViewIfNeeded` + `isVisible()`) erreichbar.
+
+2. **Zwei "Zeile hinzufügen"-Formulare ohne `flex-wrap`.** Kunde-hinzufügen
+   (`profile/page.tsx`) und Mitglied-einladen (`admin/team/page.tsx`) hatten
+   je ein `flex-1`-Textfeld neben einem festbreiten Zahlen-/Auswahlfeld und
+   einem nicht schrumpfenden Button — bei 375px lief die Zeile auf 407–425px
+   über den Viewport, weil das Textfeld nicht unter seine intrinsische
+   Mindestbreite schrumpfen kann. Fix: `flex-wrap` ergänzt (das bereits an
+   anderen Toolbar-Zeilen derselben Seiten verwendete Muster, z.B.
+   `profile/page.tsx:905`) plus ein `min-w-[…]` auf dem Textfeld, damit es
+   bei Platzmangel als Ganzes auf eine eigene Zeile umbricht statt bis zur
+   Unlesbarkeit gequetscht zu werden.
+
+**Systematisch nach demselben Muster gesucht:** `grep` nach
+`className="flex gap-2"` (ohne `flex-wrap`) über die ganze App fand genau
+zwei weitere Treffer, beide in `calendar/page.tsx` — dort aber unauffällig
+(zwei `flex-1`-Buttons zu gleichen Teilen, kein fixbreiter Nachbar, kann
+nicht überlaufen). Das Feiertag-manuell-Formular (`admin/holidays/page.tsx`)
+nutzte bereits `flex-wrap`. Kein drittes Vorkommen des Bugs gefunden.
+
+**Nach den Fixes:** `document.scrollWidth` ist auf allen acht Seiten wieder
+exakt 375px. Die einzigen verbleibenden Elemente mit grösserem
+`scrollWidth` als der Viewport sind die Bottom-Nav (536px, jetzt bewusst
+selbst scrollbar) und die Team-Tabelle (554px, bereits vorher bewusst
+`overflow-x-auto`) — beides in sich geschlossene, absichtliche
+Scroll-Container, kein Seiten-Overflow.
+
+Kalender-Tagesdialog bei 375px separat geprüft: zentriert, lesbar, kein
+Überlauf.
+
+Stand nach C2: 17 Dateien, 288 Tests, typecheck sauber.
 
 ### Vorbereitung — 14.08.2026
 

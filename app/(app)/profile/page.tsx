@@ -732,13 +732,19 @@ export default function ProfilePage() {
         <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> {t("profile.customers")}</h2>
         <p className="text-xs text-muted-foreground mb-3">{t("profile.customersDesc")}</p>
 
-        <div className="flex gap-2 mb-3">
+        {/* HARDENING.md C2: bei 375px erzwang das feste w-28-Zahlenfeld
+            plus der nicht umbrechende Button einen Zeilenumbruch-freien
+            Rest fürs Namensfeld — die Zeile lief auf ~425px über den
+            Viewport. flex-wrap statt eines starren flex-Rows, dasselbe
+            Muster wie die übrigen Toolbar-Zeilen dieser Seite
+            (z.B. Zeile 905 „flex gap-3 flex-wrap"). */}
+        <div className="flex flex-wrap gap-2 mb-3">
           <input
             type="text"
             value={newCustomerName}
             onChange={(e) => setNewCustomerName(e.target.value)}
             placeholder={t("profile.customerNamePlaceholder")}
-            className="flex-1 px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+            className="flex-1 min-w-[160px] px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
           />
           <input
             type="number"
