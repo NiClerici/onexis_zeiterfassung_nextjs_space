@@ -270,8 +270,8 @@ export default function TeamPage() {
             375px auf ~407px über den Viewport — dieselbe fehlende
             flex-wrap wie bei der Kunde-hinzufügen-Zeile in profile/page.tsx. */}
         <div className="flex flex-wrap gap-2">
-          <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder={t("login.emailPlaceholder")} className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
-          <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
+          <input aria-label={t("login.email")} type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder={t("login.emailPlaceholder")} className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+          <select aria-label={t("team.role")} value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
             {ROLE_OPTIONS.filter((r) => r !== "owner" || role === "owner").filter((r) => r !== "owner").map((r) => (
               <option key={r} value={r}>{ROLE_LABELS[r]}</option>
             ))}
@@ -318,8 +318,9 @@ export default function TeamPage() {
                     <div className="border-t border-border/50 p-3 space-y-3 bg-secondary/30">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">{t("team.role")}</label>
+                          <label htmlFor={`role-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.role")}</label>
                           <select
+                            id={`role-${m.userId}`}
                             value={m.role}
                             disabled={role !== "owner" && m.role === "owner"}
                             onChange={(e) => updateMember(m.userId, { role: e.target.value })}
@@ -331,8 +332,9 @@ export default function TeamPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">{t("team.status")}</label>
+                          <label htmlFor={`status-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.status")}</label>
                           <select
+                            id={`status-${m.userId}`}
                             value={m.status}
                             disabled={isSelf}
                             onChange={(e) => updateMember(m.userId, { status: e.target.value })}
@@ -343,8 +345,9 @@ export default function TeamPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">{t("team.manager")}</label>
+                          <label htmlFor={`manager-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.manager")}</label>
                           <select
+                            id={`manager-${m.userId}`}
                             value={m.managerId ?? ""}
                             onChange={(e) => updateMember(m.userId, { managerId: e.target.value || null })}
                             className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
@@ -357,12 +360,12 @@ export default function TeamPage() {
                         </div>
                         <div />
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">{t("team.entryDate")}</label>
-                          <input type="date" defaultValue={fmtDate(m.entryDate)} onBlur={(e) => e.target.value && updateMember(m.userId, { entryDate: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                          <label htmlFor={`entry-date-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.entryDate")}</label>
+                          <input id={`entry-date-${m.userId}`} type="date" defaultValue={fmtDate(m.entryDate)} onBlur={(e) => e.target.value && updateMember(m.userId, { entryDate: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                         </div>
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">{t("team.exitDate")}</label>
-                          <input type="date" defaultValue={fmtDate(m.exitDate)} onBlur={(e) => updateMember(m.userId, { exitDate: e.target.value || null })} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                          <label htmlFor={`exit-date-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.exitDate")}</label>
+                          <input id={`exit-date-${m.userId}`} type="date" defaultValue={fmtDate(m.exitDate)} onBlur={(e) => updateMember(m.userId, { exitDate: e.target.value || null })} className="w-full px-3 py-2 rounded-xl bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                         </div>
                       </div>
 
@@ -370,16 +373,16 @@ export default function TeamPage() {
                         <h3 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1"><TrendingUp className="w-3.5 h-3.5" /> {t("profile.pensumChange")}</h3>
                         <div className="grid grid-cols-3 gap-2 mb-2">
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">{t("profile.effectiveFrom")}</label>
-                            <input type="date" value={isExpanded ? effectiveFrom : ""} onChange={(e) => setEffectiveFrom(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                            <label htmlFor={`pensum-effective-from-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("profile.effectiveFrom")}</label>
+                            <input id={`pensum-effective-from-${m.userId}`} type="date" value={isExpanded ? effectiveFrom : ""} onChange={(e) => setEffectiveFrom(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                           </div>
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">{t("profile.newPensum")}</label>
-                            <input type="number" value={newPensum} onChange={(e) => setNewPensum(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                            <label htmlFor={`new-pensum-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("profile.newPensum")}</label>
+                            <input id={`new-pensum-${m.userId}`} type="number" value={newPensum} onChange={(e) => setNewPensum(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                           </div>
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">{t("profile.newWeeklyHours")}</label>
-                            <input type="number" value={newWeeklyHours} onChange={(e) => setNewWeeklyHours(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                            <label htmlFor={`new-weekly-hours-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("profile.newWeeklyHours")}</label>
+                            <input id={`new-weekly-hours-${m.userId}`} type="number" value={newWeeklyHours} onChange={(e) => setNewWeeklyHours(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                           </div>
                         </div>
                         <button onClick={() => addPensumChange(m.userId)} disabled={savingPensum} className="w-full py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition disabled:opacity-50 mb-2">
@@ -403,12 +406,12 @@ export default function TeamPage() {
                         <h3 className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> {t("team.monthLock")}</h3>
                         <div className="grid grid-cols-3 gap-2 mb-2">
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">{t("team.monthLockYear")}</label>
-                            <input type="number" value={isExpanded ? lockYear : ""} onChange={(e) => setLockYear(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                            <label htmlFor={`lock-year-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.monthLockYear")}</label>
+                            <input id={`lock-year-${m.userId}`} type="number" value={isExpanded ? lockYear : ""} onChange={(e) => setLockYear(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                           </div>
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">{t("team.monthLockMonth")}</label>
-                            <select value={isExpanded ? lockMonth : ""} onChange={(e) => setLockMonth(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
+                            <label htmlFor={`lock-month-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("team.monthLockMonth")}</label>
+                            <select id={`lock-month-${m.userId}`} value={isExpanded ? lockMonth : ""} onChange={(e) => setLockMonth(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition">
                               {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
                                 <option key={mo} value={mo}>{t(`month.${mo}`)}</option>
                               ))}

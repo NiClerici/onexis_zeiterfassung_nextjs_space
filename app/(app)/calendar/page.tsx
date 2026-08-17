@@ -662,12 +662,12 @@ export default function CalendarPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyFrom")}</label>
-                      <input type="date" value={applyFrom} onChange={(e) => setApplyFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                      <label htmlFor="apply-from" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyFrom")}</label>
+                      <input id="apply-from" type="date" value={applyFrom} onChange={(e) => setApplyFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                     </div>
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyTo")}</label>
-                      <input type="date" value={applyTo} onChange={(e) => setApplyTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                      <label htmlFor="apply-to" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyTo")}</label>
+                      <input id="apply-to" type="date" value={applyTo} onChange={(e) => setApplyTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                     </div>
                   </div>
 
@@ -724,12 +724,12 @@ export default function CalendarPage() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyFrom")}</label>
-                    <input type="date" value={vacFrom} onChange={(e) => setVacFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                    <label htmlFor="vac-from" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyFrom")}</label>
+                    <input id="vac-from" type="date" value={vacFrom} onChange={(e) => setVacFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyTo")}</label>
-                    <input type="date" value={vacTo} onChange={(e) => setVacTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                    <label htmlFor="vac-to" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyTo")}</label>
+                    <input id="vac-to" type="date" value={vacTo} onChange={(e) => setVacTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                   </div>
                 </div>
 

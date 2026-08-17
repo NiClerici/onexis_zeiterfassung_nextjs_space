@@ -148,12 +148,12 @@ export default function HolidaysAdminPage() {
         </p>
         <div className="flex gap-3 flex-wrap items-end">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Jahr</label>
-            <input type="number" min="2020" max="2100" value={genYear} onChange={(e) => setGenYear(parseInt(e.target.value) || genYear)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-28 focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            <label htmlFor="holiday-gen-year" className="text-xs font-medium text-muted-foreground mb-1 block">Jahr</label>
+            <input id="holiday-gen-year" type="number" min="2020" max="2100" value={genYear} onChange={(e) => setGenYear(parseInt(e.target.value) || genYear)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-28 focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Kanton</label>
-            <select value={genCanton} onChange={(e) => setGenCanton(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
+            <label htmlFor="holiday-gen-canton" className="text-xs font-medium text-muted-foreground mb-1 block">Kanton</label>
+            <select id="holiday-gen-canton" value={genCanton} onChange={(e) => setGenCanton(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
               {CANTON_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </div>
@@ -170,12 +170,12 @@ export default function HolidaysAdminPage() {
         </h2>
         <div className="flex gap-3 flex-wrap items-end">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Datum</label>
-            <input type="date" value={customDate} onChange={(e) => setCustomDate(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            <label htmlFor="holiday-custom-date" className="text-xs font-medium text-muted-foreground mb-1 block">Datum</label>
+            <input id="holiday-custom-date" type="date" value={customDate} onChange={(e) => setCustomDate(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
-            <input type="text" value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="z.B. Betriebsferien" className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            <label htmlFor="holiday-custom-name" className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
+            <input id="holiday-custom-name" type="text" value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="z.B. Betriebsferien" className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
           <label className="flex items-center gap-2 text-sm pb-1.5">
             <input type="checkbox" checked={customHalfDay} onChange={(e) => setCustomHalfDay(e.target.checked)} />

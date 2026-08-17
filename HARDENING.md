@@ -192,7 +192,7 @@ Label-Fixes direkt umsetzen, grössere Onboarding-Konzepte (z.B. ein
 geführter Schritt-für-Schritt-Wizard) nur als Vorschlag notieren, nicht
 bauen.
 
-### - [ ] C6. Barrierefreiheit-Basics
+### - [x] C6. Barrierefreiheit-Basics
 
 Tab-Reihenfolge durch Kalender-Tagesdialog und die Formulare in Admin/Team
 und Admin/Feiertage; Formularfelder haben `label`/`aria-label`; Farbe ist
@@ -546,6 +546,73 @@ Kontoerstellung verbraucht, genau wie erwartet.
 
 Stand nach C5: 17 Dateien, 288 Tests, typecheck sauber (kein Code-Fix
 ausgelöst).
+
+### C6 — Barrierefreiheit-Basics, 17.08.2026
+
+Drei Prüfungen laut Punkt, ein echter und app-weiter Fund:
+
+**1. Formularfelder haben `label`/`aria-label` — Fund, gefixt.** `grep` nach
+`htmlFor` über die ganze App: **ein einziger Treffer**, im generischen,
+tatsächlich ungenutzten shadcn-Boilerplate `components/ui/form.tsx`. In
+jeder echten Seite steht `<label>` als reines visuelles Sibling-Element
+ohne `htmlFor`/`id`-Zuordnung — für eine Screenreader-Nutzerin trägt jedes
+Formularfeld in der ganzen App keinen zugänglichen Namen, unabhängig davon,
+wie eindeutig das Label optisch daneben steht. `aria-label` war mit ganzen
+sechs Treffern app-weit ähnlich selten, und vier davon stammen aus
+ebenfalls ungenutztem shadcn-Boilerplate (`pagination.tsx`,
+`breadcrumb.tsx`).
+
+Gefixt für die drei im Punkt namentlich genannten Stellen — Kalender-
+Tagesdialog, Admin/Team, Admin/Feiertage:
+
+- `components/day-entry-dialog.tsx`: Von/Bis/Pause/Kunde/Projekt/Notiz/
+  Stunden bekommen `id`/`htmlFor`, pro Tabellenzeile eindeutig mit
+  `row.key` verschlüsselt (die Zeilen liegen in einer `.map()`). Der
+  Eintragstyp-`<select>` hatte gar kein sichtbares Label — `aria-label`
+  über den bereits vorhandenen `t("calendar.type")`-String ergänzt.
+  Gleiches Muster nebenbei auch für die beiden Bulk-Dialoge in
+  `app/(app)/calendar/page.tsx` (Standardwoche anwenden, Ferien
+  eintragen) mitgezogen, da sie zur selben Kalenderfunktion gehören und
+  identisch betroffen waren.
+- `app/(app)/admin/team/page.tsx`: Einladen-E-Mail/-Rolle (`aria-label`,
+  kein sichtbares Label vorhanden) plus zehn Felder in der aufklappbaren
+  Mitgliederzeile (Rolle/Status/Vorgesetzte Person/Ein-/Austrittsdatum/
+  Pensumsänderung ×3/Monatssperre ×2), eindeutig mit `m.userId`
+  verschlüsselt.
+- `app/(app)/admin/holidays/page.tsx`: Jahr/Kanton/Datum/Name — hier
+  einzelne, nicht wiederholte Felder, also statische IDs.
+
+Verifiziert mit Playwright `getByLabel()`/`getByRole(…, { name })` — genau
+die semantische Abfrage, die ein Screenreader ebenfalls verwendet: alle
+17 geprüften Felder über die drei Seiten liefern jetzt genau einen Treffer
+(die Ausnahme "Rolle" mit zwei Treffern auf Admin/Team ist korrekt — Einladen-
+Rolle und die Rolle der aufgeklappten Person sind zwei echte, unterschiedliche
+Felder mit demselben Anzeigetext).
+
+> Vorschlag für eine künftige Datei: dasselbe Muster (Label ohne `htmlFor`)
+> zieht sich durch praktisch die ganze App — Profil, Analytics, Absenzen,
+> Login/Register. Ein systematischer Durchgang über alle verbleibenden
+> Formulare wäre ein eigener, mechanischer Punkt, kein "offensichtliche
+> Lücke"-Fund mehr, sondern ein vollständiges Audit.
+
+**2. Tab-Reihenfolge — geprüft, kein Fix nötig.** `grep` nach `tabIndex`
+über die ganze App: keine einzige Verwendung. Ohne manuelle
+`tabIndex`-Eingriffe folgt die Tab-Reihenfolge zwangsläufig der
+DOM-Reihenfolge, die überall der visuellen Reihenfolge entspricht.
+
+**3. Farbe als alleiniger Informationsträger — geprüft, kein Fix nötig.**
+Jeder während C1–C5 gesichtete Status-Indikator trägt bereits Text oder ein
+Icon zusätzlich zur Farbe: Absenzstatus (farbiges Pill MIT Text „genehmigt"/
+„abgelehnt"), Mitgliedschaftsstatus („aktiv"/„inaktiv" als Text), Monatssperre
+(Schloss-Icon + „[Monat] [Jahr]" als Text, nicht nur eine farbige Markierung),
+Budget-Überschreitung (zusätzliches `AlertTriangle`-Icon neben der roten
+Zahl), Auslastungs-Heatmap (die Prozentzahl steht immer als Text in der
+Zelle, die Farbe ist nur zusätzliche Kodierung). Das Compliance-Warndreieck
+hat exakt den vom Punkt behaupteten Text-Tooltip
+(`title={violations.map(v => v.message).join(" · ")}`,
+`app/(app)/calendar/page.tsx:565`) — verifiziert, nicht nur angenommen.
+
+Stand nach C6: 17 Dateien, 288 Tests, typecheck sauber.
 
 ### Vorbereitung — 14.08.2026
 

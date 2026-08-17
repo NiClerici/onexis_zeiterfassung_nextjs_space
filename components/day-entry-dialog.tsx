@@ -269,6 +269,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                   <div key={row.key} className="rounded-xl bg-secondary/60 p-3 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <select
+                        aria-label={t("calendar.type")}
                         value={row.type}
                         onChange={(e) => handleTypeChange(row.key, e.target.value as EintragTyp)}
                         className="flex-1 px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
@@ -293,8 +294,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                       <>
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.von")}</label>
+                            <label htmlFor={`von-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.von")}</label>
                             <input
+                              id={`von-${row.key}`}
                               type="time"
                               value={row.von}
                               onChange={(e) => updateRow(row.key, { von: e.target.value })}
@@ -302,8 +304,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                             />
                           </div>
                           <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.bis")}</label>
+                            <label htmlFor={`bis-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.bis")}</label>
                             <input
+                              id={`bis-${row.key}`}
                               type="time"
                               value={row.bis}
                               onChange={(e) => updateRow(row.key, { bis: e.target.value })}
@@ -311,8 +314,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                             />
                           </div>
                           <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.pause")}</label>
+                            <label htmlFor={`pause-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.pause")}</label>
                             <input
+                              id={`pause-${row.key}`}
                               type="number"
                               min="0"
                               max="1440"
@@ -325,8 +329,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.customer")}</label>
+                            <label htmlFor={`customer-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.customer")}</label>
                             <select
+                              id={`customer-${row.key}`}
                               value={row.customerId}
                               onChange={(e) => handleCustomerChange(row.key, e.target.value)}
                               className="w-full px-2 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
@@ -340,8 +345,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                             </select>
                           </div>
                           <div>
-                            <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.project")}</label>
+                            <label htmlFor={`project-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.project")}</label>
                             <select
+                              id={`project-${row.key}`}
                               value={row.projectId}
                               onChange={(e) => handleProjectChange(row.key, e.target.value)}
                               disabled={!row.customerId}
@@ -370,8 +376,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                       </>
                     ) : (
                       <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.entryHours")}</label>
+                        <label htmlFor={`hours-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.entryHours")}</label>
                         <input
+                          id={`hours-${row.key}`}
                           type="number"
                           step="0.25"
                           min="0"
@@ -384,8 +391,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                     )}
 
                     <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.notiz")}</label>
+                      <label htmlFor={`notiz-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.notiz")}</label>
                       <input
+                        id={`notiz-${row.key}`}
                         type="text"
                         value={row.notiz}
                         onChange={(e) => updateRow(row.key, { notiz: e.target.value })}
