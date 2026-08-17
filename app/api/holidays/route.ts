@@ -41,7 +41,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET holidays error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
 
@@ -97,7 +97,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Dieser Feiertag existiert bereits" }, { status: 409 });
     }
     console.error("POST holidays error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
 
@@ -118,6 +118,6 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("DELETE holidays error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

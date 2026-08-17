@@ -37,7 +37,7 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("GET invitations/accept error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
 
@@ -118,6 +118,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, accountExists: false });
   } catch (error: any) {
     console.error("POST invitations/accept error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

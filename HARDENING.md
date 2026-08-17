@@ -171,7 +171,7 @@ zu tun ist, oder nur eine leere Tabelle bzw. "undefined"? Neue Organisation
 frisch registrieren und systematisch durchklicken, bevor irgendwelche
 Testdaten existieren — das ist die reale erste Erfahrung eines Kunden.
 
-### - [ ] C4. Fehler- und Ladezustände
+### - [x] C4. Fehler- und Ladezustände
 
 Für die wichtigsten Mutationen (Zeiteintrag speichern, Absenzantrag stellen,
 Einladung senden, Passwort ändern): Netzwerkfehler simulieren (z.B. Server
@@ -458,6 +458,49 @@ darüber). Keine künftige Datei nötig, kein Fix hier.
 
 Stand nach C3: 17 Dateien, 288 Tests, typecheck sauber (kein Code-Fix
 ausgelöst).
+
+### C4 — Fehler- und Ladezustände, 17.08.2026
+
+Netzwerkfehler für die vier genannten Mutationen per Playwright
+`page.route()` erzwungen (500 bzw. abgebrochene Requests statt eines
+laufenden Servers) — realistischer als den Server kurz zu stoppen, weil
+sich damit gezielt genau EINE Route treffen lässt, ohne den ganzen
+Dev-Server für die übrigen Prüfungen mit runterzureissen.
+
+**Ein echter Fund, gefixt:** alle vier Mutationen (Zeiteintrag speichern,
+Absenzantrag stellen, Einladung senden, Passwort ändern) zeigten bei einem
+erzwungenen 500 zuverlässig einen Toast und hingen nie (der `finally`-Block
+in jedem Handler setzt den Loading-State immer zurück, auch bei einem
+Fehler). Der Toast-Text war aber **"Internal server error"** — Englisch,
+in einer sonst komplett deutschen App. Ursache: alle 26 API-Routen liefern
+im generischen `catch`-Block exakt diese hartcodierte englische
+Zeichenkette, die das Frontend unverändert anzeigt (`toast.error(data?.error
+?? t(...))` bevorzugt den Server-Text, wenn vorhanden — richtig so, nur
+war der Server-Text nie lokalisiert).
+
+Fix: alle 26 Vorkommen von `"Internal server error"` (mechanisch identisch,
+`grep` vorab bestätigt, dass es ausschliesslich dieses eine Muster ist) auf
+`"Interner Serverfehler"` geändert — inklusive der Referenz-Implementierung
+im Kommentarkopf von `lib/access.ts`, die anderen Routen als Vorlage dient.
+Verifiziert: derselbe Playwright-Testlauf zeigt danach "Interner
+Serverfehler" im Toast.
+
+**Ladezustände — geprüft, kein Fix nötig.** `/api/team` künstlich um 3s
+verzögert: die Teamsicht zeigt währenddessen einen sichtbaren
+Text-Ladehinweis (`t("common.loading")`) statt eines Blank-Screens. Der
+Excel-Export-Button (`teamsicht.exportButton`) verwendet dasselbe Muster
+(`disabled={exporting}`, Text wechselt auf "Lädt…") — ein erster,
+naiver Playwright-Check mit einem text-basierten Locator ergab hier ein
+falsches Negativ (der Locator sucht nach dem Text "Excel-Export", verliert
+sein Match aber genau während der Button "Lädt…" anzeigt, und meldet dann
+fälschlich den ZUSTAND NACH Abschluss). Mit einem `MutationObserver` direkt
+im Seitenkontext bestätigt: der Button durchläuft korrekt
+`disabled=false→true` mit Text "Lädt…" und zurück auf `false` mit
+"Excel-Export", exakt wie der Quellcode es vorsieht. Kein Skeleton
+irgendwo in der App, aber jede geprüfte Ladeoperation hat einen sichtbaren
+Text-Indikator statt nichts.
+
+Stand nach C4: 17 Dateien, 288 Tests, typecheck sauber.
 
 ### Vorbereitung — 14.08.2026
 

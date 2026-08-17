@@ -64,6 +64,6 @@ export async function POST(req: Request) {
     return genericResponse();
   } catch (error: any) {
     console.error("forgot-password error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
