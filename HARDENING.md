@@ -262,6 +262,69 @@ _(Hier trägt der Loop Blocker, Entscheidungen, Auffälligkeiten und
 Vorschläge für künftige Feature-Punkte ein — letztere ausdrücklich NICHT
 in diesem Loop umsetzen.)_
 
+### Teil C — Vorbereitung, 17.08.2026
+
+`npm run seed` existiert nicht als npm-Skript — `"seed"` in `package.json`
+steht unter dem `"prisma"`-Objekt (Konvention für `npx prisma db seed`),
+nicht unter `"scripts"`. Geseedet mit `npx tsx --require dotenv/config
+scripts/safe-seed.ts` direkt. Dev-Server lokal auf Port 3000 gestartet,
+vier Playwright-Kontexte für member/manager/admin/owner mit den
+Seed-Zugangsdaten aus `scripts/seed.ts` (z.B. `admin@onexis.test` /
+`onexisAdmin123`).
+
+### C7f — vorgezogen während C1 gefunden und bereits erledigt, 17.08.2026
+
+Beim Screenshot-Vergleich über alle Rollen (C1) fiel die Monatsauswahl auf,
+bevor C1 selbst etwas dazu zu vermelden hatte — die Notiz gehört inhaltlich
+zu C7f, wird deshalb hier und nicht unter C1 festgehalten.
+
+**Korrektur der Prämisse in C7f:** Der Punkt unterstellt, Analytics verwende
+bereits das Zwei-Selects-Muster. Stimmt nicht — `analytics/page.tsx:129`
+nutzte bis eben dasselbe native `<input type="month">` wie `absences/
+page.tsx:248`, `team/page.tsx:190` und `profile/page.tsx:905` (vier
+Stellen, alle nativ). Das Zwei-Selects-Muster (Monat-`<select>` mit
+`t('month.N')` + Jahres-`<input type="number">`) existierte tatsächlich nur
+im Lohnexport-Block auf der Profilseite. „Gemischt" stimmte also, nur die
+Zuordnung im Punkt war vertauscht.
+
+**Warum das native Feld der eigentliche Fehler war, nicht nur eine
+Stilfrage:** ein `<input type="month">` rendert den Monatsnamen in der
+Sprache des BROWSERS, nicht der App. Diese App ist durchgehend Deutsch und
+hat keinen Sprachumschalter (`lib/i18n.tsx` ist ein einzelnes hartcodiertes
+Wörterbuch) — ein Nutzer mit englischem oder französischem Browser/OS sähe
+in einer sonst komplett deutschen Oberfläche plötzlich "October 2026" oder
+"octobre 2026". Reproduziert: Playwright-Kontext mit `locale: "en-US"`,
+Analytics-Seite, Monat auf 10 gestellt → vorher wäre "October" erschienen,
+mit dem Fix zeigt die ausgewählte `<option>` weiterhin "Oktober" (per
+`page.locator('select[aria-label="Monat"]').locator('option:checked')`
+verifiziert).
+
+**Entscheidung:** alle fünf Stellen (die vier nativen plus der bisherige
+Lohnexport-Sonderfall) auf eine neue gemeinsame Komponente
+`components/ui/month-year-picker.tsx` vereinheitlicht — Monat-`<select>` +
+Jahres-`<input type="number">`, exakt das vorher nur im Lohnexport genutzte
+Muster, jetzt an einer Stelle definiert statt fünfmal (einmal dupliziert,
+viermal nativ). `value`/`onChange` bleiben beim bisherigen `"YYYY-MM"`-
+String, keine der aufrufenden Seiten musste ihre sonstige Logik ändern.
+Der Lohnexport-Block behält seine getrennten `payrollMonth`/`payrollYear`-
+Zahlen-States (die Query-Params brauchen sie einzeln), nur die Darstellung
+läuft jetzt über dieselbe Komponente.
+
+**Bewusst NICHT angefasst:** das Monatssperre-Formular in
+`app/(app)/admin/team/page.tsx:400-416` verwendet ebenfalls Select+Number,
+aber in einer anderen Anordnung (Jahr zuerst, mit sichtbaren Labels über
+je einem Grid-Feld statt einer kompakten Toolbar-Zeile) und hat NICHT den
+Lokalisierungsfehler (nutzt bereits `t('month.N')` in einem `<select>`).
+Andere Anordnung ist hier eine begründete Formular-Entscheidung (Admin-
+Aktion mit Labels), keine Instanz derselben Inkonsistenz — der Umbau auf
+`MonthYearPicker` hätte die sichtbaren Feldlabels gekostet, ohne einen
+echten Fehler zu beheben.
+
+Committet vor C1, da vollständig eigenständig verifizierbar
+(`npm run typecheck`, `npm test`, Playwright mit `en-US`-Locale). Die Box
+zu C7 bleibt trotzdem offen, bis C7a–e ebenfalls erledigt sind — C7 ist im
+Dateikopf EIN Punkt, keine sechs.
+
 ### Vorbereitung — 14.08.2026
 
 `npm install` bricht ohne `--legacy-peer-deps` ab: `@typescript-eslint/

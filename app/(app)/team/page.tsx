@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { Gauge, Download, ArrowUpDown, Search, Briefcase, AlertTriangle, TrendingUp } from "lucide-react";
 import { motion } from "framer-motion";
+import { MonthYearPicker } from "@/components/ui/month-year-picker";
 
 interface FeriensaldoData {
   anspruch: number;
@@ -187,7 +188,7 @@ export default function TeamsichtPage() {
           ))}
         </div>
         <div className="flex gap-3 flex-wrap">
-          {periodType === "month" && <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />}
+          {periodType === "month" && <MonthYearPicker value={selectedMonth} onChange={setSelectedMonth} />}
           {periodType === "year" && <input type="number" min="2020" max="2030" value={selectedYear} onChange={(e) => setSelectedYear(parseInt(e.target.value) || 2026)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary/30" />}
           {periodType === "custom" && (
             <>

@@ -5,6 +5,7 @@ import { useI18n } from "@/lib/i18n";
 import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, CalendarClock, Banknote, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
+import { MonthYearPicker } from "@/components/ui/month-year-picker";
 
 const BarChartComponent = dynamic(() => import("@/components/analytics-charts"), { ssr: false, loading: () => <div className="h-64 flex items-center justify-center text-sm text-muted-foreground">Loading...</div> });
 
@@ -126,7 +127,7 @@ export default function AnalyticsPage() {
           ))}
         </div>
         <div className="flex gap-3 flex-wrap">
-          {periodType === "month" && <input type="month" value={selectedMonth} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSelectedMonth(e?.target?.value ?? "")} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />}
+          {periodType === "month" && <MonthYearPicker value={selectedMonth} onChange={setSelectedMonth} />}
           {periodType === "quarter" && (
             <>
               <input type="number" min="2020" max="2030" value={selectedYear} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSelectedYear(parseInt(e?.target?.value) || 2026)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary/30" />

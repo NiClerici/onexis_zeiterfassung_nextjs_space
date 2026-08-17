@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { CalendarOff, Check, X, Trash2, AlertTriangle, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { MonthYearPicker } from "@/components/ui/month-year-picker";
 
 const ABSENCE_TYPES = ["ferien", "krank", "militaer", "unbezahlt"] as const;
 
@@ -245,7 +246,12 @@ export default function AbsencesPage() {
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
             <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
               <h2 className="text-sm font-display font-semibold flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> {t("absences.teamCalendar")}</h2>
-              <input type="month" value={calMonth} onChange={(e) => setCalMonth(e.target.value)} className="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <MonthYearPicker
+                value={calMonth}
+                onChange={setCalMonth}
+                selectClassName="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+                yearInputClassName="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
             </div>
             <p className="text-xs text-muted-foreground mb-3">{t("absences.teamCalendarHint", { teamSize: String(teamSize) })}</p>
             {calendarDays.length === 0 ? (

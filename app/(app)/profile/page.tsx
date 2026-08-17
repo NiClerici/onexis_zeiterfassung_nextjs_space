@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { MonthYearPicker } from "@/components/ui/month-year-picker";
 
 interface ProfileData {
   firstName: string;
@@ -902,7 +903,7 @@ export default function ProfilePage() {
           ))}
         </div>
         <div className="flex gap-3 flex-wrap mb-3">
-          {exportType === "month" && <input type="month" value={exportMonth} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExportMonth(e?.target?.value ?? "")} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />}
+          {exportType === "month" && <MonthYearPicker value={exportMonth} onChange={setExportMonth} />}
           {exportType === "year" && <input type="number" min="2020" max="2030" value={exportYear} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExportYear(parseInt(e?.target?.value) || 2026)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary/30" />}
           {exportType === "custom" && (
             <>
@@ -944,12 +945,19 @@ export default function ProfilePage() {
           <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><FileText className="w-4 h-4 text-primary" /> {t("profile.exportPayroll")}</h2>
           <p className="text-xs text-muted-foreground mb-3">{t("profile.exportPayrollDesc")}</p>
           <div className="flex gap-3 flex-wrap mb-3">
-            <select value={payrollMonth} onChange={(e) => setPayrollMonth(parseInt(e.target.value))} className="px-3 py-1.5 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30">
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
-                <option key={mo} value={mo}>{t(`month.${mo}`)}</option>
-              ))}
-            </select>
-            <input type="number" min="2020" max="2030" value={payrollYear} onChange={(e) => setPayrollYear(parseInt(e?.target?.value) || 2026)} className="px-3 py-1.5 rounded-xl bg-secondary text-sm w-24 focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            {/* HARDENING.md C7f: dieselbe Monat/Jahr-Komponente wie die
+                übrigen Zeitraum-Auswahlen in der App, statt einer eigenen
+                Select/Number-Kombination — payrollMonth/payrollYear bleiben
+                als separate Zahlen bestehen (handlePayrollExport baut die
+                Query-Params daraus), nur die Darstellung ist gebündelt. */}
+            <MonthYearPicker
+              value={`${payrollYear}-${String(payrollMonth).padStart(2, "0")}`}
+              onChange={(v) => {
+                const [y, m] = v.split("-");
+                setPayrollYear(parseInt(y, 10) || payrollYear);
+                setPayrollMonth(parseInt(m, 10) || payrollMonth);
+              }}
+            />
           </div>
           <button
             onClick={handlePayrollExport}
