@@ -23,8 +23,13 @@ Testlauf dieser Anleitung auf einer echten VM.
 
 ## 1. Voraussetzungen
 
-- Eine VM bei cloudscale.ch oder Infomaniak Public Cloud (empfohlen:
-  Ubuntu 22.04 LTS, mind. 2 vCPU / 4 GB RAM für App + PostgreSQL + Caddy).
+- Eine VM bei cloudscale.ch, Infomaniak Public Cloud oder Infomaniak
+  VPS Lite (empfohlen: Ubuntu 22.04 LTS, mind. 2 vCPU / 4 GB RAM für App
+  + PostgreSQL + Caddy). Tatsächlich im Einsatz ist ein **Infomaniak VPS
+  Lite** mit 2 vCPU / 4 GB / 60 GB — der Schritt-für-Schritt-Ablauf dafür
+  steht im Deployment-Loop `.claude/commands/infomaniak.md`. Auf 4 GB RAM
+  vor dem ersten `docker compose up --build` 2 GB Swap anlegen, sonst
+  kann `next build` per OOM abbrechen.
 - Docker Engine + Docker Compose Plugin auf der VM installiert
   ([offizielle Anleitung](https://docs.docker.com/engine/install/ubuntu/)).
 - Eine Domain, deren DNS-A-Record auf die IP der VM zeigt (für Caddys
