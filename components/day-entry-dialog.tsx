@@ -6,6 +6,7 @@ import { X, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
+import { buildArbeitszeit } from "@/lib/arbeitszeit";
 
 export interface DayTimeEntry {
   id: string;
@@ -46,6 +47,11 @@ interface DraftRow {
   projectId: string;
   billable: boolean;
   hours: string;
+  // Nur für type==="arbeit" relevant: Eingabe über Von/Bis/Pause (false,
+  // Standard) oder direkt über eine Stundenzahl (true) — im zweiten Fall
+  // leitet saveRow() von/bis/pauseMin beim Speichern über buildArbeitszeit
+  // ab, die Datenstruktur beim Server bleibt identisch.
+  hoursMode: boolean;
   saving: boolean;
 }
 
@@ -62,6 +68,7 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
     projectId: entry.projectId ?? "",
     billable: entry.billable ?? false,
     hours: entry.hours != null ? String(entry.hours) : fallbackHours.toFixed(2),
+    hoursMode: false,
     saving: false,
   };
 }
@@ -79,6 +86,7 @@ function newDraft(fallbackHours: number): DraftRow {
     projectId: "",
     billable: false,
     hours: fallbackHours.toFixed(2),
+    hoursMode: false,
     saving: false,
   };
 }
@@ -160,12 +168,17 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
     updateRow(row.key, { saving: true });
     try {
       const isArbeit = row.type === "arbeit";
+      // Im Stunden-Modus (nur für arbeit) von/bis/pauseMin aus der
+      // eingegebenen Stundenzahl ableiten — gleiche Funktion, die auch
+      // Bulk-Erfassung und der Excel-Import nutzen. Die API-Datenstruktur
+      // bleibt dieselbe wie im Von/Bis-Modus, hours bleibt null.
+      const arbeitszeit = isArbeit && row.hoursMode ? buildArbeitszeit(Math.max(0, Math.min(24, parseFloat(row.hours) || 0))) : null;
       const body: Record<string, unknown> = {
         date: dateStr,
         type: row.type,
-        von: isArbeit ? row.von : null,
-        bis: isArbeit ? row.bis : null,
-        pauseMin: isArbeit ? Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0)) : 0,
+        von: isArbeit ? (arbeitszeit?.von ?? row.von) : null,
+        bis: isArbeit ? (arbeitszeit?.bis ?? row.bis) : null,
+        pauseMin: isArbeit ? (arbeitszeit?.pauseMin ?? Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0))) : 0,
         notiz: row.notiz.trim() || null,
         customerId: row.customerId || null,
         projectId: row.projectId || null,
@@ -292,41 +305,74 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
                     {isArbeit ? (
                       <>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label htmlFor={`von-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.von")}</label>
-                            <input
-                              id={`von-${row.key}`}
-                              type="time"
-                              value={row.von}
-                              onChange={(e) => updateRow(row.key, { von: e.target.value })}
-                              className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                            />
-                          </div>
-                          <div>
-                            <label htmlFor={`bis-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.bis")}</label>
-                            <input
-                              id={`bis-${row.key}`}
-                              type="time"
-                              value={row.bis}
-                              onChange={(e) => updateRow(row.key, { bis: e.target.value })}
-                              className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                            />
-                          </div>
-                          <div>
-                            <label htmlFor={`pause-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.pause")}</label>
-                            <input
-                              id={`pause-${row.key}`}
-                              type="number"
-                              min="0"
-                              max="1440"
-                              step="5"
-                              value={row.pauseMin}
-                              onChange={(e) => updateRow(row.key, { pauseMin: e.target.value })}
-                              className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                            />
-                          </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => updateRow(row.key, { hoursMode: false })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${!row.hoursMode ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-accent"}`}
+                          >
+                            {t("calendar.modeVonBis")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateRow(row.key, { hoursMode: true })}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${row.hoursMode ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-accent"}`}
+                          >
+                            {t("calendar.modeHours")}
+                          </button>
                         </div>
+                        {row.hoursMode ? (
+                          <div>
+                            <label htmlFor={`hours-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.entryHours")}</label>
+                            <input
+                              id={`hours-${row.key}`}
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              max="24"
+                              value={row.hours}
+                              onChange={(e) => updateRow(row.key, { hours: e.target.value })}
+                              className="w-full px-4 py-2 rounded-xl bg-secondary text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">{t("calendar.hoursDirectHint")}</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label htmlFor={`von-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.von")}</label>
+                              <input
+                                id={`von-${row.key}`}
+                                type="time"
+                                value={row.von}
+                                onChange={(e) => updateRow(row.key, { von: e.target.value })}
+                                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor={`bis-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.bis")}</label>
+                              <input
+                                id={`bis-${row.key}`}
+                                type="time"
+                                value={row.bis}
+                                onChange={(e) => updateRow(row.key, { bis: e.target.value })}
+                                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor={`pause-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.pause")}</label>
+                              <input
+                                id={`pause-${row.key}`}
+                                type="number"
+                                min="0"
+                                max="1440"
+                                step="5"
+                                value={row.pauseMin}
+                                onChange={(e) => updateRow(row.key, { pauseMin: e.target.value })}
+                                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                              />
+                            </div>
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label htmlFor={`customer-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.customer")}</label>

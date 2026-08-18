@@ -3,6 +3,12 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
+import { recomputeAbsenceHours } from "@/lib/absence-entries";
+import type { PensumChangeInput } from "@/lib/calc";
+
+function toPensumChangeInput(rows: { effectiveFrom: Date; pensum: number; weeklyHours: number }[]): PensumChangeInput[] {
+  return rows.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
+}
 
 // Ein userId-Parameter erlaubt owner/admin, Pensumsänderungen für ANDERE
 // Personen zu verwalten (MIGRATION.md Punkt 4c, /admin/team). Ohne Parameter
@@ -77,6 +83,14 @@ export async function POST(req: Request) {
         });
       }
 
+      // Stand VOR der neuen Änderung — Basis für recomputeAbsenceHours
+      // unten, damit sich erkennen lässt, welche Absenz-Einträge noch das
+      // alte (automatisch berechnete) Tagessoll trugen.
+      const previousChangeRows = await tx.pensumChange.findMany({
+        where: { userId: targetUserId, orgId },
+        orderBy: { effectiveFrom: "asc" },
+      });
+
       const newChange = await tx.pensumChange.create({
         data: {
           userId: targetUserId,
@@ -99,10 +113,23 @@ export async function POST(req: Request) {
         });
       }
 
-      return newChange;
+      return { newChange, previousChangeRows, targetUserId };
     });
 
-    return NextResponse.json({ change });
+    // Ausserhalb der Transaktion: bestehende Absenz-Einträge, deren
+    // gespeicherte Stunden noch das alte (automatisch berechnete) Tagessoll
+    // trugen, auf das neue Pensum nachziehen (Bugfix: Ferien-Einträge, die
+    // vor einer rückwirkenden Pensumsänderung angelegt wurden, zeigten
+    // sonst dauerhaft die alte Stundenzahl — auch im Feriensaldo).
+    const recompute = await recomputeAbsenceHours({
+      orgId,
+      userId: change.targetUserId,
+      changedBy: userId,
+      previousChanges: toPensumChangeInput(change.previousChangeRows),
+      currentChanges: toPensumChangeInput([...change.previousChangeRows, change.newChange]),
+    });
+
+    return NextResponse.json({ change: change.newChange, recompute });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
@@ -128,6 +155,12 @@ export async function DELETE(req: Request) {
     if (targetUserId !== userId) {
       requireRole(role, ["owner", "admin"]);
     }
+
+    // Stand VOR dem Löschen — für recomputeAbsenceHours unten.
+    const previousChangeRows = await prisma.pensumChange.findMany({
+      where: { userId: targetUserId, orgId },
+      orderBy: { effectiveFrom: "asc" },
+    });
 
     await prisma.pensumChange.delete({ where: { id } });
 
@@ -157,7 +190,18 @@ export async function DELETE(req: Request) {
       }
     }
 
-    return NextResponse.json({ success: true });
+    // Absenz-Einträge nachziehen, deren Stunden noch das (jetzt entfallene)
+    // Pensum trugen — spiegelbildlich zu POST oben.
+    const currentChangeRows = previousChangeRows.filter((c) => c.id !== id);
+    const recompute = await recomputeAbsenceHours({
+      orgId,
+      userId: targetUserId,
+      changedBy: userId,
+      previousChanges: toPensumChangeInput(previousChangeRows),
+      currentChanges: toPensumChangeInput(currentChangeRows),
+    });
+
+    return NextResponse.json({ success: true, recompute });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);

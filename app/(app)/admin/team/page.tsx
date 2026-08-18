@@ -503,16 +503,18 @@ export default function TeamPage() {
             <DialogTitle>{t("team.inviteLinkTitle", { email: inviteLink?.email ?? "" })}</DialogTitle>
             <DialogDescription>{t("team.inviteLinkDescription")}</DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 min-w-0 truncate px-3 py-2 rounded-xl bg-secondary text-xs">{inviteLink?.url}</code>
-            <button
-              onClick={copyInviteLink}
-              className="shrink-0 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5"
-            >
-              {inviteLinkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              {inviteLinkCopied ? t("team.inviteLinkCopied") : t("team.inviteLinkCopy")}
-            </button>
-          </div>
+          {/* Eigene Zeile statt einer engen Flex-Reihe neben dem
+              Kopieren-Knopf — ein Einladungslink ist über 90 Zeichen lang,
+              break-all statt truncate zeigt ihn vollständig statt ihn
+              (potenziell unzuverlässig) abzuschneiden. */}
+          <code className="block w-full px-3 py-2 rounded-xl bg-secondary text-xs break-all">{inviteLink?.url}</code>
+          <button
+            onClick={copyInviteLink}
+            className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition flex items-center justify-center gap-1.5"
+          >
+            {inviteLinkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {inviteLinkCopied ? t("team.inviteLinkCopied") : t("team.inviteLinkCopy")}
+          </button>
           <DialogFooter>
             <button onClick={() => setInviteLink(null)} className="px-4 py-2 rounded-xl bg-secondary text-sm font-medium hover:opacity-80 transition">
               {t("team.inviteLinkClose")}

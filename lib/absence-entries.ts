@@ -11,12 +11,32 @@
 
 import { prisma } from "@/lib/db";
 import { diffTimeEntryFields } from "@/lib/audit";
-import type { EintragTyp } from "@/lib/calc";
+import { sollStundenTag } from "@/lib/calc";
+import type { EintragTyp, Profil, PensumChangeInput, HolidayInput } from "@/lib/calc";
 
 export interface CreateAbsenceEntriesResult {
   created: number;
   updated: number;
   skipped: number;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// Baut das Profil, das sollStundenTag/pensumAt (lib/calc.ts) erwarten, aus
+// einer Membership mit geladener Organisation — dieselbe Feldzuordnung wie
+// buildProfil in lib/export-helpers.ts, hier separat gehalten, damit dieses
+// Modul nicht den ExcelJS-Import der Export-Helfer mitschleppt.
+function profilFromMembership(membership: { basePensum: number | null; pensum: number; baseWeeklyHours: number | null; weeklyHours: number; startDate: Date | null; exitDate: Date | null; vacationDays: number; org: { maxWeeklyHours: number } }): Profil {
+  return {
+    pensum: membership.basePensum ?? membership.pensum,
+    wochenstunden: membership.baseWeeklyHours ?? membership.weeklyHours,
+    startDate: membership.startDate,
+    exitDate: membership.exitDate,
+    ferientage: membership.vacationDays,
+    maxWeeklyHours: membership.org.maxWeeklyHours,
+  };
 }
 
 function dateKey(d: Date): string {
@@ -41,22 +61,22 @@ export async function createAbsenceEntries(params: {
 }): Promise<CreateAbsenceEntriesResult> {
   const { orgId, userId, changedBy, fromDate, toDate, type, overwriteExisting = false, skipDates } = params;
 
-  const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
+  const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } }, include: { org: true } });
   if (!membership) throw new Error("Membership not found");
 
-  const pensumChanges = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
+  const pensumChangeRows = await prisma.pensumChange.findMany({ where: { userId, orgId }, orderBy: { effectiveFrom: "asc" } });
+  const holidayRows = await prisma.holiday.findMany({ where: { orgId } });
+
+  // Kanonische Berechnung aus lib/calc.ts statt einer eigenen Kopie der
+  // Pensum-Auflösung — berücksichtigt dadurch auch Feiertage (ein
+  // Ferientag, der auf einen Feiertag fällt, bekam vorher fälschlich die
+  // volle Tagesrate statt 0/halb).
+  const profil = profilFromMembership(membership);
+  const changes: PensumChangeInput[] = pensumChangeRows.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
+  const holidays: HolidayInput[] = holidayRows.map((h) => ({ date: h.date, halfDay: h.halfDay }));
 
   function getDailyRateForDate(date: Date): number {
-    let effectivePensum = membership?.basePensum ?? membership?.pensum ?? 100;
-    let effectiveWeeklyHours = membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42;
-    for (const change of pensumChanges) {
-      const changeDate = new Date(change.effectiveFrom);
-      if (changeDate <= date) {
-        effectivePensum = change.pensum;
-        effectiveWeeklyHours = change.weeklyHours;
-      }
-    }
-    return (effectiveWeeklyHours * effectivePensum) / 100 / 5;
+    return sollStundenTag(date, profil, changes, holidays);
   }
 
   const existing = await prisma.timeEntry.findMany({
@@ -139,4 +159,77 @@ export async function createAbsenceEntries(params: {
   }
 
   return { created, updated, skipped };
+}
+
+export interface RecomputeAbsenceHoursResult {
+  updated: number;
+  skipped: number;
+}
+
+// Bugfix (Betrieb.md/FOLLOWUP-Nachtrag): Absenz-Einträge (alles ausser
+// "arbeit") speichern ihre Stunden als festen Wert beim Anlegen. Eine
+// rückwirkende PensumChange ändert diesen Wert bisher nie, wodurch sowohl
+// die Anzeige als auch feriensaldo() (lib/calc.ts) mit veralteten Zahlen
+// rechnen. Wird nach jedem Anlegen/Löschen einer PensumChange aufgerufen
+// (app/api/pensum-changes/route.ts).
+//
+// Ein Eintrag gilt nur dann als automatisch erzeugt und wird aktualisiert,
+// wenn sein gespeicherter Stundenwert exakt dem Tagessoll VOR dieser
+// Änderung entsprach. Weicht er ab, hat jemand von Hand einen abweichenden
+// Wert eingetragen (z.B. ein halber Ferientag) — dieser Eintrag bleibt
+// unangetastet, damit die Neuberechnung keine bewussten Korrekturen
+// stillschweigend überschreibt. "unbezahlt" wird ausgenommen: dessen
+// Stunden werden von stundenAusEintrag ohnehin immer als 0 behandelt
+// (lib/calc.ts), eine Neuberechnung hätte keinen sichtbaren Effekt.
+export async function recomputeAbsenceHours(params: {
+  orgId: string;
+  userId: string;
+  // Person, die die PensumChange angelegt/gelöscht hat — für den Audit-Trail.
+  changedBy: string;
+  // PensumChange-Stand unmittelbar VOR der auslösenden Änderung.
+  previousChanges: PensumChangeInput[];
+  // PensumChange-Stand NACH der auslösenden Änderung.
+  currentChanges: PensumChangeInput[];
+}): Promise<RecomputeAbsenceHoursResult> {
+  const { orgId, userId, changedBy, previousChanges, currentChanges } = params;
+
+  const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } }, include: { org: true } });
+  if (!membership) return { updated: 0, skipped: 0 };
+
+  const holidayRows = await prisma.holiday.findMany({ where: { orgId } });
+  const holidays: HolidayInput[] = holidayRows.map((h) => ({ date: h.date, halfDay: h.halfDay }));
+  const profil = profilFromMembership(membership);
+
+  const entries = await prisma.timeEntry.findMany({
+    where: { orgId, userId, deletedAt: null, type: { notIn: ["arbeit", "unbezahlt"] } },
+    select: { id: true, date: true, hours: true },
+  });
+  if (entries.length === 0) return { updated: 0, skipped: 0 };
+
+  let updated = 0;
+  let skipped = 0;
+
+  await prisma.$transaction(
+    async (tx) => {
+      for (const entry of entries) {
+        const oldSoll = round2(sollStundenTag(entry.date, profil, previousChanges, holidays));
+        const newSoll = round2(sollStundenTag(entry.date, profil, currentChanges, holidays));
+
+        if (oldSoll === newSoll) { skipped++; continue; }
+        if (entry.hours === null || Math.abs(entry.hours - oldSoll) > 0.005) { skipped++; continue; }
+
+        await tx.timeEntry.update({ where: { id: entry.id }, data: { hours: newSoll } });
+        const changes = diffTimeEntryFields({ hours: entry.hours }, { hours: newSoll });
+        if (changes.length > 0) {
+          await tx.timeEntryAudit.createMany({
+            data: changes.map((c) => ({ entryId: entry.id, orgId, changedBy, field: c.field, oldValue: c.oldValue, newValue: c.newValue })),
+          });
+        }
+        updated++;
+      }
+    },
+    { timeout: 30000 }
+  );
+
+  return { updated, skipped };
 }
