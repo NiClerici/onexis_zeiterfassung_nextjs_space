@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
-import { kennzahlen, sollStundenTag, stundenAusEintrag, type HolidayInput } from "@/lib/calc";
+import { kennzahlen, sollStundenTag, stundenAusEintrag, pensumAt, type HolidayInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseYearMonthFromUrl } from "@/lib/export-helpers";
 
 // Neutrales CSV für die Übernahme in ein Swissdec-zertifiziertes
@@ -104,7 +104,11 @@ export async function GET(req: Request) {
           csvField(m.user.lastName),
           csvField(m.user.firstName),
           csvField(m.user.email),
-          csvField(m.pensum),
+          // Zum Monatsende gültiges Pensum, nicht der heute aktuelle
+          // Vertragswert (derselbe Bug wie in app/api/team/route.ts —
+          // ein Lohnexport für einen vergangenen Monat darf keine erst
+          // später in Kraft getretene Pensumsänderung zeigen).
+          csvField(pensumAt(endDate, profil, changes).pensum),
           csvField(k.soll),
           csvField(stundenByType.arbeit),
           csvField(stundenByType.ferien),

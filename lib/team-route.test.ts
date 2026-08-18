@@ -34,6 +34,10 @@ let customerId: string, projectId: string;
 // Projekt, dessen Budget exakt erreicht (nicht überschritten) wird.
 let rateLessCustomerId: string, rateLessProjectId: string;
 let exactBudgetCustomerId: string, exactBudgetProjectId: string;
+// Kunde, bei dem NIE ein Projekt erfasst wird — deckt "nur auf Kundenebene
+// verrechnen" ab (Teamsicht-Bugfix: die Kundentabelle wurde bisher nie
+// gerendert, obwohl die Route diese Aggregation längst lieferte).
+let directCustomerId: string;
 
 beforeAll(async () => {
   await prisma.organization.create({ data: { id: ORG, name: "Team Route Test Org", slug: "team-route-test-org" } });
@@ -53,7 +57,11 @@ beforeAll(async () => {
   const managerMembership = await prisma.membership.create({ data: { orgId: ORG, userId: managerId, role: "manager", entryDate: new Date("2026-01-01") } });
   managerMembershipId = managerMembership.id;
   await prisma.membership.create({ data: { orgId: ORG, userId: reportId, role: "member", managerId: managerMembershipId, entryDate: new Date("2026-01-01") } });
-  await prisma.membership.create({ data: { orgId: ORG, userId: otherMemberId, role: "member", entryDate: new Date("2026-01-01") } });
+  await prisma.membership.create({ data: { orgId: ORG, userId: otherMemberId, role: "member", entryDate: new Date("2026-01-01"), pensum: 60, weeklyHours: 40 } });
+  // Bugfix-Szenario: Pensum wechselt erst per September auf 80% — eine
+  // Abfrage für August (MONTH_QS unten) muss weiterhin 60% zeigen, nicht
+  // den heute aktuellen (zukünftigen) Wert.
+  await prisma.pensumChange.create({ data: { orgId: ORG, userId: otherMemberId, pensum: 80, weeklyHours: 40, effectiveFrom: new Date("2026-09-01") } });
   // manager ohne einen einzigen direkt unterstellten Eintrag (HARDENING.md A4)
   await prisma.membership.create({ data: { orgId: ORG, userId: loneManagerId, role: "manager", entryDate: new Date("2026-01-01") } });
 
@@ -91,10 +99,19 @@ beforeAll(async () => {
   await prisma.timeEntry.create({
     data: { userId: reportId, orgId: ORG, date: new Date("2026-08-05"), type: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0, customerId: exactBudgetCustomerId, projectId: exactBudgetProjectId, billable: true },
   });
+
+  // Kunde ohne jedes Projekt, 3h direkt verbucht — der Fall "nur Kunden
+  // verrechnen" aus dem Bugfix.
+  const directCustomer = await prisma.customer.create({ data: { orgId: ORG, name: "Direktkunde ohne Projekt", hourlyRate: 120 } });
+  directCustomerId = directCustomer.id;
+  await prisma.timeEntry.create({
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-06"), type: "arbeit", von: "08:00", bis: "11:00", pauseMin: 0, customerId: directCustomerId, billable: true },
+  });
 });
 
 afterAll(async () => {
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
+  await prisma.pensumChange.deleteMany({ where: { orgId: ORG } });
   await prisma.project.deleteMany({ where: { orgId: ORG } });
   await prisma.customer.deleteMany({ where: { orgId: ORG } });
   await prisma.membership.deleteMany({ where: { orgId: ORG } });
@@ -131,9 +148,18 @@ describe("GET /api/team — Berechtigungs-Scoping", () => {
     const userIds = body.members.map((m: any) => m.userId);
     expect(userIds).toEqual(expect.arrayContaining([ownerId, adminId, managerId, reportId, otherMemberId]));
   });
+
+  it("Pensum-Spalte zeigt das zum Periodenende gültige Pensum, nicht das heute aktuelle (Bugfix)", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${MONTH_QS}`)); // August 2026
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const other = body.members.find((m: any) => m.userId === otherMemberId);
+    expect(other.pensum).toBe(60); // NICHT 80 — der Wechsel gilt erst ab September
+  });
 });
 
-describe("GET /api/team — Kunden-/Projektsicht, Heatmap, Prognose, Feriensaldo", () => {
+describe("GET /api/team — Kunden-/Projektsicht, Heatmap, Feriensaldo", () => {
   it("liefert Projektstunden, erkennt Budgetüberschreitung, und rechnet den Umsatz aus dem Stundensatz", async () => {
     setSession(adminId, ORG, "admin");
     const res = await teamGet(req(`/api/team?${MONTH_QS}`));
@@ -148,7 +174,19 @@ describe("GET /api/team — Kunden-/Projektsicht, Heatmap, Prognose, Feriensaldo
     expect(customer.stunden).toBe(6); // die Projektstunden fliessen in die Kundensicht ein
   });
 
-  it("jedes Mitglied hat einen Feriensaldo, eine Heatmap- und eine Prognose-Wochenliste", async () => {
+  it("Kunde ohne jedes Projekt wird trotzdem mit seinen direkt verbuchten Stunden aggregiert", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+    const body = await res.json();
+    const customer = body.customers.find((c: any) => c.id === directCustomerId);
+    expect(customer).toBeTruthy();
+    expect(customer.stunden).toBe(3);
+    expect(customer.umsatz).toBe(360); // 3h * 120 CHF/h
+    // Dieser Kunde taucht bewusst NICHT in body.projects auf — es gibt kein Project.
+    expect(body.projects.find((p: any) => p.customerName === "Direktkunde ohne Projekt")).toBeUndefined();
+  });
+
+  it("jedes Mitglied hat einen Feriensaldo und eine Heatmap-Wochenliste", async () => {
     setSession(adminId, ORG, "admin");
     const res = await teamGet(req(`/api/team?${MONTH_QS}`));
     const body = await res.json();
@@ -159,9 +197,6 @@ describe("GET /api/team — Kunden-/Projektsicht, Heatmap, Prognose, Feriensaldo
     const reportHeatmap = body.heatmap.find((h: any) => h.userId === reportId);
     expect(Array.isArray(reportHeatmap.weeks)).toBe(true);
     expect(reportHeatmap.weeks.length).toBeGreaterThan(0);
-
-    const reportForecast = body.forecast.find((f: any) => f.userId === reportId);
-    expect(Array.isArray(reportForecast.weeks)).toBe(true);
   });
 
   it("totals sind über alle sichtbaren Mitglieder aggregiert", async () => {
@@ -218,7 +253,6 @@ describe("GET /api/team — Randfälle (HARDENING.md A4)", () => {
     expect(body.totals.ist).toBe(0);
     expect(body.totals.verrechnungsgrad).toBe(0); // keine Division durch 0
     expect(Array.isArray(body.heatmap)).toBe(true);
-    expect(Array.isArray(body.forecast)).toBe(true);
   });
 
   it("manager ohne direkt unterstellte Personen bekommt eine leere Genehmigungsliste, kein Crash", async () => {

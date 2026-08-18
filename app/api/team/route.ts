@@ -3,18 +3,8 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/access";
-import { teamKennzahlen, feriensaldo, wochenUebersicht, montagDerWoche, stundenAusEintrag, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
+import { teamKennzahlen, feriensaldo, wochenUebersicht, pensumAt, stundenAusEintrag, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
-
-// Wie weit die Auslastungsprognose ("geplante Auslastung der kommenden
-// Wochen", MIGRATION.md Punkt 8) nach vorne schaut — bewusst UNABHÄNGIG vom
-// gewählten Berichtszeitraum (type/year/month), da die Prognose immer ab der
-// aktuellen Woche in die Zukunft blickt, während der Berichtszeitraum
-// typischerweise ein vergangener/laufender Monat/Quartal ist. 8 Wochen ist
-// eine dokumentierte, aber willkürliche Wahl (rund zwei Monate) — kein
-// Gesetzeswert wie bei den ArG-Konstanten, einfach ein sinnvoller
-// Planungshorizont.
-const FORECAST_WEEKS = 8;
 
 export async function GET(req: Request) {
   try {
@@ -25,9 +15,6 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const { startDate, endDate } = parseExportRange(url);
     const heute = new Date();
-
-    const forecastStart = montagDerWoche(heute);
-    const forecastEnd = new Date(forecastStart.getTime() + (FORECAST_WEEKS * 7 - 1) * 24 * 60 * 60 * 1000);
 
     // Manager sieht nur sich selbst + direkt unterstellte Mitglieder,
     // admin/owner sehen die ganze Organisation — siehe listVisibleUserIds().
@@ -49,21 +36,15 @@ export async function GET(req: Request) {
     const holidaysRaw = await prisma.holiday.findMany({ where: { orgId } });
     const holidays: HolidayInput[] = holidaysRaw.map((h) => ({ date: h.date, halfDay: h.halfDay }));
 
-    // Ein Entries-Fetch pro Person deckt sowohl den Berichtszeitraum als
-    // auch das Prognosefenster ab — kennzahlen()/wochenUebersicht() filtern
-    // beide intern auf ihr jeweils übergebenes [from,to], überzählige
-        // Zeilen aus dem jeweils anderen Fenster stören nicht.
-    const queryStart = startDate.getTime() < forecastStart.getTime() ? startDate : forecastStart;
-    const queryEnd = endDate.getTime() > forecastEnd.getTime() ? endDate : forecastEnd;
-
     const teamMembers: TeamMemberInput[] = [];
     const heatmap: Array<{ userId: string; name: string; weeks: Array<{ montag: string; verrechnungsgrad: number; arbeitsstunden: number }> }> = [];
-    const forecast: Array<{ userId: string; name: string; weeks: Array<{ montag: string; auslastung: number; geplantStunden: number; sollStunden: number }> }> = [];
     const feriensaldoByUser: Record<string, { anspruch: number; bezogen: number; geplant: number; offen: number }> = {};
-    // Aktuelles (nicht historisches) Pensum für die Tabellenspalte — gleiche
-    // Wahl wie im Lohnexport (Punkt 7): die Tabelle zeigt den heute gültigen
-    // Vertragswert, nicht die historische Basis, die buildProfil() intern
-    // für sollStundenTag/pensumAt braucht.
+    // Zum Periodenende (endDate) gültiges Pensum für die Tabellenspalte —
+    // NICHT membership.pensum (der heute aktuelle Wert), sonst zeigt eine
+    // Abfrage für einen vergangenen Monat ein Pensum, das erst später in
+    // Kraft trat (Bugfix: April 2026 zeigte "80%", obwohl der Wechsel von
+    // 60% auf 80% erst per September 2026 galt). pensumAt() ist dieselbe
+    // Auflösung, die sollStundenTag()/Soll unten schon korrekt verwendet.
     const pensumByUser: Record<string, number> = {};
     // Für die Kunden-/Projektsicht: alle "arbeit"-Einträge der sichtbaren
     // Mitglieder im Berichtszeitraum, projekt-/kundenbezogen aggregiert.
@@ -81,7 +62,7 @@ export async function GET(req: Request) {
     const jahrEnde = new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31));
     const [alleChanges, alleEntries, allePayouts, alleFerien] = await Promise.all([
       prisma.pensumChange.findMany({ where: { userId: { in: alleUserIds }, orgId }, orderBy: { effectiveFrom: "asc" } }),
-      prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, date: { gte: queryStart, lte: queryEnd } } }),
+      prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
       prisma.overtimePayout.findMany({ where: { userId: { in: alleUserIds }, orgId, date: { gte: startDate, lte: endDate } } }),
       prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, type: "ferien", date: { gte: jahrStart, lte: jahrEnde } } }),
     ]);
@@ -118,20 +99,13 @@ export async function GET(req: Request) {
 
       const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
       feriensaldoByUser[m.userId] = fs;
-      pensumByUser[m.userId] = m.pensum;
+      pensumByUser[m.userId] = pensumAt(endDate, profil, changes).pensum;
 
       const heatmapWochen = wochenUebersicht(eintraege, profil, changes, holidays, startDate, endDate);
       heatmap.push({
         userId: m.userId,
         name,
         weeks: heatmapWochen.map((w) => ({ montag: w.montag, verrechnungsgrad: w.verrechnungsgrad, arbeitsstunden: w.arbeitsstunden })),
-      });
-
-      const forecastWochen = wochenUebersicht(eintraege, profil, changes, holidays, forecastStart, forecastEnd);
-      forecast.push({
-        userId: m.userId,
-        name,
-        weeks: forecastWochen.map((w) => ({ montag: w.montag, auslastung: w.auslastung, geplantStunden: w.arbeitsstunden, sollStunden: w.sollStunden })),
       });
 
       for (const e of entries) {
@@ -185,7 +159,6 @@ export async function GET(req: Request) {
       members: membersWithFerien,
       totals: result.totals,
       heatmap,
-      forecast,
       customers,
       projects,
     });

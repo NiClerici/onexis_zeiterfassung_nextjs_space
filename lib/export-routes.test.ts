@@ -47,7 +47,11 @@ beforeAll(async () => {
   await prisma.membership.create({ data: { orgId: ORG, userId: ownerId, role: "owner", entryDate: new Date("2026-01-01") } });
   await prisma.membership.create({ data: { orgId: ORG, userId: adminId, role: "admin", entryDate: new Date("2026-01-01") } });
   await prisma.membership.create({ data: { orgId: ORG, userId: memberAId, role: "member", entryDate: new Date("2026-01-01") } });
-  await prisma.membership.create({ data: { orgId: ORG, userId: memberBId, role: "member", entryDate: new Date("2026-01-01") } });
+  await prisma.membership.create({ data: { orgId: ORG, userId: memberBId, role: "member", entryDate: new Date("2026-01-01"), pensum: 60, weeklyHours: 40 } });
+  // Bugfix-Szenario (wie im Teamsicht-Test): Pensum wechselt erst per
+  // Oktober auf 80% — der Lohnexport für September (MONTH_QS unten) muss
+  // weiterhin 60% zeigen.
+  await prisma.pensumChange.create({ data: { orgId: ORG, userId: memberBId, pensum: 80, weeklyHours: 40, effectiveFrom: new Date("2026-10-01") } });
 
   await prisma.timeEntry.create({
     data: { userId: memberAId, orgId: ORG, date: new Date("2026-09-03"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30 },
@@ -56,6 +60,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
+  await prisma.pensumChange.deleteMany({ where: { orgId: ORG } });
   await prisma.membership.deleteMany({ where: { orgId: ORG } });
   await prisma.user.deleteMany({ where: { id: { in: [ownerId, adminId, memberAId, memberBId] } } });
   await prisma.organization.deleteMany({ where: { id: ORG } });
@@ -142,6 +147,17 @@ describe("GET /api/export/payroll — Lohnexport CSV (immer org-weit, admin/owne
     expect(memberARow).toBeTruthy();
     const cols = memberARow!.split(";");
     expect(cols[6]).toBe("8,50"); // Arbeitsstunden-Spalte, Komma als Dezimaltrennzeichen
+  });
+
+  it("Pensum-Spalte zeigt das zum Monatsende gültige Pensum, nicht das heute aktuelle (Bugfix)", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await payrollGet(req("/api/export/payroll?year=2026&month=9")); // September
+    const text = await res.text();
+    const lines = text.replace(/^﻿/, "").trim().split("\r\n");
+    const memberBRow = lines.find((l) => l.includes(memberBId));
+    expect(memberBRow).toBeTruthy();
+    const cols = memberBRow!.split(";");
+    expect(cols[4]).toBe("60,00"); // NICHT 80,00 — der Wechsel gilt erst ab Oktober
   });
 });
 

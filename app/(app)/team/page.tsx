@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
-import { Gauge, Download, ArrowUpDown, Search, Briefcase, AlertTriangle, TrendingUp } from "lucide-react";
+import { Gauge, Download, ArrowUpDown, Search, Briefcase, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
 
@@ -32,9 +32,6 @@ interface WeekCell {
   montag: string;
   verrechnungsgrad?: number;
   arbeitsstunden?: number;
-  auslastung?: number;
-  geplantStunden?: number;
-  sollStunden?: number;
 }
 
 interface HeatmapRow {
@@ -66,7 +63,6 @@ interface TeamData {
   members: TeamMember[];
   totals: { soll: number; ist: number; ueberstunden: number; kundenstunden: number; verrechnungsgrad: number };
   heatmap: HeatmapRow[];
-  forecast: HeatmapRow[];
   customers: CustomerRow[];
   projects: ProjectRow[];
 }
@@ -296,68 +292,78 @@ export default function TeamsichtPage() {
             </div>
           </motion.div>
 
-          {/* Kunden-/Projektsicht */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Briefcase className="w-4 h-4 text-primary" /> {t("teamsicht.customersTitle")}</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-muted-foreground border-b border-border/50">
-                    <th className="py-2 pr-3 font-medium">{t("teamsicht.colProject")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("teamsicht.colCustomer")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("teamsicht.colHours")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("teamsicht.colBudget")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("teamsicht.colRevenue")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.projects.map((p) => (
-                    <tr key={p.id} className={`border-b border-border/30 last:border-0 ${p.ueberzogen ? "bg-red-50 dark:bg-red-950/20" : ""}`}>
-                      <td className="py-2 pr-3 font-medium flex items-center gap-1.5">
-                        {p.ueberzogen && <span title={t("teamsicht.overBudget")}><AlertTriangle className="w-3.5 h-3.5 text-red-500" /></span>}
-                        {p.name}
-                      </td>
-                      <td className="py-2 pr-3">{p.customerName}</td>
-                      <td className="py-2 pr-3 font-mono">{p.stunden.toFixed(1)}h</td>
-                      <td className={`py-2 pr-3 font-mono ${p.ueberzogen ? "text-red-500 font-semibold" : ""}`}>{p.budgetHours != null ? `${p.budgetHours.toFixed(1)}h` : "–"}</td>
-                      <td className="py-2 pr-3 font-mono">{p.umsatz.toFixed(2)} CHF</td>
-                    </tr>
-                  ))}
-                  {data.projects.length === 0 && (
-                    <tr><td colSpan={5} className="py-4 text-center text-muted-foreground text-xs">{t("teamsicht.noData")}</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </motion.div>
+          {/* Kunden-/Projektsicht — zwei Tabellen in einer Karte: Kunden
+              (aggregiert, auch für direkt ohne Projekt verbuchte Stunden)
+              und Projekte (granular, mit Budget). Vorher wurde nur
+              data.projects gerendert; data.customers kam von der Route
+              zwar schon zurück, war aber nirgends sichtbar — Organisationen,
+              die nur auf Kundenebene verrechnen (kein Project-Datensatz
+              angelegt), sahen deshalb immer "Keine Daten", obwohl echte
+              verrechenbare Stunden vorlagen. */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card rounded-2xl p-4 space-y-5" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <h2 className="text-sm font-display font-semibold flex items-center gap-2"><Briefcase className="w-4 h-4 text-primary" /> {t("teamsicht.customersTitle")}</h2>
 
-          {/* Prognose */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> {t("teamsicht.forecastTitle")}</h2>
-            <p className="text-xs text-muted-foreground mb-3">{t("teamsicht.forecastHint")}</p>
-            <div className="overflow-x-auto">
-              <table className="text-xs border-separate" style={{ borderSpacing: "3px" }}>
-                <thead>
-                  <tr>
-                    <th className="text-left font-medium text-muted-foreground pr-2 sticky left-0 bg-card">{t("teamsicht.colName")}</th>
-                    {(data.forecast[0]?.weeks ?? []).map((w) => (
-                      <th key={w.montag} className="font-medium text-muted-foreground px-1 whitespace-nowrap">{weekLabel(w.montag)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.forecast.map((row) => (
-                    <tr key={row.userId}>
-                      <td className="text-left pr-2 font-medium whitespace-nowrap sticky left-0 bg-card">{row.name}</td>
-                      {row.weeks.map((w) => (
-                        <td key={w.montag} className={`w-9 h-7 text-center rounded-md ${heatColor(w.auslastung)}`} title={`${weekLabel(w.montag)}: ${w.auslastung?.toFixed(0)}% (${w.geplantStunden?.toFixed(1)}h / ${w.sollStunden?.toFixed(1)}h)`}>
-                          {w.auslastung !== undefined ? Math.round(w.auslastung) : ""}
-                        </td>
-                      ))}
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground mb-2">{t("teamsicht.customersSubtitle")}</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border/50">
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colCustomer")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colHours")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colRate")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colRevenue")}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.customers.map((c) => (
+                      <tr key={c.id} className="border-b border-border/30 last:border-0">
+                        <td className="py-2 pr-3 font-medium">{c.name}</td>
+                        <td className="py-2 pr-3 font-mono">{c.stunden.toFixed(1)}h</td>
+                        <td className="py-2 pr-3 font-mono">{c.hourlyRate != null ? `${c.hourlyRate.toFixed(2)} CHF` : "–"}</td>
+                        <td className="py-2 pr-3 font-mono">{c.hourlyRate != null ? `${c.umsatz.toFixed(2)} CHF` : "–"}</td>
+                      </tr>
+                    ))}
+                    {data.customers.length === 0 && (
+                      <tr><td colSpan={4} className="py-4 text-center text-muted-foreground text-xs">{t("teamsicht.noData")}</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-muted-foreground mb-2">{t("teamsicht.projectsSubtitle")}</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border/50">
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colProject")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colCustomer")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colHours")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colBudget")}</th>
+                      <th className="py-2 pr-3 font-medium">{t("teamsicht.colRevenue")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.projects.map((p) => (
+                      <tr key={p.id} className={`border-b border-border/30 last:border-0 ${p.ueberzogen ? "bg-red-50 dark:bg-red-950/20" : ""}`}>
+                        <td className="py-2 pr-3 font-medium flex items-center gap-1.5">
+                          {p.ueberzogen && <span title={t("teamsicht.overBudget")}><AlertTriangle className="w-3.5 h-3.5 text-red-500" /></span>}
+                          {p.name}
+                        </td>
+                        <td className="py-2 pr-3">{p.customerName}</td>
+                        <td className="py-2 pr-3 font-mono">{p.stunden.toFixed(1)}h</td>
+                        <td className={`py-2 pr-3 font-mono ${p.ueberzogen ? "text-red-500 font-semibold" : ""}`}>{p.budgetHours != null ? `${p.budgetHours.toFixed(1)}h` : "–"}</td>
+                        <td className="py-2 pr-3 font-mono">{p.umsatz.toFixed(2)} CHF</td>
+                      </tr>
+                    ))}
+                    {data.projects.length === 0 && (
+                      <tr><td colSpan={5} className="py-4 text-center text-muted-foreground text-xs">{t("teamsicht.noData")}</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </motion.div>
         </>
