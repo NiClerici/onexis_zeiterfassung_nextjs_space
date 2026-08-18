@@ -83,7 +83,7 @@ Log-Datei mit `ubuntu:ubuntu`-Rechten vorbereitet.
 Keine Zugangsdaten in dieser Datei — Access Key und Secret Key liegen
 ausschliesslich in `~/.aws/credentials` auf dem VPS.
 
-### - [ ] 2. Server-Härtung
+### - [x] 2. Server-Härtung
 
 `ufw` (default deny incoming, allow 22/80/443), `fail2ban` mit
 sshd-Jail, `unattended-upgrades`. `PasswordAuthentication no` ist bereits
@@ -96,6 +96,28 @@ Infomaniak-Manager.
 Verify: aus einer **neuen** SSH-Sitzung `ufw status verbose` und
 `fail2ban-client status sshd`; von aussen 22/80/443 offen, ein
 willkürlicher vierter Port zu; Healthcheck weiterhin grün.
+
+**Ergebnis (18.08.2026):** `ufw`, `fail2ban`, `unattended-upgrades`
+installiert. Reihenfolge eingehalten — erst Regeln fuer 22/80/443
+gesetzt, danach `ufw enable`. Status: `active`, Default incoming
+`deny`, Default outgoing `allow`, IPv4+IPv6-Regeln fuer alle drei Ports.
+
+`fail2ban`: `jail.local` mit explizitem `[sshd]`-Jail (maxretry 5,
+bantime 3600s, findtime 600s) statt sich auf den Paket-Default zu
+verlassen. Aktiv, 0 Bans bislang.
+
+`unattended-upgrades`: `20auto-upgrades` gesetzt (Update-Package-Lists
+und Unattended-Upgrade je "1"), Trockenlauf ohne Fehler ("All upgrades
+installed"), beide systemd-Timer (`apt-daily`, `apt-daily-upgrade`)
+enabled.
+
+`PasswordAuthentication no` war bereits aktiv (siehe Deployment-Loop) —
+erneut bestaetigt, nichts geaendert.
+
+**Verify bestanden:** neue SSH-Sitzung funktioniert (Schluessel-Auth
+unveraendert), `curl https://zeit-onexis.duckdns.org/api/health` weiterhin
+`{"status":"ok","database":"ok"}`, Port 8080 (stellvertretend fuer
+"alles ausser 22/80/443") von aussen zu.
 
 ### - [ ] 3. Einladungslink im Dialog statt per Mail
 
