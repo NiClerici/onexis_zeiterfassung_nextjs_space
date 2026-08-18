@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText } from "lucide-react";
+import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -143,6 +143,14 @@ export default function ProfilePage() {
   const [payrollYear, setPayrollYear] = useState(() => new Date().getFullYear());
   const [payrollMonth, setPayrollMonth] = useState(() => new Date().getMonth() + 1);
   const [exportingPayroll, setExportingPayroll] = useState(false);
+
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importDone, setImportDone] = useState(false);
+  const [importPreview, setImportPreview] = useState<{
+    imported: number; skippedExisting: number; skippedLocked: number; totalRows: number;
+    dateFrom: string | null; dateTo: string | null; errors: { rowNumber: number; message: string }[];
+  } | null>(null);
 
   const fetchProfile = useCallback(async () => {
     setLoading(true);
@@ -535,6 +543,41 @@ export default function ProfilePage() {
   const handleExport = async () => {
     const url = `/api/export?${buildRangeQuery()}${buildScopeQuery()}`;
     await downloadBlob(url, `zeiterfassung_${exportType}_${Date.now()}.xlsx`, (msg) => toast.error(msg));
+  };
+
+  const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImportFile(e?.target?.files?.[0] ?? null);
+    setImportPreview(null);
+    setImportDone(false);
+  };
+
+  // Zwei Aufrufe derselben Route (Betrieb.md Punkt 4): erst "preview"
+  // (schreibt nichts), erst nach Bestätigung "commit" — beide mit derselben
+  // Datei aus dem State, damit man nicht zweimal auswählen muss.
+  const runImport = async (mode: "preview" | "commit") => {
+    if (!importFile) return;
+    setImportLoading(true);
+    try {
+      const fd = new FormData();
+      fd.set("file", importFile);
+      fd.set("mode", mode);
+      const res = await fetch("/api/import/timesheet", { method: "POST", body: fd });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        setImportPreview(data);
+        if (mode === "commit") {
+          setImportDone(true);
+          toast.success(t("profile.importDone", { count: String(data?.imported ?? 0) }));
+        }
+      } else {
+        toast.error(data?.error ?? t("profile.importFileError"));
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(t("profile.importFileError"));
+    } finally {
+      setImportLoading(false);
+    }
   };
 
   const handleArgControlExport = async () => {
@@ -944,6 +987,64 @@ export default function ProfilePage() {
         >
           <FileSpreadsheet className="w-4 h-4" /> {exportingArgControl ? t("common.loading") : t("profile.exportArgControl")}
         </button>
+      </motion.div>
+
+      {/* Alt-Import (Betrieb.md Punkt 4) — nur für das eigene Konto,
+          kein Admin-Import für Dritte. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.26 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Upload className="w-4 h-4 text-primary" /> {t("profile.import")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("profile.importHint")}</p>
+        <input
+          type="file"
+          accept=".xlsx"
+          onChange={handleImportFileChange}
+          className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-secondary file:text-foreground file:text-sm file:font-medium hover:file:bg-accent file:transition"
+        />
+        {importFile && !importPreview && (
+          <button
+            onClick={() => runImport("preview")}
+            disabled={importLoading}
+            className="w-full mt-3 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50"
+          >
+            {importLoading ? t("common.loading") : t("profile.importPreview")}
+          </button>
+        )}
+        {importPreview && (
+          <div className="mt-3 bg-secondary rounded-xl p-3 text-sm space-y-1.5">
+            <p>{t("profile.importPreviewCount", { imported: String(importPreview.imported), total: String(importPreview.totalRows) })}</p>
+            {importPreview.dateFrom && importPreview.dateTo && (
+              <p className="text-xs text-muted-foreground">{importPreview.dateFrom} – {importPreview.dateTo}</p>
+            )}
+            {importPreview.skippedExisting > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.importSkippedExisting", { count: String(importPreview.skippedExisting) })}</p>
+            )}
+            {importPreview.skippedLocked > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.importSkippedLocked", { count: String(importPreview.skippedLocked) })}</p>
+            )}
+            {importPreview.errors.length > 0 && (
+              <details className="text-xs text-destructive">
+                <summary className="cursor-pointer">{t("profile.importErrors", { count: String(importPreview.errors.length) })}</summary>
+                <ul className="mt-1 list-disc list-inside space-y-0.5">
+                  {importPreview.errors.slice(0, 30).map((e, i) => (
+                    <li key={i}>Zeile {e.rowNumber}: {e.message}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {!importDone && importPreview.imported > 0 && (
+              <button
+                onClick={() => runImport("commit")}
+                disabled={importLoading}
+                className="w-full mt-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              >
+                {importLoading ? t("common.loading") : t("profile.importCommit", { count: String(importPreview.imported) })}
+              </button>
+            )}
+            {importDone && (
+              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.importDone", { count: String(importPreview.imported) })}</p>
+            )}
+          </div>
+        )}
       </motion.div>
 
       {isOrgAdmin && (

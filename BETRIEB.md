@@ -147,7 +147,7 @@ Verify: Einladung anlegen → Dialog zeigt Link → Beitritt im privaten
 Fenster klappt → zweiter Aufruf desselben Links schlägt fehl. Test für
 die Route.
 
-### - [ ] 4. Import der Alt-Exporte (Excel)
+### - [x] 4. Import der Alt-Exporte (Excel)
 
 Vorlage ist der Jahresexport einer älteren Fassung dieser App
 (Blätter `Tageszeiten`, `Kundenstunden`, `Zusammenfassung`). Nur
@@ -179,6 +179,45 @@ varianten, kaputte Zeilen, Summenzeile, gesperrter Monat). Danach echter
 Durchlauf mit Nicos Datei, Stundensumme gegen das Blatt
 `Zusammenfassung` halten: Arbeitsstunden 422.0h, Ferienstunden 48.0h,
 Feiertagsstunden 32.8h.
+
+**Ergebnis (18.08.2026):** `lib/import-timesheet.ts` (reiner Parser,
+kein Prisma) liest ueber Spaltenueberschriften — Pflichtspalten Datum/
+Stunden/Typ, Von/Bis/Notiz optional. Typ-Zuordnung ueber die Umkehrung
+von `TYPE_LABELS`; unbekannte Typen werden als Zeilenfehler gemeldet,
+nicht still auf "arbeit" gemappt. Summenzeilen ("Total" in irgendeiner
+Zelle) und Leerzeilen werden uebersprungen. `buildArbeitszeit` aus
+`app/api/time-entries/bulk-apply/route.ts` nach `lib/arbeitszeit.ts`
+gezogen (Verhalten unveraendert, nur der Ort), wird jetzt von beiden
+Stellen genutzt.
+
+`POST /api/import/timesheet` (`requireOrg()`, schreibt immer auf die
+eigene `userId`) prueft Konflikte gegen die Datenbank: vorhandene
+Eintraege am selben Datum werden uebersprungen, nicht ueberschrieben.
+Gesperrte Monate blockieren nur fuer Rolle `member` — dieselbe Regel wie
+ueberall sonst (`lib/access.ts`, `assertMonthEditable`), admin/manager/
+owner duerfen auch in gesperrten Monaten importieren. Zwei Modi
+(`preview`/`commit`) mit identischer Konfliktpruefung.
+
+Oberflaeche unter `app/(app)/profile`: Datei waehlen → Vorschau (Anzahl,
+Zeitraum, uebersprungene Zeilen, Fehlerliste aufklappbar) → Bestaetigen.
+
+**Verifikation gegen Nicos echte Datei**
+(`zeiterfassung_year_1787054338273.xlsx`, Export des Vorgaengersystems):
+alle 159 Zeilen fehlerfrei geparst. Summen bis zum Exportzeitpunkt
+(18.08.2026, aus dem Dateinamen dekodiert) stimmen exakt mit dem Blatt
+"Zusammenfassung" ueberein — Arbeitsstunden 422.0h, Ferienstunden 48.0h,
+Feiertagsstunden 32.8h (Summe 502.8h = "Ist-Stunden bis heute"). Die
+uebrigen 546.4h sind in die Zukunft datierte Eintraege ("Geplante
+Stunden") und werden beim Import mit importiert, wie es die App auch bei
+selbst erfassten Zukunftsdaten tut.
+
+Zwei neue Testdateien: `lib/import-timesheet.test.ts` (7 Faelle, reiner
+Parser: beide Spaltenvarianten, Summenzeile, fehlende Pflichtspalte,
+fehlendes Blatt, defekte Zeilen, Leerzeilen) und
+`lib/import-timesheet-route.test.ts` (4 Faelle: preview schreibt nichts,
+commit schreibt und ueberspringt beim zweiten Lauf Duplikate, gesperrter
+Monat blockiert member aber nicht admin, Zeilenfehler stoppen nicht die
+uebrigen gueltigen Zeilen). Volle Suite: 316/316 Tests, 21 Dateien.
 
 ### - [ ] 5. OPTIONAL: Passwort zurücksetzen ohne Mail
 
