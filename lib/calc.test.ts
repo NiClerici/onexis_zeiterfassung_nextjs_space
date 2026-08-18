@@ -11,6 +11,7 @@ import {
   type Profil,
   type HolidayInput,
 } from "./calc";
+import { buildArbeitszeit } from "./arbeitszeit";
 
 const testProfil: Profil = {
   wochenstunden: 40,
@@ -94,6 +95,34 @@ describe("stundenAusEintrag", () => {
   it("arbeit ohne von/bis fällt auf hours zurück", () => {
     const stunden = stundenAusEintrag({ typ: "arbeit", hours: 6.5 }, 4.8);
     expect(stunden).toBe(6.5);
+  });
+});
+
+// Bugfix components/day-entry-dialog.tsx: der Umschalter "Von/Bis" ↔
+// "Stunden direkt" muss beim Wechsel tatsächlich umrechnen, nicht nur das
+// Anzeige-Flag setzen. Beide Richtungen laufen über stundenAusEintrag()
+// bzw. buildArbeitszeit() — hier als reines Rechenpaar getestet, ohne
+// Component-Test-Infrastruktur (im Projekt sonst nicht verwendet).
+describe("Stunden-Umschalter im Tagesdialog — Hin-/Rückrechnung", () => {
+  it("Von/Bis → Stunden übernimmt die tatsächlich eingetragene Zeit", () => {
+    // 07:45–15:45, 45min Pause — genau das gemeldete Bug-Szenario.
+    const stunden = stundenAusEintrag({ typ: "arbeit", von: "07:45", bis: "15:45", pauseMin: 45 }, 0);
+    expect(stunden).toBeCloseTo(7.25, 5);
+  });
+
+  it("Stunden → Von/Bis normalisiert (Start 08:00, Pause nach Schwelle), Gesamtstunden bleiben erhalten", () => {
+    // Rückrichtung ist bewusst NICHT symmetrisch zur Hinrichtung —
+    // buildArbeitszeit setzt immer 08:00 als Start, nicht die ursprüngliche
+    // Zeit. Der Test hält fest, was tatsächlich passiert, nicht eine
+    // Symmetrie, die es nicht gibt.
+    const { von, bis, pauseMin } = buildArbeitszeit(7.25);
+    expect(von).toBe("08:00");
+    expect(bis).toBe("15:45");
+    expect(pauseMin).toBe(30);
+    // Aber: die daraus resultierenden Gesamtstunden entsprechen wieder 7.25 —
+    // nur die Aufteilung (Startzeit/Pausenlänge) hat sich geändert.
+    const zurueck = stundenAusEintrag({ typ: "arbeit", von, bis, pauseMin }, 0);
+    expect(zurueck).toBeCloseTo(7.25, 5);
   });
 });
 

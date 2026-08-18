@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
-import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
+import { EINTRAG_TYPEN, stundenAusEintrag, type EintragTyp } from "@/lib/calc";
 import { buildArbeitszeit } from "@/lib/arbeitszeit";
 
 export interface DayTimeEntry {
@@ -308,14 +308,31 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            onClick={() => updateRow(row.key, { hoursMode: false })}
+                            onClick={() => {
+                              // Beim Wechsel zu Von/Bis die getippte Stundenzahl
+                              // übernehmen, statt stumm auf die alten Von/Bis-
+                              // Werte zurückzufallen (Bug: bisher blieb beim
+                              // Umschalten 08:00-17:00 stehen, egal was im
+                              // Stunden-Feld stand).
+                              const hours = Math.max(0, Math.min(24, parseFloat(row.hours) || 0));
+                              const { von, bis, pauseMin } = buildArbeitszeit(hours);
+                              updateRow(row.key, { hoursMode: false, von, bis, pauseMin: String(pauseMin) });
+                            }}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${!row.hoursMode ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-accent"}`}
                           >
                             {t("calendar.modeVonBis")}
                           </button>
                           <button
                             type="button"
-                            onClick={() => updateRow(row.key, { hoursMode: true })}
+                            onClick={() => {
+                              // Umgekehrt: die tatsächlich eingetragene Zeit in
+                              // Stunden umrechnen, statt weiterhin das
+                              // Tagessoll aus der Vorbelegung anzuzeigen (Bug,
+                              // siehe oben — gleicher Fehler in Gegenrichtung).
+                              const pauseMin = Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0));
+                              const hours = stundenAusEintrag({ typ: "arbeit", von: row.von, bis: row.bis, pauseMin }, 0);
+                              updateRow(row.key, { hoursMode: true, hours: (Math.round(hours * 100) / 100).toFixed(2) });
+                            }}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${row.hoursMode ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-accent"}`}
                           >
                             {t("calendar.modeHours")}
