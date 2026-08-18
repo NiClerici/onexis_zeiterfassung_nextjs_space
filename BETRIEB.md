@@ -36,7 +36,7 @@ und landet auf GitHub.
 
 ---
 
-### - [ ] 1. Backups nach Infomaniak Swiss Backup
+### - [x] 1. Backups nach Infomaniak Swiss Backup
 
 `deploy/backup.sh` ist fertig; die Dump/Restore-Mechanik wurde laut
 `deploy/README.md` lokal gegen eine echte Datenbank verifiziert (alle 16
@@ -53,6 +53,35 @@ vergleichen, Wegwerf-DB löschen. `deploy/restore.sh` dabei nicht
 verwenden — es überschreibt die Produktivdatenbank.
 
 Verify: Datei im Bucket mit Grösse > 0 **und** bestandener Restore-Test.
+
+**Ergebnis (18.08.2026):** Swiss-Backup-Produkt bestellt (Tarif "Device",
+Backup Cloud, nicht Acronis) — die Zugangsdaten entstehen erst NACH der
+Bestellung im Produkt selbst unter "Manage my devices" → "Add device" →
+Typ S3, nicht auf der Bestellseite. Angelegtes S3-Device heisst
+`onexis-zeiterfassung`, Endpoint `https://s3.swiss-backup02.infomaniak.com`,
+Standort 02. Auf dem VPS `awscli` (1.22.34) installiert,
+`aws configure` interaktiv von Nico ausgefuehrt (Region `us-east-1` —
+reiner AWS-CLI-Pflichtwert fuer die Signatur, keine Aussage ueber den
+tatsaechlichen Speicherort, der liegt fest bei Infomaniak Schweiz).
+
+Bucket `onexis-zeiterfassung-backups` angelegt (statt des von Infomaniak
+vorgegebenen generischen `default`-Buckets). `S3_ENDPOINT` und
+`S3_BUCKET` an die `.env` auf dem VPS angehaengt.
+
+Erster Lauf von `deploy/backup.sh`: Dump 42217 Bytes, erfolgreich nach
+S3 hochgeladen. **Restore-Test bestanden:** Dump aus S3 geladen, in eine
+Wegwerf-Datenbank `zeiterfassung_restoretest` zurueckgespielt (NICHT in
+`zeiterfassung`, `deploy/restore.sh` nicht verwendet), alle 17 Tabellen
+(16 fachliche + `_prisma_migrations`) mit identischen Zeilenzahlen wie
+im Original — Diff leer. Wegwerf-DB und temporaere Dateien danach
+entfernt.
+
+Cronjob taeglich 03:00 eingerichtet:
+`cd /home/ubuntu/zeiterfassung && ./deploy/backup.sh >> /var/log/zeiterfassung-backup.log 2>&1`,
+Log-Datei mit `ubuntu:ubuntu`-Rechten vorbereitet.
+
+Keine Zugangsdaten in dieser Datei — Access Key und Secret Key liegen
+ausschliesslich in `~/.aws/credentials` auf dem VPS.
 
 ### - [ ] 2. Server-Härtung
 
