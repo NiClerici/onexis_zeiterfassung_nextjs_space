@@ -113,7 +113,12 @@ export async function POST(req: Request) {
         `Falls du das nicht erwartet hast, kannst du diese E-Mail ignorieren.`,
     });
 
-    return NextResponse.json({ success: true });
+    // inviteUrl zusätzlich zurückgeben (nicht nur per Mail verschicken):
+    // ohne konfiguriertes SMTP landet die Mail nur im Server-Log, die
+    // Oberfläche zeigt den Link stattdessen direkt zum Kopieren an. Der
+    // Klartext-Token existiert ohnehin nur in diesem Moment — gespeichert
+    // wird ausschliesslich tokenHash (Betrieb.md Punkt 3).
+    return NextResponse.json({ success: true, inviteUrl });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("POST invitations error:", error);

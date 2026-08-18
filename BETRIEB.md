@@ -119,7 +119,7 @@ unveraendert), `curl https://zeit-onexis.duckdns.org/api/health` weiterhin
 `{"status":"ok","database":"ok"}`, Port 8080 (stellvertretend fuer
 "alles ausser 22/80/443") von aussen zu.
 
-### - [ ] 3. Einladungslink im Dialog statt per Mail
+### - [x] 3. Einladungslink im Dialog statt per Mail
 
 Entscheid vom 18.08.: kein SMTP-Anbieter, stattdessen Link direkt in der
 Oberfläche zum Kopieren.

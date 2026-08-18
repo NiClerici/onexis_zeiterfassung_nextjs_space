@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Users, UserPlus, ChevronDown, ChevronUp, Trash2, TrendingUp, Lock, Unlock } from "lucide-react";
+import { Users, UserPlus, ChevronDown, ChevronUp, Trash2, TrendingUp, Lock, Unlock, Copy, Check, RefreshCw } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 
 interface Member {
   membershipId: string;
@@ -72,6 +73,9 @@ export default function TeamPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("member");
   const [inviting, setInviting] = useState(false);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<{ email: string; url: string } | null>(null);
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
 
   const [pensumByUser, setPensumByUser] = useState<Record<string, PensumChange[]>>({});
   const [newPensum, setNewPensum] = useState("");
@@ -205,7 +209,12 @@ export default function TeamPage() {
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
       });
       if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
         toast.success(t("team.inviteSent"));
+        if (data?.inviteUrl) {
+          setInviteLinkCopied(false);
+          setInviteLink({ email: inviteEmail.trim(), url: data.inviteUrl });
+        }
         setInviteEmail("");
         await fetchInvitations();
       } else {
@@ -213,6 +222,37 @@ export default function TeamPage() {
         toast.error(data?.error ?? t("profile.error"));
       }
     } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setInviting(false); }
+  };
+
+  // "Link neu erzeugen" für eine bestehende Einladung: ruft dieselbe Route
+  // erneut mit E-Mail + Rolle der bestehenden Einladung auf. Die Route
+  // entwertet dabei die alte Einladung selbst (siehe app/api/invitations/
+  // route.ts) — der bisherige Link ist danach ungültig, nur der neue zählt.
+  const regenerateInvite = async (inv: InvitationRow) => {
+    setRegeneratingId(inv.id);
+    try {
+      const res = await fetch("/api/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inv.email, role: inv.role }),
+      });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        setInviteLinkCopied(false);
+        setInviteLink({ email: inv.email, url: data?.inviteUrl });
+        await fetchInvitations();
+      } else {
+        toast.error(data?.error ?? t("profile.error"));
+      }
+    } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setRegeneratingId(null); }
+  };
+
+  const copyInviteLink = async () => {
+    if (!inviteLink?.url) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink.url);
+      setInviteLinkCopied(true);
+    } catch (err) { console.error(err); toast.error(t("profile.error")); }
   };
 
   const revokeInvite = async (id: string) => {
@@ -285,7 +325,17 @@ export default function TeamPage() {
             {invitations.filter((i) => i.status === "ausstehend").map((inv) => (
               <div key={inv.id} className="flex items-center justify-between bg-secondary rounded-xl px-3 py-2 text-sm">
                 <span>{inv.email} <span className="text-muted-foreground text-xs">({ROLE_LABELS[inv.role] ?? inv.role})</span></span>
-                <button onClick={() => revokeInvite(inv.id)} className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><Trash2 className="w-3.5 h-3.5" /></button>
+                <span className="flex items-center gap-1">
+                  <button
+                    onClick={() => regenerateInvite(inv)}
+                    disabled={regeneratingId === inv.id}
+                    title={t("team.inviteRegenerate")}
+                    className="p-1 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${regeneratingId === inv.id ? "animate-spin" : ""}`} />
+                  </button>
+                  <button onClick={() => revokeInvite(inv.id)} className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><Trash2 className="w-3.5 h-3.5" /></button>
+                </span>
               </div>
             ))}
           </div>
@@ -446,6 +496,30 @@ export default function TeamPage() {
           </div>
         )}
       </motion.div>
+
+      <Dialog open={Boolean(inviteLink)} onOpenChange={(open) => { if (!open) setInviteLink(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("team.inviteLinkTitle", { email: inviteLink?.email ?? "" })}</DialogTitle>
+            <DialogDescription>{t("team.inviteLinkDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 min-w-0 truncate px-3 py-2 rounded-xl bg-secondary text-xs">{inviteLink?.url}</code>
+            <button
+              onClick={copyInviteLink}
+              className="shrink-0 px-3 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5"
+            >
+              {inviteLinkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {inviteLinkCopied ? t("team.inviteLinkCopied") : t("team.inviteLinkCopy")}
+            </button>
+          </div>
+          <DialogFooter>
+            <button onClick={() => setInviteLink(null)} className="px-4 py-2 rounded-xl bg-secondary text-sm font-medium hover:opacity-80 transition">
+              {t("team.inviteLinkClose")}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
