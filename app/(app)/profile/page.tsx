@@ -119,6 +119,19 @@ export default function ProfilePage() {
   const [newProjectBudget, setNewProjectBudget] = useState("");
   const [savingProject, setSavingProject] = useState(false);
 
+  // Kundenstunden monatlich (Plan "Kundenstunden monatlich statt täglich",
+  // Teil 2 — Erfassung). cmDirectHours: Stunden direkt beim Kunden
+  // (CustomerMonth ohne projectId), cmProjectHours: Stunden pro Projekt
+  // (mit projectId) — beides kann parallel befüllt sein, siehe
+  // app/api/team/route.ts Kommentar zu CustomerMonth-Aggregation.
+  const [cmMonth, setCmMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
+  const [cmDirectHours, setCmDirectHours] = useState<Record<string, string>>({});
+  const [cmProjectHours, setCmProjectHours] = useState<Record<string, string>>({});
+  const [cmExpanded, setCmExpanded] = useState<Record<string, boolean>>({});
+  const [cmArbeitsstunden, setCmArbeitsstunden] = useState(0);
+  const [cmLoading, setCmLoading] = useState(false);
+  const [cmSaving, setCmSaving] = useState(false);
+
   // Overtime payouts state
   const [overtimePayouts, setOvertimePayouts] = useState<OvertimePayoutData[]>([]);
   const [payoutDate, setPayoutDate] = useState("");
@@ -219,6 +232,26 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
+  const fetchCustomerMonth = useCallback(async (month: string) => {
+    setCmLoading(true);
+    try {
+      const [y, m] = month.split("-");
+      const res = await fetch(`/api/customer-months?year=${y}&month=${parseInt(m, 10)}`);
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        const direct: Record<string, string> = {};
+        const proj: Record<string, string> = {};
+        for (const r of data?.rows ?? []) {
+          if (r.projectId) proj[r.projectId] = String(r.hours);
+          else direct[r.customerId] = String(r.hours);
+        }
+        setCmDirectHours(direct);
+        setCmProjectHours(proj);
+        setCmArbeitsstunden(data?.arbeitsstunden ?? 0);
+      }
+    } catch (err: any) { console.error(err); } finally { setCmLoading(false); }
+  }, []);
+
   const fetchTeamMembers = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/team");
@@ -232,6 +265,8 @@ export default function ProfilePage() {
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers, fetchProjects]);
 
   useEffect(() => { if (isOrgAdmin) fetchTeamMembers(); }, [isOrgAdmin, fetchTeamMembers]);
+
+  useEffect(() => { fetchCustomerMonth(cmMonth); }, [cmMonth, fetchCustomerMonth]);
 
   // Check if effectiveFrom is in the past
   useEffect(() => {
@@ -498,6 +533,40 @@ export default function ProfilePage() {
       if (res?.ok) { toast.success(t("profile.projectDeleted")); await fetchProjects(); }
       else { toast.error(t("profile.projectError")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
+  };
+
+  const toggleCmExpanded = (customerId: string) => setCmExpanded((prev) => ({ ...prev, [customerId]: !prev[customerId] }));
+
+  const cmTotalEntered =
+    Object.values(cmDirectHours).reduce((s, v) => s + (parseFloat(v) || 0), 0) +
+    Object.values(cmProjectHours).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+
+  const saveCustomerMonth = async () => {
+    setCmSaving(true);
+    try {
+      const [y, m] = cmMonth.split("-");
+      const rows: { customerId: string; projectId?: string; hours: number }[] = [];
+      for (const c of customers) {
+        const h = parseFloat(cmDirectHours[c.id]);
+        if (Number.isFinite(h) && h > 0) rows.push({ customerId: c.id, hours: h });
+      }
+      for (const p of projects) {
+        const h = parseFloat(cmProjectHours[p.id]);
+        if (Number.isFinite(h) && h > 0) rows.push({ customerId: p.customerId, projectId: p.id, hours: h });
+      }
+      const res = await fetch("/api/customer-months", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: parseInt(y, 10), month: parseInt(m, 10), rows }),
+      });
+      if (res?.ok) {
+        toast.success(t("profile.customerMonthSaved"));
+        await fetchCustomerMonth(cmMonth);
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error || t("profile.customerMonthError"));
+      }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerMonthError")); } finally { setCmSaving(false); }
   };
 
   // Zeitraum-Query-String, gemeinsam für alle drei Export-Endpunkte
@@ -926,6 +995,87 @@ export default function ProfilePage() {
           </div>
         ) : (
           <p className="text-xs text-muted-foreground text-center">{t("profile.noProjects")}</p>
+        )}
+      </motion.div>
+
+      {/* Kundenstunden monatlich (statt am Tageseintrag) */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Calendar className="w-4 h-4 text-primary" /> {t("profile.customerMonth")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("profile.customerMonthDesc")}</p>
+
+        <div className="mb-3">
+          <MonthYearPicker value={cmMonth} onChange={setCmMonth} />
+        </div>
+
+        {customers.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center">{t("profile.noCustomers")}</p>
+        ) : (
+          <div className={`space-y-1.5 ${cmLoading ? "opacity-50 pointer-events-none" : ""}`}>
+            {customers.map((c) => {
+              const customerProjects = projects.filter((p) => p.customerId === c.id);
+              const expanded = !!cmExpanded[c.id];
+              return (
+                <div key={c.id} className="bg-secondary rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      value={cmDirectHours[c.id] ?? ""}
+                      onChange={(e) => setCmDirectHours((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                      placeholder="0"
+                      className="w-24 px-2 py-1 rounded-lg bg-card text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                    />
+                    <span className="text-xs text-muted-foreground shrink-0">h</span>
+                    {customerProjects.length > 0 && (
+                      <button
+                        onClick={() => toggleCmExpanded(c.id)}
+                        className="text-xs text-muted-foreground hover:text-primary px-1.5 py-1 shrink-0 transition"
+                      >
+                        {expanded ? t("profile.customerMonthCollapse") : t("profile.customerMonthSplit")}
+                      </button>
+                    )}
+                  </div>
+                  {expanded && customerProjects.length > 0 && (
+                    <div className="mt-1.5 pl-3 space-y-1 border-l-2 border-border">
+                      {customerProjects.map((p) => (
+                        <div key={p.id} className="flex items-center gap-2 text-xs">
+                          <span className="flex-1 min-w-0 truncate text-muted-foreground">{p.name}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            value={cmProjectHours[p.id] ?? ""}
+                            onChange={(e) => setCmProjectHours((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                            placeholder="0"
+                            className="w-24 px-2 py-1 rounded-lg bg-card text-xs text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                          />
+                          <span className="text-xs text-muted-foreground shrink-0">h</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {customers.length > 0 && (
+          <>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-3 mb-3 px-1">
+              <span>{t("profile.customerMonthEntered", { hours: cmTotalEntered.toFixed(2) })}</span>
+              <span>{t("profile.customerMonthWorked", { hours: cmArbeitsstunden.toFixed(2) })}</span>
+            </div>
+            <button
+              onClick={saveCustomerMonth}
+              disabled={cmSaving || cmLoading}
+              className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              <CheckCircle className="w-4 h-4" /> {cmSaving ? t("common.loading") : t("profile.customerMonthSave")}
+            </button>
+          </>
         )}
       </motion.div>
 

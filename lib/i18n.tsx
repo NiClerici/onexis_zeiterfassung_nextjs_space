@@ -249,6 +249,16 @@ const translations: Record<string, string> = {
   "profile.projectSaved": "Projekt gespeichert",
   "profile.projectDeleted": "Projekt gelöscht",
   "profile.projectError": "Fehler beim Speichern des Projekts",
+  // Kundenstunden monatlich (statt am Tageseintrag)
+  "profile.customerMonth": "Kundenstunden",
+  "profile.customerMonthDesc": "Kundenstunden werden einmal pro Monat erfasst, nicht am einzelnen Tageseintrag. Optional auf Projekte des Kunden aufteilbar.",
+  "profile.customerMonthSplit": "aufteilen",
+  "profile.customerMonthCollapse": "zuklappen",
+  "profile.customerMonthSave": "Monat speichern",
+  "profile.customerMonthSaved": "Kundenstunden gespeichert",
+  "profile.customerMonthError": "Fehler beim Speichern der Kundenstunden",
+  "profile.customerMonthEntered": "{hours}h Kunden zugeordnet",
+  "profile.customerMonthWorked": "{hours}h Arbeitszeit erfasst",
   "profile.retroactiveWarning": "Bei rückwirkender Pensumsänderungen müssen die eingegebenen Zeiten (z.B. Ferientage) ab diesem Datum manuell nachkontrolliert werden.",
   // Team-Verwaltung (/admin/team)
   "team.invite": "Mitglied einladen",
