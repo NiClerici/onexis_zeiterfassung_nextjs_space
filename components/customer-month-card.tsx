@@ -1,11 +1,9 @@
 "use client";
 
-// Kundenstunden direkt im Kalender pflegen, nicht nur im Profil (Nachtrag
-// zu "Kundenstunden monatlich erfassen", 19.08.2026 — vor dem Vision-Ausbau
-// gab es dafür bereits einen Block direkt unter dem Kalendergitter, siehe
-// git show 110cdb9^:"app/(app)/calendar/page.tsx", damals auf dem
-// inzwischen ersetzten CustomerHour-Modell). API ist bereits monatsbasiert
-// (app/api/customer-months/route.ts) und braucht dafür keine Änderung.
+// Manuelle monatliche Kundenstunden-Erfassung — nur im Profil eingebunden
+// (app/(app)/profile/page.tsx), bewusst nicht zusätzlich im Kalender, um
+// nicht zwei Bearbeitungsorte für dieselben Daten zu haben. API ist
+// monatsbasiert (app/api/customer-months/route.ts).
 //
 // Wichtig: PUT /api/customer-months ersetzt immer den GESAMTEN Monat
 // (deleteMany + create in einer Transaktion) — es gibt bewusst kein

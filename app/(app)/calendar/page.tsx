@@ -11,7 +11,6 @@ import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type P
 import { pruefeCompliance } from "@/lib/compliance";
 import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
 import { ProjectMonthSummary, type ProjectSummaryRow } from "@/components/project-month-summary";
-import { CustomerMonthCard } from "@/components/customer-month-card";
 import { downloadBlob } from "@/lib/download-blob";
 
 interface UserProfile {
@@ -308,15 +307,21 @@ export default function CalendarPage() {
         if (e.type !== "arbeit") continue;
         const stunden = stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll);
         total += stunden;
-        if (!e.projectId) { unassigned += stunden; continue; }
-        const project = projects.find((p) => p.id === e.projectId);
-        const customer = project ? customers.find((c) => c.id === project.customerId) : undefined;
-        const existing = byProject.get(e.projectId);
+        if (!e.projectId && !e.customerId) { unassigned += stunden; continue; }
+        // Kunde ohne konkretes Projekt (z.B. migrierte Altzeilen) läuft unter
+        // einem eigenen Schlüssel pro Kunde statt in unassignedHours zu
+        // landen — die Stunden SIND einem Kunden zugeordnet, nur keinem
+        // Projekt.
+        const key = e.projectId ?? `customer-${e.customerId}`;
+        const project = e.projectId ? projects.find((p) => p.id === e.projectId) : undefined;
+        const customerId = project?.customerId ?? e.customerId ?? "";
+        const customer = customerId ? customers.find((c) => c.id === customerId) : undefined;
+        const existing = byProject.get(key);
         if (existing) existing.hours += stunden;
-        else byProject.set(e.projectId, {
-          projectId: e.projectId,
-          projectName: project?.name ?? "?",
-          customerId: project?.customerId ?? "",
+        else byProject.set(key, {
+          projectId: key,
+          projectName: project?.name ?? t("calendar.projectNone"),
+          customerId,
           customerName: customer?.name ?? "?",
           hours: stunden,
         });
@@ -662,10 +667,6 @@ export default function CalendarPage() {
         totalHours={projectSummary.totalHours}
         onExportCustomer={exportCustomerRapport}
       />
-
-      {/* Manuelle monatliche Kundenstunden-Erfassung (Migration alter
-          Zahlen) — unabhängig von der Tageserfassung oben. */}
-      <CustomerMonthCard year={currentDate.year} month={currentDate.month} locked={isMember && isCurrentMonthLocked} />
 
       {/* Legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
