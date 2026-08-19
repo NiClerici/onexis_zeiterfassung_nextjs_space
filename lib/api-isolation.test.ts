@@ -25,6 +25,7 @@ function setSession(userId: string, orgId: string, role: string) {
 
 import { GET as teGet, POST as tePost, PUT as tePut, DELETE as teDelete } from "@/app/api/time-entries/route";
 import { GET as custGet, POST as custPost, PUT as custPut, DELETE as custDelete } from "@/app/api/customers/route";
+import { GET as projGet } from "@/app/api/projects/route";
 import { GET as payoutGet, POST as payoutPost, DELETE as payoutDelete } from "@/app/api/overtime-payouts/route";
 import { GET as pcGet, POST as pcPost, DELETE as pcDelete } from "@/app/api/pensum-changes/route";
 
@@ -33,7 +34,8 @@ const ORG_B = "test_iso_org_b";
 
 let a1: string, a2: string, b1: string, b2: string; // userIds
 let shared: string; // Mitglied in BEIDEN Organisationen — der eigentliche Härtetest
-let customerA: string, customerB: string;
+let customerA: string, customerB: string, customerC: string;
+let projectA: string;
 let entryA: string, entryB: string;
 let entrySharedInA: string, entrySharedInB: string;
 let payoutA: string, payoutB: string;
@@ -72,13 +74,24 @@ beforeAll(async () => {
 
   const custA = await prisma.customer.create({ data: { orgId: ORG_A, name: "Kunde A" } });
   const custB = await prisma.customer.create({ data: { orgId: ORG_B, name: "Kunde B" } });
+  // Von a2 (member) nie bebuchter Kunde — Testfall für die Rollen-Sichtbarkeit.
+  const custC = await prisma.customer.create({ data: { orgId: ORG_A, name: "Kunde C (nur a1)" } });
   customerA = custA.id;
   customerB = custB.id;
+  customerC = custC.id;
+
+  const projA = await prisma.project.create({ data: { orgId: ORG_A, customerId: customerA, name: "Projekt A" } });
+  projectA = projA.id;
 
   const teA = await prisma.timeEntry.create({ data: { orgId: ORG_A, userId: a1, date: new Date("2026-11-02"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30 } });
   const teB = await prisma.timeEntry.create({ data: { orgId: ORG_B, userId: b1, date: new Date("2026-11-02"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30 } });
   entryA = teA.id;
   entryB = teB.id;
+
+  // a2 (member) bebucht customerA/projectA selbst — a1 (owner) bebucht
+  // customerC, den a2 nie sieht, obwohl gleiche Org.
+  await prisma.timeEntry.create({ data: { orgId: ORG_A, userId: a2, date: new Date("2026-11-05"), type: "arbeit", von: "08:00", bis: "12:00", customerId: customerA, projectId: projectA } });
+  await prisma.timeEntry.create({ data: { orgId: ORG_A, userId: a1, date: new Date("2026-11-05"), type: "arbeit", von: "08:00", bis: "12:00", customerId: customerC } });
 
   // Gleicher userId (shared), aber je ein Eintrag in Org A und Org B.
   const teSharedA = await prisma.timeEntry.create({ data: { orgId: ORG_A, userId: shared, date: new Date("2026-11-02"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30 } });
@@ -101,6 +114,7 @@ afterAll(async () => {
   await prisma.pensumChange.deleteMany({ where: { orgId: { in: [ORG_A, ORG_B] } } });
   await prisma.overtimePayout.deleteMany({ where: { orgId: { in: [ORG_A, ORG_B] } } });
   await prisma.timeEntry.deleteMany({ where: { orgId: { in: [ORG_A, ORG_B] } } });
+  await prisma.project.deleteMany({ where: { orgId: { in: [ORG_A, ORG_B] } } });
   await prisma.customer.deleteMany({ where: { orgId: { in: [ORG_A, ORG_B] } } });
   await prisma.membership.deleteMany({ where: { orgId: { in: [ORG_A, ORG_B] } } });
   await prisma.user.deleteMany({ where: { id: { in: [a1, a2, b1, b2, shared] } } });
@@ -170,20 +184,24 @@ describe("Isolation: time-entries", () => {
 });
 
 describe("Isolation: customers", () => {
-  it("GET liefert nur Kunden der eigenen Org", async () => {
+  it("GET liefert dem Owner alle Kunden der eigenen Org, keine der fremden", async () => {
     setSession(a1, ORG_A, "owner");
     const res = await custGet();
     const body = await res.json();
     const ids = body.customers.map((c: any) => c.id);
     expect(ids).toContain(customerA);
+    expect(ids).toContain(customerC);
     expect(ids).not.toContain(customerB);
   });
 
-  it("innerhalb derselben Org sehen VERSCHIEDENE Nutzer denselben Kunden (kein Overblocking)", async () => {
+  it("ein Mitglied sieht nur Kunden, bei denen es selbst schon Stunden erfasst hat", async () => {
     setSession(a2, ORG_A, "member");
     const res = await custGet();
     const body = await res.json();
-    expect(body.customers.map((c: any) => c.id)).toContain(customerA);
+    const ids = body.customers.map((c: any) => c.id);
+    expect(ids).toContain(customerA); // a2 hat selbst einen Eintrag mit customerA
+    expect(ids).not.toContain(customerC); // nur a1 bebucht customerC
+    expect(ids).not.toContain(customerB); // fremde Org
   });
 
   it("PUT auf einen fremden Org-Kunden liefert 404", async () => {
@@ -200,6 +218,22 @@ describe("Isolation: customers", () => {
     expect(res.status).toBe(404);
     const stillThere = await prisma.customer.findUnique({ where: { id: customerB } });
     expect(stillThere).not.toBeNull();
+  });
+});
+
+describe("Isolation: projects", () => {
+  it("GET liefert dem Owner alle Projekte der eigenen Org", async () => {
+    setSession(a1, ORG_A, "owner");
+    const res = await projGet(req("/api/projects"));
+    const body = await res.json();
+    expect(body.projects.map((p: any) => p.id)).toContain(projectA);
+  });
+
+  it("ein Mitglied sieht nur Projekte, bei denen es selbst schon Stunden erfasst hat", async () => {
+    setSession(a2, ORG_A, "member");
+    const res = await projGet(req("/api/projects"));
+    const body = await res.json();
+    expect(body.projects.map((p: any) => p.id)).toContain(projectA); // a2 hat selbst einen Eintrag mit projectA
   });
 });
 

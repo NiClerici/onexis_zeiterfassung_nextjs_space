@@ -5,16 +5,42 @@ import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 
 // Projekte gehören wie Kunden der Organisation (MIGRATION.md Punkt 5) — kein
-// Rollen-Gate: jedes Mitglied darf Projekte anlegen/pflegen, analog zu
-// customers/route.ts.
+// Rollen-Gate für Anlegen/Pflegen, das darf jedes Mitglied. Beim Lesen
+// (GET) gilt wie bei customers/route.ts: manager/admin/owner sehen alles,
+// ein Mitglied nur Projekte, bei denen es selbst schon Stunden erfasst hat.
 export async function GET(req: Request) {
   try {
-    const { orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
     const url = new URL(req.url);
     const customerId = url.searchParams.get("customerId");
 
+    if (role === "manager" || role === "admin" || role === "owner") {
+      const projects = await prisma.project.findMany({
+        where: { orgId, ...(customerId ? { customerId } : {}) },
+        orderBy: { name: "asc" },
+      });
+      return NextResponse.json({ projects: projects ?? [] });
+    }
+
+    const [fromEntries, fromMonths] = await Promise.all([
+      prisma.timeEntry.findMany({
+        where: { userId, orgId, deletedAt: null, projectId: { not: null } },
+        select: { projectId: true },
+        distinct: ["projectId"],
+      }),
+      prisma.customerMonth.findMany({
+        where: { userId, orgId, projectId: { not: null } },
+        select: { projectId: true },
+        distinct: ["projectId"],
+      }),
+    ]);
+    const visibleIds = Array.from(
+      new Set([...fromEntries.map((e) => e.projectId), ...fromMonths.map((m) => m.projectId)].filter((id): id is string => !!id))
+    );
+    if (visibleIds.length === 0) return NextResponse.json({ projects: [] });
+
     const projects = await prisma.project.findMany({
-      where: { orgId, ...(customerId ? { customerId } : {}) },
+      where: { orgId, id: { in: visibleIds }, ...(customerId ? { customerId } : {}) },
       orderBy: { name: "asc" },
     });
 

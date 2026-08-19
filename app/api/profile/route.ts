@@ -25,9 +25,8 @@ export async function GET() {
       baseWeeklyHours: membership?.baseWeeklyHours ?? null,
       basePensum: membership?.basePensum ?? null,
       vacationDays: membership?.vacationDays ?? 25,
-      // Kürzel für den Stundenrapport-Export (lib/import-stundenrapport.ts /
-      // app/api/export/stundenrapport) — frei pflegbar, keine Ableitung aus
-      // dem Namen.
+      // Kürzel für den Stundenrapport-Export (app/api/export/stundenrapport)
+      // — frei pflegbar, keine Ableitung aus dem Namen.
       kuerzel: membership?.kuerzel ?? "",
       // Gesetzliche Höchstarbeitszeit der Organisation (Art. 12/13 ArG,
       // MIGRATION.md Punkt 6a) — für die Kalender-Kennzahlenberechnung.

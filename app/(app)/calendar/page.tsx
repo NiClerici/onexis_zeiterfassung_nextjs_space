@@ -11,6 +11,7 @@ import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type P
 import { pruefeCompliance } from "@/lib/compliance";
 import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
 import { ProjectMonthSummary, type ProjectSummaryRow } from "@/components/project-month-summary";
+import { CustomerMonthCard } from "@/components/customer-month-card";
 import { downloadBlob } from "@/lib/download-blob";
 
 interface UserProfile {
@@ -661,6 +662,10 @@ export default function CalendarPage() {
         totalHours={projectSummary.totalHours}
         onExportCustomer={exportCustomerRapport}
       />
+
+      {/* Manuelle monatliche Kundenstunden-Erfassung (Migration alter
+          Zahlen) — unabhängig von der Tageserfassung oben. */}
+      <CustomerMonthCard year={currentDate.year} month={currentDate.month} locked={isMember && isCurrentMonthLocked} />
 
       {/* Legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">

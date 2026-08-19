@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { User, Briefcase, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload } from "lucide-react";
+import { User, Briefcase, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload, Calendar, ChevronDown, ChevronUp } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -126,6 +126,19 @@ export default function ProfilePage() {
   const [editProjectRate, setEditProjectRate] = useState("");
   const [editProjectBudget, setEditProjectBudget] = useState("");
 
+  // Kundenstunden monatlich (Migration/Übersicht, unabhängig von der
+  // Tageserfassung). cmDirectHours: Stunden direkt beim Kunden (CustomerMonth
+  // ohne projectId), cmProjectHours: Stunden pro Projekt (mit projectId) —
+  // beides kann parallel befüllt sein, siehe app/api/team/route.ts Kommentar
+  // zu CustomerMonth-Aggregation.
+  const [cmMonth, setCmMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
+  const [cmDirectHours, setCmDirectHours] = useState<Record<string, string>>({});
+  const [cmProjectHours, setCmProjectHours] = useState<Record<string, string>>({});
+  const [cmExpanded, setCmExpanded] = useState<Record<string, boolean>>({});
+  const [cmArbeitsstunden, setCmArbeitsstunden] = useState(0);
+  const [cmLoading, setCmLoading] = useState(false);
+  const [cmSaving, setCmSaving] = useState(false);
+
   // Overtime payouts state
   const [overtimePayouts, setOvertimePayouts] = useState<OvertimePayoutData[]>([]);
   const [payoutDate, setPayoutDate] = useState("");
@@ -159,28 +172,6 @@ export default function ProfilePage() {
     dateFrom: string | null; dateTo: string | null;
     importedCustomerMonths: number; skippedExistingCustomerMonths: number; skippedLockedCustomerMonths: number; totalCustomerMonthRows: number;
     errors: { rowNumber: number; message: string; sheet: string }[];
-  } | null>(null);
-
-  // Stundenrapport-Import (Projekte pro Tag, siehe lib/import-stundenrapport.ts)
-  // — eigener, unabhängiger Zustand vom Alt-Import oben. Mehrere Dateien
-  // gleichzeitig möglich (z.B. ein Workbook pro Monat statt eines
-  // gemeinsamen mit mehreren Blättern); jede .xlsx-Datei kann ihrerseits
-  // mehrere Blätter enthalten — die Vorschau zeigt deshalb eine blocks[]-
-  // Liste (ein Block pro Blatt/Datei), nicht eine einzelne Zusammenfassung.
-  const [srFiles, setSrFiles] = useState<File[]>([]);
-  const [srCustomerName, setSrCustomerName] = useState("");
-  const [srLoading, setSrLoading] = useState(false);
-  const [srDone, setSrDone] = useState(false);
-  interface SrBlock {
-    fileName: string; sheetName: string | null;
-    customerName: string | null; customerIsNew: boolean; newProjects: string[];
-    imported: number; skippedExisting: number; skippedLocked: number; totalRows: number;
-    dateFrom: string | null; dateTo: string | null;
-    errors: { rowNumber: number; message: string }[];
-  }
-  const [srPreview, setSrPreview] = useState<{
-    blocks: SrBlock[];
-    totalRows: number; totalImported: number; totalSkippedExisting: number; totalSkippedLocked: number;
   } | null>(null);
 
   const fetchProfile = useCallback(async () => {
@@ -261,9 +252,31 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
+  const fetchCustomerMonth = useCallback(async (month: string) => {
+    setCmLoading(true);
+    try {
+      const [y, m] = month.split("-");
+      const res = await fetch(`/api/customer-months?year=${y}&month=${parseInt(m, 10)}`);
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        const direct: Record<string, string> = {};
+        const proj: Record<string, string> = {};
+        for (const r of data?.rows ?? []) {
+          if (r.projectId) proj[r.projectId] = String(r.hours);
+          else direct[r.customerId] = String(r.hours);
+        }
+        setCmDirectHours(direct);
+        setCmProjectHours(proj);
+        setCmArbeitsstunden(data?.arbeitsstunden ?? 0);
+      }
+    } catch (err: any) { console.error(err); } finally { setCmLoading(false); }
+  }, []);
+
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers, fetchProjects]);
 
   useEffect(() => { if (isOrgAdmin) fetchTeamMembers(); }, [isOrgAdmin, fetchTeamMembers]);
+
+  useEffect(() => { fetchCustomerMonth(cmMonth); }, [cmMonth, fetchCustomerMonth]);
 
   // Check if effectiveFrom is in the past
   useEffect(() => {
@@ -563,6 +576,40 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
   };
 
+  const toggleCmExpanded = (customerId: string) => setCmExpanded((prev) => ({ ...prev, [customerId]: !prev[customerId] }));
+
+  const cmTotalEntered =
+    Object.values(cmDirectHours).reduce((s, v) => s + (parseFloat(v) || 0), 0) +
+    Object.values(cmProjectHours).reduce((s, v) => s + (parseFloat(v) || 0), 0);
+
+  const saveCustomerMonth = async () => {
+    setCmSaving(true);
+    try {
+      const [y, m] = cmMonth.split("-");
+      const rows: { customerId: string; projectId?: string; hours: number }[] = [];
+      for (const c of customers) {
+        const h = parseFloat(cmDirectHours[c.id]);
+        if (Number.isFinite(h) && h > 0) rows.push({ customerId: c.id, hours: h });
+      }
+      for (const p of projects) {
+        const h = parseFloat(cmProjectHours[p.id]);
+        if (Number.isFinite(h) && h > 0) rows.push({ customerId: p.customerId, projectId: p.id, hours: h });
+      }
+      const res = await fetch("/api/customer-months", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: parseInt(y, 10), month: parseInt(m, 10), rows }),
+      });
+      if (res?.ok) {
+        toast.success(t("profile.customerMonthSaved"));
+        await fetchCustomerMonth(cmMonth);
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error || t("profile.customerMonthError"));
+      }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerMonthError")); } finally { setCmSaving(false); }
+  };
+
   // Zeitraum-Query-String, gemeinsam für alle drei Export-Endpunkte
   // (MIGRATION.md Punkt 7) — dieselbe type=month|year|custom-Logik wie schon
   // vorher, nur extrahiert statt dreimal dupliziert.
@@ -620,65 +667,6 @@ export default function ProfilePage() {
       toast.error(t("profile.importFileError"));
     } finally {
       setImportLoading(false);
-    }
-  };
-
-  // Dateien werden angesammelt (nicht ersetzt) — die Person kann den
-  // Dialog mehrfach öffnen, um nach und nach mehrere Monatsdateien
-  // zusammenzustellen, statt in einem Rutsch alle auf einmal markieren zu
-  // müssen. e.target.value wird geleert, damit dieselbe Datei ein zweites
-  // Mal ausgewählt werden kann und erneut ein change-Event auslöst.
-  const handleSrFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(e?.target?.files ?? []);
-    if (picked.length > 0) {
-      setSrFiles((prev) => [...prev, ...picked]);
-      setSrPreview(null);
-      setSrDone(false);
-    }
-    e.target.value = "";
-  };
-
-  const removeSrFile = (index: number) => {
-    setSrFiles((prev) => prev.filter((_, i) => i !== index));
-    setSrPreview(null);
-    setSrDone(false);
-  };
-
-  // Wie runImport oben, zusätzlich mit optionalem Kunde-Override: die erste
-  // Vorschau übernimmt den Kundennamen ins Eingabefeld, aber NUR wenn alle
-  // Blöcke (Blätter/Dateien) denselben Kundennamen tragen — bei gemischten
-  // Kunden im selben Batch bleibt das Feld leer, damit kein einzelner
-  // Vorschlag versehentlich für alle übernommen wird. Jeder weitere Aufruf
-  // (Vorschau erneut oder Commit) schickt den aktuellen — ggf. von Hand
-  // korrigierten — Feldwert mit, für alle Dateien/Blätter gleichermassen.
-  const runSrImport = async (mode: "preview" | "commit") => {
-    if (srFiles.length === 0) return;
-    setSrLoading(true);
-    try {
-      const fd = new FormData();
-      for (const f of srFiles) fd.append("file", f);
-      fd.set("mode", mode);
-      if (srCustomerName.trim()) fd.set("customerName", srCustomerName.trim());
-      const res = await fetch("/api/import/stundenrapport", { method: "POST", body: fd });
-      const data = await res?.json?.().catch(() => ({}));
-      if (res?.ok) {
-        setSrPreview(data);
-        if (!srCustomerName.trim()) {
-          const names = new Set((data?.blocks ?? []).map((b: SrBlock) => b.customerName).filter(Boolean));
-          if (names.size === 1) setSrCustomerName([...names][0] as string);
-        }
-        if (mode === "commit") {
-          setSrDone(true);
-          toast.success(t("profile.srImportDone", { count: String(data?.totalImported ?? 0) }));
-        }
-      } else {
-        toast.error(data?.error ?? t("profile.importFileError"));
-      }
-    } catch (err: any) {
-      console.error(err);
-      toast.error(t("profile.importFileError"));
-    } finally {
-      setSrLoading(false);
     }
   };
 
@@ -1071,6 +1059,88 @@ export default function ProfilePage() {
         )}
       </motion.div>
 
+      {/* Kundenstunden monatlich (statt am Tageseintrag) */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Calendar className="w-4 h-4 text-primary" /> {t("profile.customerMonth")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("profile.customerMonthDesc")}</p>
+
+        <div className="mb-3">
+          <MonthYearPicker value={cmMonth} onChange={setCmMonth} />
+        </div>
+
+        {customers.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center">{t("profile.noCustomers")}</p>
+        ) : (
+          <div className={`space-y-1.5 ${cmLoading ? "opacity-50 pointer-events-none" : ""}`}>
+            {customers.map((c) => {
+              const customerProjects = projects.filter((p) => p.customerId === c.id);
+              const expanded = !!cmExpanded[c.id];
+              return (
+                <div key={c.id} className="bg-secondary rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      value={cmDirectHours[c.id] ?? ""}
+                      onChange={(e) => setCmDirectHours((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                      placeholder="0"
+                      className="w-24 px-2 py-1 rounded-lg bg-card text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                    />
+                    <span className="text-xs text-muted-foreground shrink-0">h</span>
+                    {customerProjects.length > 0 && (
+                      <button
+                        onClick={() => toggleCmExpanded(c.id)}
+                        className="flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-lg px-2 py-1 shrink-0 transition"
+                      >
+                        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        {expanded ? t("profile.customerMonthCollapse") : t("profile.customerMonthSplit")}
+                      </button>
+                    )}
+                  </div>
+                  {expanded && customerProjects.length > 0 && (
+                    <div className="mt-1.5 pl-3 space-y-1 border-l-2 border-border">
+                      {customerProjects.map((p) => (
+                        <div key={p.id} className="flex items-center gap-2 text-xs">
+                          <span className="flex-1 min-w-0 truncate text-muted-foreground">{p.name}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            value={cmProjectHours[p.id] ?? ""}
+                            onChange={(e) => setCmProjectHours((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                            placeholder="0"
+                            className="w-24 px-2 py-1 rounded-lg bg-card text-xs text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                          />
+                          <span className="text-xs text-muted-foreground shrink-0">h</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {customers.length > 0 && (
+          <>
+            <div className="flex items-center justify-between text-xs text-muted-foreground mt-3 mb-3 px-1">
+              <span>{t("profile.customerMonthEntered", { hours: cmTotalEntered.toFixed(2) })}</span>
+              <span>{t("profile.customerMonthWorked", { hours: cmArbeitsstunden.toFixed(2) })}</span>
+            </div>
+            <button
+              onClick={saveCustomerMonth}
+              disabled={cmSaving || cmLoading}
+              className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              <CheckCircle className="w-4 h-4" /> {cmSaving ? t("common.loading") : t("profile.customerMonthSave")}
+            </button>
+          </>
+        )}
+      </motion.div>
+
       {/* Change Password */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-primary" /> {t("profile.changePassword")}</h2>
@@ -1198,120 +1268,6 @@ export default function ProfilePage() {
         )}
       </motion.div>
 
-      {/* Stundenrapport-Import (Projekte pro Tag) — eigener Block, eigene
-          Route, unabhängig vom Alt-Import oben. Mehrere Dateien möglich
-          (z.B. ein Workbook pro Monat), jede .xlsx-Datei kann ihrerseits
-          mehrere Blätter enthalten (z.B. ein Blatt pro Monat in einer
-          Datei) — die Vorschau zeigt deshalb pro Blatt/Datei einen
-          eigenen Block. */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.27 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-        <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Upload className="w-4 h-4 text-primary" /> {t("profile.srImport")}</h2>
-        <p className="text-xs text-muted-foreground mb-3">{t("profile.srImportHint")}</p>
-        <input
-          type="file"
-          accept=".xlsx,.csv"
-          multiple
-          onChange={handleSrFileChange}
-          className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-secondary file:text-foreground file:text-sm file:font-medium hover:file:bg-accent file:transition"
-        />
-        {srFiles.length > 0 && (
-          <div className="mt-3 space-y-1">
-            {srFiles.map((f, i) => (
-              <div key={`${f.name}-${i}`} className="flex items-center justify-between bg-secondary rounded-lg px-3 py-1.5 text-xs">
-                <span className="truncate flex-1 min-w-0">{f.name}</span>
-                <button onClick={() => removeSrFile(i)} className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><X className="w-3.5 h-3.5" /></button>
-              </div>
-            ))}
-          </div>
-        )}
-        {srFiles.length > 0 && (
-          <div className="mt-3">
-            <label className="text-xs text-muted-foreground mb-1 block">{t("profile.srImportCustomerLabel")}</label>
-            <input
-              type="text"
-              value={srCustomerName}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSrCustomerName(e?.target?.value ?? "")}
-              placeholder={t("profile.srImportCustomerPlaceholder")}
-              className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-            />
-            <p className="text-xs text-muted-foreground mt-1">{t("profile.srImportCustomerHint")}</p>
-          </div>
-        )}
-        {srFiles.length > 0 && !srPreview && (
-          <button
-            onClick={() => runSrImport("preview")}
-            disabled={srLoading}
-            className="w-full mt-3 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50"
-          >
-            {srLoading ? t("common.loading") : t("profile.importPreview")}
-          </button>
-        )}
-        {srPreview && (
-          <div className="mt-3 space-y-2">
-            <div className="bg-secondary rounded-xl p-3 text-sm space-y-2">
-              {srPreview.blocks.map((b, i) => (
-                <div key={i} className="rounded-lg bg-card p-2.5 text-xs space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{b.fileName}{b.sheetName ? ` · ${b.sheetName}` : ""}</span>
-                    <span className="text-muted-foreground shrink-0">{b.imported}/{b.totalRows}</span>
-                  </div>
-                  {b.customerName && (
-                    <p className="text-muted-foreground">
-                      {b.customerIsNew
-                        ? t("profile.srImportNewCustomer", { name: b.customerName })
-                        : t("profile.srImportExistingCustomer", { name: b.customerName })}
-                      {b.dateFrom && b.dateTo && ` · ${b.dateFrom} – ${b.dateTo}`}
-                    </p>
-                  )}
-                  {b.newProjects.length > 0 && (
-                    <p className="text-muted-foreground">{t("profile.srImportNewProjects", { names: b.newProjects.join(", ") })}</p>
-                  )}
-                  {b.skippedExisting > 0 && (
-                    <p className="text-muted-foreground">{t("profile.importSkippedExisting", { count: String(b.skippedExisting) })}</p>
-                  )}
-                  {b.skippedLocked > 0 && (
-                    <p className="text-muted-foreground">{t("profile.importSkippedLocked", { count: String(b.skippedLocked) })}</p>
-                  )}
-                  {b.errors.length > 0 && (
-                    <details className="text-destructive">
-                      <summary className="cursor-pointer">{t("profile.importErrors", { count: String(b.errors.length) })}</summary>
-                      <ul className="mt-1 list-disc list-inside space-y-0.5">
-                        {b.errors.slice(0, 30).map((e, ei) => (
-                          <li key={ei}>Zeile {e.rowNumber}: {e.message}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </div>
-              ))}
-              <p className="font-medium pt-1 border-t border-border">
-                {t("profile.importPreviewCount", { imported: String(srPreview.totalImported), total: String(srPreview.totalRows) })}
-              </p>
-            </div>
-            {!srDone && (
-              <button
-                onClick={() => runSrImport("preview")}
-                disabled={srLoading}
-                className="w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50 border border-border"
-              >
-                {t("profile.importPreview")}
-              </button>
-            )}
-            {!srDone && srPreview.totalImported > 0 && (
-              <button
-                onClick={() => runSrImport("commit")}
-                disabled={srLoading}
-                className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-              >
-                {srLoading ? t("common.loading") : t("profile.srImportCommit", { count: String(srPreview.totalImported) })}
-              </button>
-            )}
-            {srDone && (
-              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.srImportDone", { count: String(srPreview.totalImported) })}</p>
-            )}
-          </div>
-        )}
-      </motion.div>
 
       {isOrgAdmin && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.27 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>

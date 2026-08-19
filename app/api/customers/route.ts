@@ -6,12 +6,43 @@ import { requireOrg, AccessError } from "@/lib/access";
 
 export async function GET() {
   try {
-    const { orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
-    // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden —
-    // alle Mitglieder sehen dieselbe Kundenliste (MIGRATION.md Punkt 3).
+    // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden
+    // (MIGRATION.md Punkt 3) — manager/admin/owner sehen deshalb weiterhin
+    // alle. Ein normales Mitglied sieht dagegen nur Kunden, bei denen es
+    // selbst schon Stunden erfasst hat (Tageseintrag oder monatliche
+    // Kundenstunden), damit z.B. Gabriel nicht Nicos Kundenportfolio sieht
+    // und umgekehrt. Bekannte Einschränkung: ein frisch angelegter, noch nie
+    // bebuchter Kunde taucht in der eigenen Liste erst nach dem ersten
+    // Eintrag auf.
+    if (role === "manager" || role === "admin" || role === "owner") {
+      const customers = await prisma.customer.findMany({
+        where: { orgId },
+        orderBy: { name: "asc" },
+      });
+      return NextResponse.json({ customers: customers ?? [] });
+    }
+
+    const [fromEntries, fromMonths] = await Promise.all([
+      prisma.timeEntry.findMany({
+        where: { userId, orgId, deletedAt: null, customerId: { not: null } },
+        select: { customerId: true },
+        distinct: ["customerId"],
+      }),
+      prisma.customerMonth.findMany({
+        where: { userId, orgId },
+        select: { customerId: true },
+        distinct: ["customerId"],
+      }),
+    ]);
+    const visibleIds = Array.from(
+      new Set([...fromEntries.map((e) => e.customerId), ...fromMonths.map((m) => m.customerId)].filter((id): id is string => !!id))
+    );
+    if (visibleIds.length === 0) return NextResponse.json({ customers: [] });
+
     const customers = await prisma.customer.findMany({
-      where: { orgId },
+      where: { orgId, id: { in: visibleIds } },
       orderBy: { name: "asc" },
     });
 

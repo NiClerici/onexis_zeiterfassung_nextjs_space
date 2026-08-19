@@ -17,14 +17,15 @@ function sheetSafeName(name: string): string {
   return name.replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 31) || "Kunde";
 }
 
-// Export im Layout des alten ONEXIS-Stundenrapports (siehe
-// lib/import-stundenrapport.ts für das Gegenstück beim Import) — ein Kunde
-// und ein Monat pro Datei: oben eine Stunden-je-Projekt-Zusammenfassung,
-// darunter die Tages-/Projektzeilen. Anders als das Original ohne
-// Betragsspalte (Produktentscheid, siehe Plan) und mit ECHTEN Summen im
-// Kopfblock — im Originaltemplate stand dort ein separater, von den
-// Detailzeilen entkoppelter Projektkatalog mit SAP-Codes und immer 0.00 als
-// Platzhalter, siehe Kommentar in lib/import-stundenrapport.ts.
+// Export im Layout des alten ONEXIS-Stundenrapports — ein Kunde und ein
+// Monat pro Datei: oben eine Stunden-je-Projekt-Zusammenfassung, darunter
+// die Tages-/Projektzeilen. Anders als das Original ohne Betragsspalte
+// (Produktentscheid) und mit ECHTEN Summen im Kopfblock — im
+// Originaltemplate stand dort ein separater, von den Detailzeilen
+// entkoppelter Projektkatalog mit SAP-Codes und immer 0.00 als Platzhalter.
+// Datenquelle sind die Tageseinträge (TimeEntry mit Projekt/Kunde), die
+// direkt im Kalender erfasst werden — kein Import mehr, der Nico bewusst
+// wieder entfernt hat (zu fehleranfällig).
 export async function GET(req: Request) {
   try {
     const { userId, orgId } = await requireOrg();

@@ -459,11 +459,12 @@ describe("kennzahlen() schneidet Einträge ausserhalb von [from, to] weg", () =>
   });
 });
 
-// Migrations-Import (Stundenrapport, app/api/import/stundenrapport/route.ts)
-// schreibt Projekt-/Kundenzuordnung ohne Wirkung auf die Arbeitszeit — sonst
-// würde ein Tag mit schon vorhandener echter Arbeitszeit beim Import
-// verdoppelt gezählt (genau der gemeldete Bug: 8h echte Arbeitszeit + 9h
-// importierte Projektzeile = fälschlich 17h Ist).
+// countsAsWorktime:false markiert eine Zeile als reine Projekt-/
+// Kundenzuordnung ohne Wirkung auf die Arbeitszeit (TimeEntry.countsAsWorktime
+// in prisma/schema.prisma) — sonst würde ein Tag mit schon vorhandener
+// echter Arbeitszeit verdoppelt gezählt (8h echte Arbeitszeit + 9h einer
+// solchen Zeile = fälschlich 17h Ist). Aktuell setzt nichts in der App
+// dieses Feld aktiv auf false — die Absicherung bleibt trotzdem bestehen.
 describe("kennzahlen() ignoriert Einträge mit countsAsWorktime:false", () => {
   const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
 

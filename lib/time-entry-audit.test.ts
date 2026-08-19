@@ -80,11 +80,11 @@ describe("TimeEntry Audit-Trail (PUT)", () => {
   });
 });
 
-// "Graduierung" (Nachtrag Stundenrapport-Import): eine importierte Zeile
-// (countsAsWorktime:false, siehe app/api/import/stundenrapport/route.ts)
-// zählt bewusst nicht zur Arbeitszeit, bis ein Mensch sie aktiv im
-// Tagesdialog speichert — PUT setzt das Feld dabei immer auf true, egal ob
-// sich sonst etwas ändert.
+// "Graduierung": eine Zeile mit countsAsWorktime:false (siehe
+// prisma/schema.prisma) zählt bewusst nicht zur Arbeitszeit, bis ein Mensch
+// sie aktiv im Tagesdialog speichert — PUT setzt das Feld dabei immer auf
+// true, egal ob sich sonst etwas ändert. Aktuell setzt nichts in der App
+// dieses Feld aktiv auf false; der Test hält die Absicherung trotzdem fest.
 describe("TimeEntry countsAsWorktime — Graduierung beim aktiven Speichern (PUT)", () => {
   it("PUT setzt countsAsWorktime von false auf true, auch ohne inhaltliche Änderung, und protokolliert es", async () => {
     const created = await prisma.timeEntry.create({

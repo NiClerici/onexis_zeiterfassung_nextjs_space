@@ -1,12 +1,9 @@
 // Test für GET /api/export/stundenrapport — baut TimeEntry-Zeilen direkt in
 // der Test-DB auf (Muster wie lib/export-routes.test.ts), liest den
 // zurückgegebenen Buffer wieder mit ExcelJS ein und prüft Kopf, Projekt-
-// Summenblock und Detailzeilen. Zusätzlich ein echter Round-Trip: Import der
-// Swissgrid-Referenzdatei (lib/import-stundenrapport.ts), dann Export
-// desselben Monats — Summen müssen exakt übereinstimmen.
+// Summenblock und Detailzeilen.
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
-import { readFileSync } from "fs";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/db";
 
@@ -20,7 +17,6 @@ function setSession(userId: string, orgId: string, role: string) {
 }
 
 import { GET as exportGet } from "@/app/api/export/stundenrapport/route";
-import { POST as importPost } from "@/app/api/import/stundenrapport/route";
 
 function req(url: string): Request {
   return new Request(`http://localhost${url}`);
@@ -150,53 +146,5 @@ describe("GET /api/export/stundenrapport", () => {
     setSession(userId, ORG, "member");
     const res = await exportGet(req(`/api/export/stundenrapport?year=2026&month=7`));
     expect(res.status).toBe(400);
-  });
-});
-
-describe("Round-Trip: Import der Swissgrid-Referenzdatei, dann Export desselben Monats", () => {
-  it("Export-Summe stimmt exakt mit den unabhängig ausgezählten 91.00h überein", async () => {
-    const orgId = "test_export_sr_roundtrip_org";
-    await prisma.organization.create({ data: { id: orgId, name: "Roundtrip Org", slug: "export-sr-roundtrip-org", plan: "pro" } });
-    const user = await prisma.user.create({ data: { email: "export-sr-roundtrip@example.test", password: "irrelevant", firstName: "R", lastName: "T" } });
-    await prisma.membership.create({ data: { orgId, userId: user.id, role: "member", entryDate: new Date("2026-01-01"), kuerzel: "CLN" } });
-
-    try {
-      setSession(user.id, orgId, "member");
-      const buf = readFileSync("/Users/nicoclerici/Documents/Arbeit/Zeiterfassung/ONEXIS_Stundenabbrechnung_April-26_NClerici(Swissgrid Juli).csv");
-      const fd = new FormData();
-      fd.set("file", new File([buf], "ONEXIS_Stundenabbrechnung_April-26_NClerici(Swissgrid Juli).csv", { type: "text/csv" }));
-      fd.set("mode", "commit");
-      const importRes = await importPost(new Request("http://localhost/api/import/stundenrapport", { method: "POST", body: fd }));
-      const importBody = await importRes.json();
-      expect(importBody.totalImported).toBe(18);
-
-      const customer = await prisma.customer.findFirst({ where: { orgId, name: "Swissgrid" } });
-      expect(customer).not.toBeNull();
-
-      const exportRes = await exportGet(req(`/api/export/stundenrapport?year=2026&month=7&customerId=${customer!.id}`));
-      expect(exportRes.status).toBe(200);
-      const wb = await readWorkbook(exportRes);
-      const ws = wb.worksheets[0];
-
-      // Summenblock: genau 2 Projektzeilen (Zeile 6-7), Total in Zeile 8.
-      expect(ws.getCell("B6").value).not.toBeNull();
-      expect(ws.getCell("B8").value).toBe("Total (Stunden)");
-      expect(ws.getCell("A8").value).toBe(91);
-
-      // 18 Detailzeilen ab Zeile 11 bis 28, TOTAL in Zeile 29.
-      expect(ws.getCell("A29").value).toBe("TOTAL");
-      expect((ws.getCell("E29").value as any)?.formula).toBe("SUM(E11:E28)");
-
-      let sum = 0;
-      for (let r = 11; r <= 28; r++) sum += Number(ws.getCell(`E${r}`).value ?? 0);
-      expect(sum).toBeCloseTo(91, 5);
-    } finally {
-      await prisma.timeEntry.deleteMany({ where: { orgId } });
-      await prisma.project.deleteMany({ where: { orgId } });
-      await prisma.customer.deleteMany({ where: { orgId } });
-      await prisma.membership.deleteMany({ where: { orgId } });
-      await prisma.user.deleteMany({ where: { id: user.id } });
-      await prisma.organization.deleteMany({ where: { id: orgId } });
-    }
   });
 });
