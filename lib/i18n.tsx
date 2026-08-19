@@ -329,8 +329,6 @@ const translations: Record<string, string> = {
   "teamsicht.colVerrechnung": "Verrechnungsgrad",
   "teamsicht.colFerien": "Feriensaldo",
   "teamsicht.totalsRow": "Total",
-  "teamsicht.heatmapTitle": "Auslastungs-Heatmap",
-  "teamsicht.heatmapHint": "Verrechnungsgrad (%) je Kalenderwoche im gewählten Zeitraum.",
   "teamsicht.customersTitle": "Kunden- und Projektsicht",
   "teamsicht.customersSubtitle": "Kunden",
   "teamsicht.projectsSubtitle": "Projekte",

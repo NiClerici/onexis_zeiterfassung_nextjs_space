@@ -28,18 +28,6 @@ interface TeamMember {
   feriensaldo: FeriensaldoData;
 }
 
-interface WeekCell {
-  montag: string;
-  verrechnungsgrad?: number;
-  arbeitsstunden?: number;
-}
-
-interface HeatmapRow {
-  userId: string;
-  name: string;
-  weeks: WeekCell[];
-}
-
 interface ProjectRow {
   id: string;
   name: string;
@@ -62,26 +50,11 @@ interface CustomerRow {
 interface TeamData {
   members: TeamMember[];
   totals: { soll: number; ist: number; ueberstunden: number; kundenstunden: number; verrechnungsgrad: number };
-  heatmap: HeatmapRow[];
   customers: CustomerRow[];
   projects: ProjectRow[];
 }
 
 type SortKey = "name" | "pensum" | "soll" | "ist" | "ueberstunden" | "verrechnungsgrad";
-
-function heatColor(pct: number | undefined): string {
-  if (pct === undefined) return "bg-secondary";
-  if (pct <= 0) return "bg-secondary";
-  if (pct < 50) return "bg-orange-300/60 dark:bg-orange-900/40";
-  if (pct < 80) return "bg-yellow-300/60 dark:bg-yellow-800/40";
-  if (pct <= 110) return "bg-green-400/60 dark:bg-green-800/40";
-  return "bg-red-400/70 dark:bg-red-900/50"; // deutlich überbucht
-}
-
-function weekLabel(montag: string): string {
-  const d = new Date(`${montag}T00:00:00.000Z`);
-  return `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.`;
-}
 
 export default function TeamsichtPage() {
   const { t } = useI18n();
@@ -258,36 +231,6 @@ export default function TeamsichtPage() {
                     <td className="py-2 pr-3" />
                   </tr>
                 </tfoot>
-              </table>
-            </div>
-          </motion.div>
-
-          {/* Auslastungs-Heatmap */}
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <h2 className="text-sm font-display font-semibold mb-1">{t("teamsicht.heatmapTitle")}</h2>
-            <p className="text-xs text-muted-foreground mb-3">{t("teamsicht.heatmapHint")}</p>
-            <div className="overflow-x-auto">
-              <table className="text-xs border-separate" style={{ borderSpacing: "3px" }}>
-                <thead>
-                  <tr>
-                    <th className="text-left font-medium text-muted-foreground pr-2 sticky left-0 bg-card">{t("teamsicht.colName")}</th>
-                    {(data.heatmap[0]?.weeks ?? []).map((w) => (
-                      <th key={w.montag} className="font-medium text-muted-foreground px-1 whitespace-nowrap">{weekLabel(w.montag)}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.heatmap.map((row) => (
-                    <tr key={row.userId}>
-                      <td className="text-left pr-2 font-medium whitespace-nowrap sticky left-0 bg-card">{row.name}</td>
-                      {row.weeks.map((w) => (
-                        <td key={w.montag} className={`w-9 h-7 text-center rounded-md ${heatColor(w.verrechnungsgrad)}`} title={`${weekLabel(w.montag)}: ${w.verrechnungsgrad?.toFixed(0)}% (${w.arbeitsstunden?.toFixed(1)}h)`}>
-                          {w.verrechnungsgrad !== undefined ? Math.round(w.verrechnungsgrad) : ""}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
               </table>
             </div>
           </motion.div>
