@@ -351,6 +351,12 @@ model Project {
   budgetHours Float?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
+  createdBy   String?  // userId der erstellenden Person — bewusst keine Relation
+                        // (gleiches Muster wie TimeEntryAudit.changedBy), NULL bei
+                        // Bestandsprojekten vor dieser Migration. Macht ein von
+                        // einem "member" frisch angelegtes Projekt für diesen
+                        // sichtbar, bevor er selbst Stunden darauf gebucht hat
+                        // (siehe GET /api/projects).
 
   org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)

@@ -37,10 +37,17 @@ export async function GET(req: Request) {
     const visibleIds = Array.from(
       new Set([...fromEntries.map((e) => e.projectId), ...fromMonths.map((m) => m.projectId)].filter((id): id is string => !!id))
     );
-    if (visibleIds.length === 0) return NextResponse.json({ projects: [] });
 
+    // Ohne diesen OR-Zweig wäre ein frisch von einem "member" erstelltes
+    // Projekt für ihn selbst unsichtbar, bis er zum ersten Mal Stunden
+    // darauf gebucht hat — Henne-Ei-Problem, da das Projekt-Dropdown im
+    // Kalender genau aus dieser Liste gespeist wird.
     const projects = await prisma.project.findMany({
-      where: { orgId, id: { in: visibleIds }, ...(customerId ? { customerId } : {}) },
+      where: {
+        orgId,
+        OR: [{ id: { in: visibleIds } }, { createdBy: userId }],
+        ...(customerId ? { customerId } : {}),
+      },
       orderBy: { name: "asc" },
     });
 
@@ -54,7 +61,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const { orgId } = await requireOrg();
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { customerId, name, hourlyRate, budgetHours } = body ?? {};
@@ -79,7 +86,7 @@ export async function POST(req: Request) {
     }
 
     const project = await prisma.project.create({
-      data: { orgId, customerId, name: trimmedName, hourlyRate: parsedRate, budgetHours: parsedBudget },
+      data: { orgId, customerId, name: trimmedName, hourlyRate: parsedRate, budgetHours: parsedBudget, createdBy: userId },
     });
 
     return NextResponse.json({ project });
