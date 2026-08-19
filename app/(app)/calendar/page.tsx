@@ -9,7 +9,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput, type HolidayInput, type EintragMitDatum } from "@/lib/calc";
 import { pruefeCompliance } from "@/lib/compliance";
-import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
+import { DayEntryDialog, type DayTimeEntry } from "@/components/day-entry-dialog";
 
 interface UserProfile {
   firstName: string;
@@ -67,8 +67,6 @@ export default function CalendarPage() {
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
   const [entries, setEntries] = useState<DayTimeEntry[]>([]);
-  const [customers, setCustomers] = useState<DayCustomer[]>([]);
-  const [projects, setProjects] = useState<DayProject[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -105,26 +103,6 @@ export default function CalendarPage() {
       }
     } catch (err: any) { console.error(err); }
   }, [currentDate?.year, currentDate?.month]);
-
-  const fetchCustomers = useCallback(async () => {
-    try {
-      const res = await fetch("/api/customers");
-      if (res?.ok) {
-        const data = await res?.json?.().catch(() => ({}));
-        setCustomers(data?.customers ?? []);
-      }
-    } catch (err: any) { console.error(err); }
-  }, []);
-
-  const fetchProjects = useCallback(async () => {
-    try {
-      const res = await fetch("/api/projects");
-      if (res?.ok) {
-        const data = await res?.json?.().catch(() => ({}));
-        setProjects(data?.projects ?? []);
-      }
-    } catch (err: any) { console.error(err); }
-  }, []);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -182,7 +160,7 @@ export default function CalendarPage() {
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
   useEffect(() => { fetchMonthLocks(); }, [fetchMonthLocks]);
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchHolidays, fetchCustomers, fetchProjects]);
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); }, [fetchProfile, fetchPensumChanges, fetchHolidays]);
 
   // Close month picker on outside click
   useEffect(() => {
@@ -604,8 +582,6 @@ export default function CalendarPage() {
         dateStr={selectedDateStr}
         dayLabel={selectedDayLabel}
         entries={selectedDayEntries}
-        customers={customers}
-        projects={projects}
         tagesSoll={selectedDayTagesSoll}
         onChanged={fetchEntries}
         locked={isMember && isCurrentMonthLocked}

@@ -3,6 +3,11 @@
 // die Berechnung von der Route trennt, damit die Diff-Logik ohne Prisma
 // getestet werden kann.
 
+// customerId/projectId/billable werden von app/api/time-entries/route.ts seit
+// der Umstellung auf monatliche Kundenstunden (CustomerMonth) nicht mehr
+// gelesen oder geschrieben — hier auditiert würden sie nur noch die
+// unveränderten Altwerte gegen "fehlt im Request" vergleichen und dadurch
+// bei jedem PUT eine falsche Änderung melden.
 export const AUDITED_TIME_ENTRY_FIELDS = [
   "date",
   "type",
@@ -10,9 +15,6 @@ export const AUDITED_TIME_ENTRY_FIELDS = [
   "bis",
   "pauseMin",
   "notiz",
-  "customerId",
-  "projectId",
-  "billable",
   "hours",
 ] as const;
 

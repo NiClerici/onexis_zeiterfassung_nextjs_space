@@ -16,23 +16,7 @@ export interface DayTimeEntry {
   bis: string | null;
   pauseMin: number;
   notiz: string | null;
-  customerId: string | null;
-  projectId: string | null;
-  billable: boolean;
   hours: number | null;
-}
-
-export interface DayCustomer {
-  id: string;
-  name: string;
-  billable: boolean;
-}
-
-export interface DayProject {
-  id: string;
-  customerId: string;
-  name: string;
-  active: boolean;
 }
 
 interface DraftRow {
@@ -43,9 +27,6 @@ interface DraftRow {
   bis: string;
   pauseMin: string;
   notiz: string;
-  customerId: string;
-  projectId: string;
-  billable: boolean;
   hours: string;
   // Nur für type==="arbeit" relevant: Eingabe über Von/Bis/Pause (false,
   // Standard) oder direkt über eine Stundenzahl (true) — im zweiten Fall
@@ -64,9 +45,6 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
     bis: entry.bis ?? "17:00",
     pauseMin: String(entry.pauseMin ?? 0),
     notiz: entry.notiz ?? "",
-    customerId: entry.customerId ?? "",
-    projectId: entry.projectId ?? "",
-    billable: entry.billable ?? false,
     hours: entry.hours != null ? String(entry.hours) : fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
@@ -82,9 +60,6 @@ function newDraft(fallbackHours: number): DraftRow {
     bis: "17:00",
     pauseMin: "0",
     notiz: "",
-    customerId: "",
-    projectId: "",
-    billable: false,
     hours: fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
@@ -97,8 +72,6 @@ interface DayEntryDialogProps {
   dateStr: string;
   dayLabel: string;
   entries: DayTimeEntry[];
-  customers: DayCustomer[];
-  projects: DayProject[];
   tagesSoll: number;
   onChanged: () => void;
   // Monatsabschluss (MIGRATION.md Punkt 6e) — true, wenn der angezeigte Monat
@@ -108,7 +81,7 @@ interface DayEntryDialogProps {
   locked?: boolean;
 }
 
-export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged, locked = false }: DayEntryDialogProps) {
+export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, tagesSoll, onChanged, locked = false }: DayEntryDialogProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<DraftRow[]>([]);
 
@@ -119,33 +92,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
   const updateRow = (key: string, patch: Partial<DraftRow>) => {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  };
-
-  // Kunde/Projekt bestimmen billable — beim Wechsel des Kunden wird billable
-  // aus dessen Standard-Flag neu vorbelegt (im Tagesdialog per Checkbox
-  // weiterhin überschreibbar, MIGRATION.md Punkt 5).
-  const handleCustomerChange = (key: string, customerId: string) => {
-    const customer = customers.find((c) => c.id === customerId);
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.key !== key) return r;
-        // Projekt zurücksetzen, wenn es nicht mehr zum neuen Kunden passt.
-        const projectStillValid = r.projectId && projects.find((p) => p.id === r.projectId)?.customerId === customerId;
-        return { ...r, customerId, projectId: projectStillValid ? r.projectId : "", billable: customer?.billable ?? false };
-      })
-    );
-  };
-
-  const handleProjectChange = (key: string, projectId: string) => {
-    const project = projects.find((p) => p.id === projectId);
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.key !== key) return r;
-        if (!project) return { ...r, projectId: "" };
-        const customer = customers.find((c) => c.id === project.customerId);
-        return { ...r, projectId, customerId: project.customerId, billable: customer?.billable ?? r.billable };
-      })
-    );
   };
 
   const handleTypeChange = (key: string, type: EintragTyp) => {
@@ -180,9 +126,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
         bis: isArbeit ? (arbeitszeit?.bis ?? row.bis) : null,
         pauseMin: isArbeit ? (arbeitszeit?.pauseMin ?? Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0))) : 0,
         notiz: row.notiz.trim() || null,
-        customerId: row.customerId || null,
-        projectId: row.projectId || null,
-        billable: row.billable,
         // hours ist nur für Absenzen relevant — bei arbeit wird aus von/bis/pauseMin berechnet
         hours: isArbeit || row.hours === "" ? null : Math.max(0, Math.min(24, parseFloat(row.hours) || 0)),
       };
@@ -390,52 +333,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                             </div>
                           </div>
                         )}
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label htmlFor={`customer-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.customer")}</label>
-                            <select
-                              id={`customer-${row.key}`}
-                              value={row.customerId}
-                              onChange={(e) => handleCustomerChange(row.key, e.target.value)}
-                              className="w-full px-2 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                            >
-                              <option value="">{t("calendar.customerNone")}</option>
-                              {customers.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label htmlFor={`project-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.project")}</label>
-                            <select
-                              id={`project-${row.key}`}
-                              value={row.projectId}
-                              onChange={(e) => handleProjectChange(row.key, e.target.value)}
-                              disabled={!row.customerId}
-                              className="w-full px-2 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition disabled:opacity-50"
-                            >
-                              <option value="">{t("calendar.projectNone")}</option>
-                              {projects
-                                .filter((p) => p.customerId === row.customerId && p.active)
-                                .map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.name}
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
-                        </div>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={row.billable}
-                            onChange={(e) => updateRow(row.key, { billable: e.target.checked })}
-                            className="accent-primary"
-                          />
-                          {t("calendar.billable")}
-                        </label>
                       </>
                     ) : (
                       <div>
