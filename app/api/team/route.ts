@@ -73,7 +73,7 @@ export async function GET(req: Request) {
         ? Promise.resolve([])
         : prisma.customerMonth.findMany({
             where: { orgId, userId: { in: alleUserIds }, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
-            include: { customer: { select: { name: true, billable: true, hourlyRate: true } }, project: { select: { name: true, hourlyRate: true, budgetHours: true } } },
+            include: { customer: { select: { name: true, hourlyRate: true } }, project: { select: { name: true, hourlyRate: true, budgetHours: true } } },
           }),
       // Kundenstunden für kennzahlen().verrechnungsgrad je Person — neu aus
       // TimeEntry berechnet, mit Fallback auf CustomerMonth für noch nicht

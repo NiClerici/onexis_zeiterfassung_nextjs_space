@@ -18,7 +18,6 @@ export interface DayTimeEntry {
   notiz: string | null;
   customerId: string | null;
   projectId: string | null;
-  billable: boolean;
   hours: number | null;
   // false nur bei aus dem Stundenrapport-Import migrierten Zeilen (siehe
   // TimeEntry.countsAsWorktime in prisma/schema.prisma) — zählt bewusst
@@ -30,7 +29,6 @@ export interface DayTimeEntry {
 export interface DayCustomer {
   id: string;
   name: string;
-  billable: boolean;
 }
 
 export interface DayProject {
@@ -50,7 +48,6 @@ interface DraftRow {
   notiz: string;
   customerId: string;
   projectId: string;
-  billable: boolean;
   hours: string;
   // Nur für type==="arbeit" relevant: Eingabe über Von/Bis/Pause (false,
   // Standard) oder direkt über eine Stundenzahl (true) — im zweiten Fall
@@ -72,7 +69,6 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
     notiz: entry.notiz ?? "",
     customerId: entry.customerId ?? "",
     projectId: entry.projectId ?? "",
-    billable: entry.billable ?? false,
     hours: entry.hours != null ? String(entry.hours) : fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
@@ -91,7 +87,6 @@ function newDraft(fallbackHours: number): DraftRow {
     notiz: "",
     customerId: "",
     projectId: "",
-    billable: false,
     hours: fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
@@ -131,17 +126,14 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
   // Kunde ist keine eigene Auswahl mehr — er ergibt sich aus dem gewählten
   // Projekt (Project.customerId ist required, siehe app/api/time-entries/
-  // route.ts:resolveProjectAndCustomer). billable wird beim Projektwechsel
-  // aus dem Standard-Flag des zugehörigen Kunden neu vorbelegt, bleibt aber
-  // per Checkbox überschreibbar (MIGRATION.md Punkt 5).
+  // route.ts:resolveProjectAndCustomer).
   const handleProjectChange = (key: string, projectId: string) => {
     const project = projects.find((p) => p.id === projectId);
     setRows((prev) =>
       prev.map((r) => {
         if (r.key !== key) return r;
-        if (!project) return { ...r, projectId: "", customerId: "", billable: false };
-        const customer = customers.find((c) => c.id === project.customerId);
-        return { ...r, projectId, customerId: project.customerId, billable: customer?.billable ?? r.billable };
+        if (!project) return { ...r, projectId: "", customerId: "" };
+        return { ...r, projectId, customerId: project.customerId };
       })
     );
   };
@@ -180,7 +172,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
         notiz: row.notiz.trim() || null,
         customerId: row.customerId || null,
         projectId: row.projectId || null,
-        billable: row.billable,
         // hours ist nur für Absenzen relevant — bei arbeit wird aus von/bis/pauseMin berechnet
         hours: isArbeit || row.hours === "" ? null : Math.max(0, Math.min(24, parseFloat(row.hours) || 0)),
       };
@@ -416,15 +407,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                             })}
                           </select>
                         </div>
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={row.billable}
-                            onChange={(e) => updateRow(row.key, { billable: e.target.checked })}
-                            className="accent-primary"
-                          />
-                          {t("calendar.billable")}
-                        </label>
                       </>
                     ) : (
                       <div>

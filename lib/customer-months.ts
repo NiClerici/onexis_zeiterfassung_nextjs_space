@@ -40,10 +40,11 @@ export function monthsInRange(from: Date, to: Date): { year: number; month: numb
 }
 
 // Kundenstunden je (userId, Jahr, Monat) — die eigentliche, für alle
-// Aufrufer (Teamsicht, Export, Analytics) gemeinsame Berechnung. Nur Stunden
-// bei verrechenbaren Kunden zählen als "Kundenstunden" im Sinne von
-// kennzahlen().verrechnungsgrad — dieselbe Bedeutung wie früher
-// TimeEntry.billable, jetzt wieder direkt an TimeEntry.customerId/billable.
+// Aufrufer (Teamsicht, Export, Analytics) gemeinsame Berechnung. Jede
+// "arbeit"-Stunde mit Kunden-/Projektzuordnung zählt als "Kundenstunde" im
+// Sinne von kennzahlen().verrechnungsgrad (Betrieb.md-Nachtrag, 19.08.2026 —
+// vorher gab es zusätzlich einen "billable"-Haken pro Kunde/Eintrag, der
+// entfiel, weil die Zuordnung selbst schon die einzig relevante Aussage ist).
 export async function billableHoursByUserAndMonth(params: {
   orgId: string;
   userIds: string[];
@@ -60,19 +61,16 @@ export async function billableHoursByUserAndMonth(params: {
   const lastMonth = months[months.length - 1];
   const monthEnd = new Date(Date.UTC(lastMonth.year, lastMonth.month, 0));
 
-  // Neue Quelle: TimeEntry mit Kundenzuordnung eines verrechenbaren Kunden.
-  // "arbeit" braucht kein Tagessoll (stundenAusEintrag rechnet für diesen
-  // Typ direkt aus von/bis/pauseMin bzw. hours), deshalb genügt ein
-  // einzelnes Query ohne Pensum-/Feiertagsauflösung.
+  // Neue Quelle: TimeEntry mit Kundenzuordnung. "arbeit" braucht kein
+  // Tagessoll (stundenAusEintrag rechnet für diesen Typ direkt aus
+  // von/bis/pauseMin bzw. hours), deshalb genügt ein einzelnes Query ohne
+  // Pensum-/Feiertagsauflösung.
   const entries = await prisma.timeEntry.findMany({
     where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, customerId: { not: null }, date: { gte: monthStart, lte: monthEnd } },
-    select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true, billable: true, customer: { select: { billable: true } } },
+    select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true },
   });
   const neuByUserMonth = new Map<string, Map<string, number>>();
   for (const e of entries) {
-    // billable ist am Tageseintrag überschreibbar (Tagesdialog) — Standard
-    // aus dem Kunden-Flag, aber die konkrete Zeile entscheidet.
-    if (!e.billable) continue;
     const d = new Date(e.date);
     const key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
     const stunden = stundenAusEintrag({ typ: "arbeit", von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, 0);
@@ -85,11 +83,9 @@ export async function billableHoursByUserAndMonth(params: {
   // eigene TimeEntry-Summe (siehe Modulkommentar).
   const oldRows = await prisma.customerMonth.findMany({
     where: { orgId, userId: { in: userIds }, OR: months.map((mo) => ({ year: mo.year, month: mo.month })) },
-    include: { customer: { select: { billable: true } } },
   });
   const altByUserMonth = new Map<string, Map<string, number>>();
   for (const r of oldRows) {
-    if (!r.customer.billable) continue;
     const key = `${r.year}-${r.month}`;
     const perMonth = altByUserMonth.get(r.userId) ?? new Map<string, number>();
     perMonth.set(key, (perMonth.get(key) ?? 0) + r.hours);

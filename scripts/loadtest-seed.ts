@@ -62,7 +62,7 @@ async function seed() {
   const projekte: string[] = [];
   for (let i = 0; i < 10; i++) {
     const kunde = await prisma.customer.create({
-      data: { orgId: LOADTEST_ORG, name: `Lasttest-Kunde ${i + 1}`, hourlyRate: 120 + i * 10, billable: true },
+      data: { orgId: LOADTEST_ORG, name: `Lasttest-Kunde ${i + 1}`, hourlyRate: 120 + i * 10 },
     });
     kunden.push(kunde.id);
     for (let j = 0; j < 3; j++) {
@@ -121,7 +121,7 @@ async function seed() {
   // TimeEntries: jeder Werktag über JAHRE Jahre, für jede Person.
   const von = new Date(Date.UTC(START_JAHR, 0, 1));
   const bis = new Date(Date.UTC(START_JAHR + JAHRE - 1, 11, 31));
-  const rows: Array<{ userId: string; orgId: string; date: Date; type: string; von: string | null; bis: string | null; pauseMin: number; hours: number | null; customerId: string | null; projectId: string | null; billable: boolean }> = [];
+  const rows: Array<{ userId: string; orgId: string; date: Date; type: string; von: string | null; bis: string | null; pauseMin: number; hours: number | null; customerId: string | null; projectId: string | null }> = [];
 
   for (let idx = 0; idx < userIds.length; idx++) {
     const userId = userIds[idx];
@@ -143,7 +143,6 @@ async function seed() {
           hours: istAbsenz ? 8 : null,
           customerId: istAbsenz ? null : kunden[(idx + tagNr) % kunden.length],
           projectId: istAbsenz ? null : projekte[(idx + tagNr) % projekte.length],
-          billable: !istAbsenz,
         });
         tagNr++;
       }

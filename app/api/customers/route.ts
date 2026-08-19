@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     const { orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { name, billable, hourlyRate } = body ?? {};
+    const { name, hourlyRate } = body ?? {};
 
     const trimmedName = name?.trim?.();
     if (!trimmedName) return NextResponse.json({ error: "Name fehlt" }, { status: 400 });
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     }
 
     const customer = await prisma.customer.create({
-      data: { orgId, name: trimmedName, billable: billable !== undefined ? Boolean(billable) : true, hourlyRate: parsedRate },
+      data: { orgId, name: trimmedName, hourlyRate: parsedRate },
     });
 
     return NextResponse.json({ customer });
@@ -89,7 +89,7 @@ export async function PUT(req: Request) {
     const { orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { id, name, billable, hourlyRate } = body ?? {};
+    const { id, name, hourlyRate } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
@@ -114,7 +114,6 @@ export async function PUT(req: Request) {
       where: { id },
       data: {
         name: trimmedName || existing.name,
-        billable: billable !== undefined ? Boolean(billable) : existing.billable,
         hourlyRate: parsedRate !== undefined ? parsedRate : existing.hourlyRate,
       },
     });

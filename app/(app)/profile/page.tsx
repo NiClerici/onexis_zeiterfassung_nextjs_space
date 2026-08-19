@@ -38,7 +38,6 @@ interface OvertimePayoutData {
 interface CustomerData {
   id: string;
   name: string;
-  billable: boolean;
   hourlyRate: number | null;
 }
 
@@ -444,19 +443,6 @@ export default function ProfilePage() {
         setNewCustomerRate("");
         await fetchCustomers();
       } else { toast.error(data?.error ?? t("profile.customerError")); }
-    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
-  };
-
-  const toggleCustomerBillable = async (customer: CustomerData) => {
-    setSavingCustomer(true);
-    try {
-      const res = await fetch("/api/customers", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: customer.id, billable: !customer.billable }),
-      });
-      if (res?.ok) { await fetchCustomers(); }
-      else { toast.error(t("profile.customerError")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
   };
 
@@ -926,10 +912,6 @@ export default function ProfilePage() {
                 ) : (
                   <>
                     <span className="font-medium flex-1 min-w-0 truncate">{c.name}{c.hourlyRate != null && <span className="text-muted-foreground font-normal"> · {c.hourlyRate.toFixed(0)} CHF/h</span>}</span>
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none shrink-0">
-                      <input type="checkbox" checked={c.billable} onChange={() => toggleCustomerBillable(c)} className="accent-primary" />
-                      {t("profile.billable")}
-                    </label>
                     <button onClick={() => startEditCustomer(c)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition shrink-0"><Pencil className="w-3.5 h-3.5" /></button>
                     <button onClick={() => deleteCustomer(c.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                   </>

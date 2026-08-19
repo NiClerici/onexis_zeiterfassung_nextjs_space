@@ -273,10 +273,6 @@ model TimeEntry {
   notiz      String?
   customerId String?
   projectId  String?
-  // Verrechenbar — beim Anlegen aus Projekt/Kunde vorbelegt (customer.billable),
-  // im Tagesdialog überschreibbar. Ersetzt die frühere Kunden-Lookup-Liste in
-  // kennzahlen() (MIGRATION.md Punkt 5).
-  billable   Boolean  @default(false)
   // true = zählt zu Soll/Ist/Überzeit (kennzahlen() in lib/calc.ts) — der
   // bisherige, einzige Zustand. false = reine Projekt-/Kundenzuordnung ohne
   // Wirkung auf die Arbeitszeit-Kennzahlen, aber weiterhin wirksam für alles
@@ -328,7 +324,6 @@ model Customer {
   id        String      @id @default(cuid())
   orgId     String
   name      String
-  billable  Boolean     @default(true)
   // Fallback-Stundensatz, falls ein Projekt dieses Kunden keinen eigenen
   // hourlyRate trägt (MIGRATION.md Punkt 5).
   hourlyRate Float?

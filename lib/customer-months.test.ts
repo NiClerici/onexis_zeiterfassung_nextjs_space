@@ -24,7 +24,7 @@ beforeAll(async () => {
   await prisma.membership.create({ data: { orgId: ORG, userId: userAId, role: "member", entryDate: new Date("2026-01-01") } });
   await prisma.membership.create({ data: { orgId: ORG, userId: userBId, role: "member", entryDate: new Date("2026-01-01") } });
 
-  const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Testkunde", billable: true } });
+  const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Testkunde" } });
   customerId = customer.id;
   const project = await prisma.project.create({ data: { orgId: ORG, customerId, name: "Testprojekt" } });
   projectId = project.id;
@@ -41,22 +41,22 @@ afterAll(async () => {
 });
 
 describe("billableHoursByUserAndMonth / sumCustomerHours", () => {
-  it("zählt TimeEntry-Stunden mit Projekt eines verrechenbaren Kunden", async () => {
+  it("zählt TimeEntry-Stunden mit Kunden-/Projektzuordnung", async () => {
     await prisma.timeEntry.create({
-      data: { orgId: ORG, userId: userAId, date: new Date("2026-07-01"), type: "arbeit", hours: 5, customerId, projectId, billable: true },
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-07-01"), type: "arbeit", hours: 5, customerId, projectId },
     });
     await prisma.timeEntry.create({
-      data: { orgId: ORG, userId: userAId, date: new Date("2026-07-08"), type: "arbeit", hours: 3, customerId, projectId, billable: true },
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-07-08"), type: "arbeit", hours: 3, customerId, projectId },
     });
 
     const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-07-01"), to: new Date("2026-07-31") });
     expect(total).toBe(8);
   });
 
-  it("nicht-verrechenbare Einträge (billable=false) zählen nicht, auch wenn der Kunde selbst verrechenbar ist", async () => {
+  it("Einträge ohne Kunden-/Projektzuordnung zählen nicht", async () => {
     await prisma.timeEntry.deleteMany({ where: { orgId: ORG, userId: userAId, date: { gte: new Date("2026-08-01"), lte: new Date("2026-08-31") } } });
     await prisma.timeEntry.create({
-      data: { orgId: ORG, userId: userAId, date: new Date("2026-08-03"), type: "arbeit", hours: 4, customerId, projectId, billable: false },
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-08-03"), type: "arbeit", hours: 4 },
     });
     const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-08-01"), to: new Date("2026-08-31") });
     expect(total).toBe(0);
@@ -71,7 +71,7 @@ describe("billableHoursByUserAndMonth / sumCustomerHours", () => {
   it("Kein Fallback, sobald der Monat eine eigene TimeEntry-Summe > 0 hat — auch wenn zusätzlich CustomerMonth-Zeilen existieren", async () => {
     await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2026, month: 9, customerId, hours: 999 } });
     await prisma.timeEntry.create({
-      data: { orgId: ORG, userId: userAId, date: new Date("2026-09-02"), type: "arbeit", hours: 2, customerId, projectId, billable: true },
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-09-02"), type: "arbeit", hours: 2, customerId, projectId },
     });
     const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-09-01"), to: new Date("2026-09-30") });
     expect(total).toBe(2); // NICHT 999 — die neue Zahl gewinnt, sobald sie > 0 ist
@@ -88,7 +88,7 @@ describe("billableHoursByUserAndMonth / sumCustomerHours", () => {
 
   it("sumCustomerHoursByUser: mehrere Personen in einem Aufruf, unabhängig voneinander", async () => {
     await prisma.timeEntry.create({
-      data: { orgId: ORG, userId: userBId, date: new Date("2026-07-05"), type: "arbeit", hours: 6, customerId, projectId, billable: true },
+      data: { orgId: ORG, userId: userBId, date: new Date("2026-07-05"), type: "arbeit", hours: 6, customerId, projectId },
     });
     const result = await sumCustomerHoursByUser({ orgId: ORG, userIds: [userAId, userBId], from: new Date("2026-07-01"), to: new Date("2026-07-31") });
     expect(result.get(userAId)).toBe(8); // aus dem ersten Test oben

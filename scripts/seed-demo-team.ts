@@ -132,7 +132,7 @@ async function main() {
   const swissgrid = await prisma.customer.upsert({
     where: { orgId_name: { orgId: ORG_ID, name: "Swissgrid" } },
     update: {},
-    create: { orgId: ORG_ID, name: "Swissgrid", billable: true },
+    create: { orgId: ORG_ID, name: "Swissgrid" },
   });
 
   const projects = [];
@@ -194,7 +194,6 @@ async function main() {
             pauseMin: 60,
             customerId: noProject ? null : swissgrid.id,
             projectId: noProject ? null : project!.id,
-            billable: !noProject,
           },
         });
       }

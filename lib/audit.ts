@@ -12,7 +12,6 @@ export const AUDITED_TIME_ENTRY_FIELDS = [
   "notiz",
   "customerId",
   "projectId",
-  "billable",
   "hours",
   "countsAsWorktime",
 ] as const;

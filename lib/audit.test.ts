@@ -3,7 +3,7 @@ import { diffTimeEntryFields } from "./audit";
 
 describe("diffTimeEntryFields", () => {
   it("liefert eine leere Liste, wenn sich nichts geändert hat", () => {
-    const state = { date: new Date("2026-08-10"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30, notiz: null, customerId: null, projectId: null, billable: false, hours: null };
+    const state = { date: new Date("2026-08-10"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30, notiz: null, customerId: null, projectId: null, hours: null };
     expect(diffTimeEntryFields(state, { ...state })).toEqual([]);
   });
 
@@ -50,9 +50,9 @@ describe("diffTimeEntryFields", () => {
     expect(diffTimeEntryFields(before, after)).toEqual([]);
   });
 
-  it("behandelt boolean-Felder korrekt (billable false → true)", () => {
-    expect(diffTimeEntryFields({ billable: false }, { billable: true })).toEqual([
-      { field: "billable", oldValue: "false", newValue: "true" },
+  it("behandelt boolean-Felder korrekt (countsAsWorktime false → true)", () => {
+    expect(diffTimeEntryFields({ countsAsWorktime: false }, { countsAsWorktime: true })).toEqual([
+      { field: "countsAsWorktime", oldValue: "false", newValue: "true" },
     ]);
   });
 });

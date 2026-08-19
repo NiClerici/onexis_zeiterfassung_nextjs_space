@@ -185,7 +185,7 @@ export async function GET(req: Request) {
         ? []
         : await prisma.customerMonth.findMany({
             where: { orgId, userId, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
-            include: { customer: { select: { name: true, billable: true } } },
+            include: { customer: { select: { name: true } } },
             orderBy: [{ year: "asc" }, { month: "asc" }],
           });
     // Für kennzahlen().verrechnungsgrad: neu aus TimeEntry berechnet, mit
@@ -206,10 +206,10 @@ export async function GET(req: Request) {
     // (eine allfällige Projektaufteilung wird hier wieder zum Kunden summiert
     // — das Importformat kennt nur Jahr | Monat | Kunde | Stunden, siehe
     // lib/import-timesheet.ts).
-    const customerBreakdownMap = new Map<string, { year: number; month: number; name: string; billable: boolean; hours: number }>();
+    const customerBreakdownMap = new Map<string, { year: number; month: number; name: string; hours: number }>();
     for (const cm of customerMonths) {
       const key = `${cm.year}-${cm.month}-${cm.customerId}`;
-      const cur = customerBreakdownMap.get(key) ?? { year: cm.year, month: cm.month, name: cm.customer.name, billable: cm.customer.billable, hours: 0 };
+      const cur = customerBreakdownMap.get(key) ?? { year: cm.year, month: cm.month, name: cm.customer.name, hours: 0 };
       cur.hours += cm.hours;
       customerBreakdownMap.set(key, cur);
     }
@@ -291,24 +291,22 @@ export async function GET(req: Request) {
       { header: "Jahr", key: "year", width: 10 },
       { header: "Monat", key: "month", width: 14 },
       { header: "Kunde", key: "customer", width: 28 },
-      { header: "Verrechenbar", key: "billable", width: 14 },
       { header: "Stunden", key: "hours", width: 12 },
     ];
-    styleHeaderRow(ws2.getRow(1), 5);
+    styleHeaderRow(ws2.getRow(1), 4);
 
     for (const c of customerBreakdown) {
       const row = ws2.addRow({
         year: c.year,
         month: MONTH_NAMES[c.month - 1] ?? c.month,
         customer: c.name,
-        billable: c.billable ? "Ja" : "Nein",
         hours: Math.round(c.hours * 100) / 100,
       });
-      styleDataRow(row, 5);
+      styleDataRow(row, 4);
     }
 
     if (customerBreakdown.length === 0) {
-      const emptyRow = ws2.addRow({ year: "", month: "", customer: "Keine Kundenstunden vorhanden", billable: "", hours: "" });
+      const emptyRow = ws2.addRow({ year: "", month: "", customer: "Keine Kundenstunden vorhanden", hours: "" });
       emptyRow.getCell(3).font = { italic: true, color: { argb: "FF999999" } };
     }
 

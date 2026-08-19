@@ -71,13 +71,12 @@ function buildExcelWorkbook(data: Awaited<ReturnType<typeof gatherOrgExport>>): 
   const wsCustomers = workbook.addWorksheet("Kunden");
   wsCustomers.columns = [
     { header: "Name", key: "name", width: 28 },
-    { header: "Verrechenbar", key: "billable", width: 14 },
     { header: "Stundensatz", key: "rate", width: 14 },
   ];
-  styleHeaderRow(wsCustomers.getRow(1), 3);
+  styleHeaderRow(wsCustomers.getRow(1), 2);
   for (const c of data.customers) {
-    const row = wsCustomers.addRow({ name: c.name, billable: c.billable ? "Ja" : "Nein", rate: c.hourlyRate ?? "" });
-    styleDataRow(row, 3);
+    const row = wsCustomers.addRow({ name: c.name, rate: c.hourlyRate ?? "" });
+    styleDataRow(row, 2);
   }
 
   const wsProjects = workbook.addWorksheet("Projekte");
