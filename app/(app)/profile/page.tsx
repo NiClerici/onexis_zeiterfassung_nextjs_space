@@ -162,7 +162,9 @@ export default function ProfilePage() {
   const [importDone, setImportDone] = useState(false);
   const [importPreview, setImportPreview] = useState<{
     imported: number; skippedExisting: number; skippedLocked: number; totalRows: number;
-    dateFrom: string | null; dateTo: string | null; errors: { rowNumber: number; message: string }[];
+    dateFrom: string | null; dateTo: string | null;
+    importedCustomerMonths: number; skippedExistingCustomerMonths: number; skippedLockedCustomerMonths: number; totalCustomerMonthRows: number;
+    errors: { rowNumber: number; message: string; sheet: string }[];
   } | null>(null);
 
   const fetchProfile = useCallback(async () => {
@@ -1171,27 +1173,36 @@ export default function ProfilePage() {
             {importPreview.skippedLocked > 0 && (
               <p className="text-xs text-muted-foreground">{t("profile.importSkippedLocked", { count: String(importPreview.skippedLocked) })}</p>
             )}
+            {importPreview.totalCustomerMonthRows > 0 && (
+              <p>{t("profile.importCustomerMonthCount", { imported: String(importPreview.importedCustomerMonths), total: String(importPreview.totalCustomerMonthRows) })}</p>
+            )}
+            {importPreview.skippedExistingCustomerMonths > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.importSkippedExisting", { count: String(importPreview.skippedExistingCustomerMonths) })}</p>
+            )}
+            {importPreview.skippedLockedCustomerMonths > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.importSkippedLocked", { count: String(importPreview.skippedLockedCustomerMonths) })}</p>
+            )}
             {importPreview.errors.length > 0 && (
               <details className="text-xs text-destructive">
                 <summary className="cursor-pointer">{t("profile.importErrors", { count: String(importPreview.errors.length) })}</summary>
                 <ul className="mt-1 list-disc list-inside space-y-0.5">
                   {importPreview.errors.slice(0, 30).map((e, i) => (
-                    <li key={i}>Zeile {e.rowNumber}: {e.message}</li>
+                    <li key={i}>{e.sheet} · Zeile {e.rowNumber}: {e.message}</li>
                   ))}
                 </ul>
               </details>
             )}
-            {!importDone && importPreview.imported > 0 && (
+            {!importDone && (importPreview.imported > 0 || importPreview.importedCustomerMonths > 0) && (
               <button
                 onClick={() => runImport("commit")}
                 disabled={importLoading}
                 className="w-full mt-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
               >
-                {importLoading ? t("common.loading") : t("profile.importCommit", { count: String(importPreview.imported) })}
+                {importLoading ? t("common.loading") : t("profile.importCommit", { count: String(importPreview.imported + importPreview.importedCustomerMonths) })}
               </button>
             )}
             {importDone && (
-              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.importDone", { count: String(importPreview.imported) })}</p>
+              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.importDone", { count: String(importPreview.imported + importPreview.importedCustomerMonths) })}</p>
             )}
           </div>
         )}

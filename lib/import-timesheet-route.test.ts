@@ -29,6 +29,16 @@ async function buildXlsx(rows: (string | number)[][]): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+async function buildXlsxWithCustomerMonths(cmRows: (string | number)[][]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws1 = wb.addWorksheet("Tageszeiten");
+  ws1.addRow(["Datum", "Wochentag", "Stunden", "Typ"]);
+  const ws2 = wb.addWorksheet("Kundenstunden");
+  ws2.addRow(["Jahr", "Monat", "Kunde", "Stunden"]);
+  for (const r of cmRows) ws2.addRow(r);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
 function uploadReq(buffer: Buffer, mode: "preview" | "commit"): Request {
   const fd = new FormData();
   fd.set("file", new File([buffer], "import.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
@@ -38,6 +48,7 @@ function uploadReq(buffer: Buffer, mode: "preview" | "commit"): Request {
 
 let memberId: string;
 let adminId: string;
+let customerId: string;
 
 beforeAll(async () => {
   await prisma.organization.create({ data: { id: ORG, name: "Import Test Org", slug: "import-test-org", plan: "pro" } });
@@ -48,11 +59,16 @@ beforeAll(async () => {
   const admin = await prisma.user.create({ data: { email: "import-admin@example.test", password: "irrelevant", firstName: "A", lastName: "Dmin" } });
   adminId = admin.id;
   await prisma.membership.create({ data: { orgId: ORG, userId: adminId, role: "admin", entryDate: new Date("2026-01-01") } });
+
+  const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Swissgrid" } });
+  customerId = customer.id;
 });
 
 afterAll(async () => {
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
+  await prisma.customerMonth.deleteMany({ where: { orgId: ORG } });
   await prisma.monthLock.deleteMany({ where: { orgId: ORG } });
+  await prisma.customer.deleteMany({ where: { orgId: ORG } });
   await prisma.membership.deleteMany({ where: { orgId: ORG } });
   await prisma.user.deleteMany({ where: { id: { in: [memberId, adminId] } } });
   await prisma.organization.deleteMany({ where: { id: ORG } });
@@ -133,5 +149,60 @@ describe("POST /api/import/timesheet", () => {
     expect(body.imported).toBe(1);
     expect(body.errors).toHaveLength(1);
     expect(body.errors[0].message).toMatch(/Urlaub/);
+  });
+});
+
+describe("POST /api/import/timesheet — Blatt 'Kundenstunden'", () => {
+  it("commit schreibt CustomerMonth-Zeilen, ein zweiter Import überspringt dieselbe Kombination", async () => {
+    setSession(memberId, ORG, "member");
+    const buf = await buildXlsxWithCustomerMonths([[2026, "April", "Swissgrid", 102.75]]);
+
+    const first = await importPost(uploadReq(buf, "commit"));
+    const firstBody = await first.json();
+    expect(firstBody.importedCustomerMonths).toBe(1);
+    expect(firstBody.totalCustomerMonthRows).toBe(1);
+
+    const stored = await prisma.customerMonth.findMany({ where: { orgId: ORG, userId: memberId } });
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ year: 2026, month: 4, customerId, hours: 102.75 });
+
+    const second = await importPost(uploadReq(buf, "commit"));
+    const secondBody = await second.json();
+    expect(secondBody.importedCustomerMonths).toBe(0);
+    expect(secondBody.skippedExistingCustomerMonths).toBe(1);
+
+    const countAfter = await prisma.customerMonth.count({ where: { orgId: ORG, userId: memberId } });
+    expect(countAfter).toBe(1);
+  });
+
+  it("preview für Kundenstunden schreibt nichts", async () => {
+    setSession(memberId, ORG, "member");
+    const buf = await buildXlsxWithCustomerMonths([[2026, "Juli", "Swissgrid", 91]]);
+    const res = await importPost(uploadReq(buf, "preview"));
+    const body = await res.json();
+    expect(body.importedCustomerMonths).toBe(1);
+    const count = await prisma.customerMonth.count({ where: { orgId: ORG, userId: memberId, year: 2026, month: 7 } });
+    expect(count).toBe(0);
+  });
+
+  it("unbekannter Kunde wird als Zeilenfehler mit Blatt-Kennzeichnung gemeldet", async () => {
+    setSession(memberId, ORG, "member");
+    const buf = await buildXlsxWithCustomerMonths([[2026, "August", "Unbekannte AG", 5]]);
+    const res = await importPost(uploadReq(buf, "commit"));
+    const body = await res.json();
+    expect(body.importedCustomerMonths).toBe(0);
+    expect(body.errors).toHaveLength(1);
+    expect(body.errors[0].sheet).toBe("Kundenstunden");
+    expect(body.errors[0].message).toMatch(/Unbekannte AG/);
+  });
+
+  it("gesperrter Monat wird für 'member' bei Kundenstunden ebenfalls respektiert", async () => {
+    await prisma.monthLock.create({ data: { orgId: ORG, userId: memberId, year: 2026, month: 9, lockedBy: adminId } });
+    setSession(memberId, ORG, "member");
+    const buf = await buildXlsxWithCustomerMonths([[2026, "September", "Swissgrid", 20]]);
+    const res = await importPost(uploadReq(buf, "commit"));
+    const body = await res.json();
+    expect(body.importedCustomerMonths).toBe(0);
+    expect(body.skippedLockedCustomerMonths).toBe(1);
   });
 });

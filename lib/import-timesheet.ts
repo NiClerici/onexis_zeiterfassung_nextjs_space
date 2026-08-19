@@ -42,6 +42,137 @@ export interface ParsedTimesheet {
   errors: ImportRowError[];
 }
 
+// Zweiter Parser für das Blatt "Kundenstunden" des Alt-Exports (Betrieb.md
+// Punkt 4, Nachtrag nach der Umstellung auf CustomerMonth) — Format
+// Jahr | Monat | Kunde | Stunden, eine Zeile pro Monat/Kunde-Kombination.
+// Anders als Tageszeiten ist dieses Blatt optional: fehlt es, gibt es
+// einfach nichts zu importieren, kein Fehler.
+
+const CUSTOMER_MONTH_SHEET_NAME = "Kundenstunden";
+
+const MONTH_NAME_TO_NUM: Record<string, number> = {
+  januar: 1, jan: 1,
+  februar: 2, feb: 2,
+  märz: 3, maerz: 3, mär: 3, mrz: 3,
+  april: 4, apr: 4,
+  mai: 5,
+  juni: 6, jun: 6,
+  juli: 7, jul: 7,
+  august: 8, aug: 8,
+  september: 9, sep: 9, sept: 9,
+  oktober: 10, okt: 10,
+  november: 11, nov: 11,
+  dezember: 12, dez: 12,
+};
+
+function parseMonth(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 12) return value;
+  const text = cellText(value).toLowerCase();
+  if (!text) return null;
+  if (MONTH_NAME_TO_NUM[text] !== undefined) return MONTH_NAME_TO_NUM[text];
+  const n = Number(text);
+  if (Number.isInteger(n) && n >= 1 && n <= 12) return n;
+  return null;
+}
+
+function parseYear(value: unknown): number | null {
+  const text = cellText(value);
+  const n = typeof value === "number" ? value : Number(text);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 2000 || n > 2100) return null;
+  return n;
+}
+
+export interface CustomerRef {
+  id: string;
+  name: string;
+}
+
+export interface ImportedCustomerMonthRow {
+  rowNumber: number;
+  year: number;
+  month: number;
+  customerId: string;
+  customerName: string;
+  hours: number;
+}
+
+export interface ParsedCustomerMonths {
+  rows: ImportedCustomerMonthRow[];
+  errors: ImportRowError[];
+}
+
+export function parseCustomerMonthsWorkbook(workbook: ExcelJS.Workbook, customers: CustomerRef[]): ParsedCustomerMonths {
+  const sheet = workbook.worksheets.find((ws) => ws.name.trim().toLowerCase() === CUSTOMER_MONTH_SHEET_NAME.toLowerCase());
+  if (!sheet) return { rows: [], errors: [] };
+
+  const headerRow = sheet.getRow(1);
+  const columns: Record<string, number> = {};
+  const lastCol = Math.max(sheet.columnCount, headerRow.cellCount);
+  for (let c = 1; c <= lastCol; c++) {
+    const header = normalizeHeader(headerRow.getCell(c).value);
+    if (header) columns[header] = c;
+  }
+
+  const required = ["jahr", "monat", "kunde", "stunden"];
+  const missing = required.filter((r) => !(r in columns));
+  if (missing.length > 0) {
+    return { rows: [], errors: [{ rowNumber: 1, message: `Blatt "${CUSTOMER_MONTH_SHEET_NAME}": Pflichtspalte(n) fehlen: ${missing.join(", ")}.` }] };
+  }
+
+  const jahrCol = columns["jahr"];
+  const monatCol = columns["monat"];
+  const kundeCol = columns["kunde"];
+  const stundenCol = columns["stunden"];
+
+  // Case-insensitiver Namensabgleich gegen bestehende Kunden der Organisation
+  // — unbekannter Kunde ist ein Zeilenfehler, kein automatisches Anlegen
+  // (sonst wächst die Kundenliste durch Tippfehler im Altsystem zu).
+  const byLowerName = new Map<string, CustomerRef>();
+  for (const c of customers) {
+    const key = c.name.trim().toLowerCase();
+    if (!byLowerName.has(key)) byLowerName.set(key, c);
+  }
+
+  const rows: ImportedCustomerMonthRow[] = [];
+  const errors: ImportRowError[] = [];
+
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r);
+    const jahrRaw = row.getCell(jahrCol).value;
+    const monatRaw = row.getCell(monatCol).value;
+    const kundeRaw = row.getCell(kundeCol).value;
+
+    if (!cellText(jahrRaw) && !cellText(monatRaw) && !cellText(kundeRaw)) continue; // Leerzeile
+    if (isTotalRow(row, lastCol)) continue;
+
+    const year = parseYear(jahrRaw);
+    if (year === null) {
+      errors.push({ rowNumber: r, message: `Ungültiges Jahr: "${cellText(jahrRaw)}".` });
+      continue;
+    }
+    const month = parseMonth(monatRaw);
+    if (month === null) {
+      errors.push({ rowNumber: r, message: `Ungültiger Monat: "${cellText(monatRaw)}".` });
+      continue;
+    }
+    const kundeName = cellText(kundeRaw);
+    const customer = byLowerName.get(kundeName.toLowerCase());
+    if (!customer) {
+      errors.push({ rowNumber: r, message: `Unbekannter Kunde: "${kundeName}".` });
+      continue;
+    }
+    const hours = parseHours(row.getCell(stundenCol).value);
+    if (hours === null || hours < 0 || hours > 800) {
+      errors.push({ rowNumber: r, message: `Ungültige Stundenzahl: "${cellText(row.getCell(stundenCol).value)}".` });
+      continue;
+    }
+
+    rows.push({ rowNumber: r, year, month, customerId: customer.id, customerName: customer.name, hours });
+  }
+
+  return { rows, errors };
+}
+
 function normalizeHeader(v: unknown): string {
   return String(v ?? "").trim().toLowerCase();
 }

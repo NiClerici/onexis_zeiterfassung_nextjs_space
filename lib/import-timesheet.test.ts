@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { parseTimesheetWorkbook } from "@/lib/import-timesheet";
+import { parseTimesheetWorkbook, parseCustomerMonthsWorkbook, type CustomerRef } from "@/lib/import-timesheet";
 
 async function buildWorkbook(sheetName: string, headers: string[], data: (string | number | Date | null)[][]): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
@@ -105,5 +105,80 @@ describe("parseTimesheetWorkbook — Fehlerfälle", () => {
     const { rows, errors } = parseTimesheetWorkbook(wb);
     expect(errors).toEqual([]);
     expect(rows).toHaveLength(2);
+  });
+});
+
+describe("parseCustomerMonthsWorkbook — Blatt 'Kundenstunden'", () => {
+  const customers: CustomerRef[] = [
+    { id: "cust-swissgrid", name: "Swissgrid" },
+    { id: "cust-abb", name: "ABB" },
+  ];
+
+  it("parst Jahr/Monat als Text und als Zahl, matcht Kunden case-insensitiv", async () => {
+    const wb = await buildWorkbook("Kundenstunden", ["Jahr", "Monat", "Kunde", "Stunden"], [
+      [2026, "April", "Swissgrid", 102.75],
+      [2026, "Mai", "swissgrid", 67.75], // case-insensitiv
+      [2026, 6, "ABB", 45], // Monat als Zahl
+      [2026, "Mär", "ABB", 12], // Abkürzung
+    ]);
+
+    const { rows, errors } = parseCustomerMonthsWorkbook(wb, customers);
+    expect(errors).toEqual([]);
+    expect(rows).toHaveLength(4);
+    expect(rows[0]).toMatchObject({ year: 2026, month: 4, customerId: "cust-swissgrid", hours: 102.75 });
+    expect(rows[1]).toMatchObject({ year: 2026, month: 5, customerId: "cust-swissgrid", hours: 67.75 });
+    expect(rows[2]).toMatchObject({ year: 2026, month: 6, customerId: "cust-abb", hours: 45 });
+    expect(rows[3]).toMatchObject({ year: 2026, month: 3, customerId: "cust-abb", hours: 12 });
+  });
+
+  it("unbekannter Kunde ist ein Zeilenfehler, kein automatisches Anlegen", async () => {
+    const wb = await buildWorkbook("Kundenstunden", ["Jahr", "Monat", "Kunde", "Stunden"], [
+      [2026, "April", "Nicht Erfasste AG", 10],
+    ]);
+    const { rows, errors } = parseCustomerMonthsWorkbook(wb, customers);
+    expect(rows).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/Nicht Erfasste AG/);
+  });
+
+  it("ungültiges Jahr, ungültiger Monat und ungültige Stunden werden pro Zeile gemeldet, Rest wird trotzdem geparst", async () => {
+    const wb = await buildWorkbook("Kundenstunden", ["Jahr", "Monat", "Kunde", "Stunden"], [
+      [1999, "April", "Swissgrid", 10], // Jahr ausserhalb 2000-2100
+      [2026, "Sommerloch", "Swissgrid", 10], // unbekannter Monat
+      [2026, "April", "Swissgrid", -5], // negative Stunden
+      [2026, "April", "Swissgrid", 20], // gültig
+    ]);
+    const { rows, errors } = parseCustomerMonthsWorkbook(wb, customers);
+    expect(errors).toHaveLength(3);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hours).toBe(20);
+  });
+
+  it("Summenzeile und Leerzeilen werden übersprungen", async () => {
+    const wb = await buildWorkbook("Kundenstunden", ["Jahr", "Monat", "Kunde", "Stunden"], [
+      [2026, "April", "Swissgrid", 10],
+      [null, null, null, null],
+      [null, null, "Total", 10],
+    ]);
+    const { rows, errors } = parseCustomerMonthsWorkbook(wb, customers);
+    expect(errors).toEqual([]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("fehlendes Blatt 'Kundenstunden' ist kein Fehler, sondern einfach 0 Zeilen (optionales Blatt)", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Tageszeiten");
+    const { rows, errors } = parseCustomerMonthsWorkbook(wb, customers);
+    expect(rows).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("meldet fehlende Pflichtspalten", async () => {
+    const wb = await buildWorkbook("Kundenstunden", ["Jahr", "Kunde"], [[2026, "Swissgrid"]]);
+    const { rows, errors } = parseCustomerMonthsWorkbook(wb, customers);
+    expect(rows).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/monat/i);
+    expect(errors[0].message).toMatch(/stunden/i);
   });
 });
