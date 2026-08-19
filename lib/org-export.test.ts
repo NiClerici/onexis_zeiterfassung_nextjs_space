@@ -27,7 +27,7 @@ function jsonReq(url: string, method: string, body: unknown): Request {
 
 describe("GET /api/admin/organization/export", () => {
   const ORG = "test_org_export_org";
-  let ownerId: string, memberId: string;
+  let ownerId: string, memberId: string, customerId: string;
 
   beforeAll(async () => {
     await prisma.organization.create({ data: { id: ORG, name: "Org Export Test Org", slug: "org-export-test-org" } });
@@ -42,9 +42,15 @@ describe("GET /api/admin/organization/export", () => {
     await prisma.timeEntry.create({
       data: { userId: memberId, orgId: ORG, date: new Date("2026-05-01"), type: "arbeit", von: "08:00", bis: "17:00", pauseMin: 30, deletedAt: new Date() },
     });
+
+    const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Export-Kunde" } });
+    customerId = customer.id;
+    await prisma.customerMonth.create({ data: { orgId: ORG, userId: memberId, year: 2026, month: 5, customerId, hours: 12.5 } });
   });
 
   afterAll(async () => {
+    await prisma.customerMonth.deleteMany({ where: { orgId: ORG } });
+    await prisma.customer.deleteMany({ where: { orgId: ORG } });
     await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
     await prisma.membership.deleteMany({ where: { orgId: ORG } });
     await prisma.user.deleteMany({ where: { id: { in: [ownerId, memberId] } } });
@@ -67,6 +73,8 @@ describe("GET /api/admin/organization/export", () => {
     expect(body.memberships).toHaveLength(2);
     expect(body.timeEntries).toHaveLength(1);
     expect(body.timeEntries[0].deletedAt).not.toBeNull(); // soft-gelöscht, trotzdem enthalten
+    expect(body.customerMonths).toHaveLength(1);
+    expect(body.customerMonths[0]).toMatchObject({ year: 2026, month: 5, customerId, hours: 12.5 });
   });
 
   it("liefert ein gültiges xlsx bei format=excel", async () => {
@@ -132,6 +140,8 @@ describe("DELETE /api/admin/organization", () => {
     await prisma.timeEntryAudit.create({ data: { entryId: entry.id, orgId: ORG, changedBy: ownerId, field: "bis", oldValue: "16:00", newValue: "17:00" } });
     await prisma.monthLock.create({ data: { orgId: ORG, userId: ownerId, year: 2026, month: 5, lockedBy: ownerId } });
     await prisma.monthLockAudit.create({ data: { orgId: ORG, userId: ownerId, year: 2026, month: 5, action: "locked", performedBy: ownerId } });
+    const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Delete-Test-Kunde" } });
+    await prisma.customerMonth.create({ data: { orgId: ORG, userId: ownerId, year: 2026, month: 5, customerId: customer.id, hours: 3 } });
   });
 
   it("admin darf die Organisation nicht löschen (nur owner)", async () => {
@@ -162,6 +172,7 @@ describe("DELETE /api/admin/organization", () => {
     expect(await prisma.timeEntryAudit.count({ where: { orgId: ORG } })).toBe(0);
     expect(await prisma.monthLock.count({ where: { orgId: ORG } })).toBe(0);
     expect(await prisma.monthLockAudit.count({ where: { orgId: ORG } })).toBe(0);
+    expect(await prisma.customerMonth.count({ where: { orgId: ORG } })).toBe(0);
 
     // Die User-Konten selbst überleben — nur ihre Mitgliedschaft in DIESER
     // Organisation ist weg (ein Mensch kann in mehreren Organisationen sein).

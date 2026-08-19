@@ -93,6 +93,31 @@ function buildExcelWorkbook(data: Awaited<ReturnType<typeof gatherOrgExport>>): 
     styleDataRow(row, 4);
   }
 
+  const wsCustomerMonths = workbook.addWorksheet("Kundenstunden");
+  wsCustomerMonths.columns = [
+    { header: "Person", key: "name", width: 24 },
+    { header: "Jahr", key: "year", width: 10 },
+    { header: "Monat", key: "month", width: 10 },
+    { header: "Kunde", key: "customer", width: 24 },
+    { header: "Projekt", key: "project", width: 24 },
+    { header: "Stunden", key: "hours", width: 12 },
+  ];
+  styleHeaderRow(wsCustomerMonths.getRow(1), 6);
+  const userNameById = new Map(data.memberships.map((m) => [m.userId, `${m.user.firstName} ${m.user.lastName}`]));
+  const customerNameById = new Map(data.customers.map((c) => [c.id, c.name]));
+  const projectNameById = new Map(data.projects.map((p) => [p.id, p.name]));
+  for (const cm of data.customerMonths) {
+    const row = wsCustomerMonths.addRow({
+      name: userNameById.get(cm.userId) ?? cm.userId,
+      year: cm.year,
+      month: cm.month,
+      customer: customerNameById.get(cm.customerId) ?? cm.customerId,
+      project: cm.projectId ? (projectNameById.get(cm.projectId) ?? cm.projectId) : "",
+      hours: cm.hours,
+    });
+    styleDataRow(row, 6);
+  }
+
   const wsAbsences = workbook.addWorksheet("Absenzanträge");
   wsAbsences.columns = [
     { header: "Person", key: "name", width: 24 },

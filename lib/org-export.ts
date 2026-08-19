@@ -14,6 +14,7 @@ export async function gatherOrgExport(orgId: string) {
     timeEntryAudits,
     customers,
     projects,
+    customerMonths,
     holidays,
     pensumChanges,
     overtimePayouts,
@@ -35,6 +36,11 @@ export async function gatherOrgExport(orgId: string) {
     prisma.timeEntryAudit.findMany({ where: { orgId }, orderBy: { changedAt: "asc" } }),
     prisma.customer.findMany({ where: { orgId }, orderBy: { name: "asc" } }),
     prisma.project.findMany({ where: { orgId }, orderBy: { name: "asc" } }),
+    // Monatlich erfasste Kundenstunden (Plan "Kundenstunden monatlich statt
+    // täglich") — seit der Umstellung die massgebliche Quelle, nicht mehr
+    // TimeEntry.customerId, gehört deshalb genauso in die vollständige
+    // Auskunft wie die Zeiteinträge selbst.
+    prisma.customerMonth.findMany({ where: { orgId }, orderBy: [{ year: "asc" }, { month: "asc" }] }),
     prisma.holiday.findMany({ where: { orgId }, orderBy: { date: "asc" } }),
     prisma.pensumChange.findMany({ where: { orgId }, orderBy: { effectiveFrom: "asc" } }),
     prisma.overtimePayout.findMany({ where: { orgId }, orderBy: { date: "asc" } }),
@@ -56,6 +62,7 @@ export async function gatherOrgExport(orgId: string) {
     timeEntryAudits,
     customers,
     projects,
+    customerMonths,
     holidays,
     pensumChanges,
     overtimePayouts,
