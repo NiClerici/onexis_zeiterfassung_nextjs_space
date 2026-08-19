@@ -121,6 +121,10 @@ export default function ProfilePage() {
   const [newProjectRate, setNewProjectRate] = useState("");
   const [newProjectBudget, setNewProjectBudget] = useState("");
   const [savingProject, setSavingProject] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState("");
+  const [editProjectRate, setEditProjectRate] = useState("");
+  const [editProjectBudget, setEditProjectBudget] = useState("");
 
   // Overtime payouts state
   const [overtimePayouts, setOvertimePayouts] = useState<OvertimePayoutData[]>([]);
@@ -158,16 +162,25 @@ export default function ProfilePage() {
   } | null>(null);
 
   // Stundenrapport-Import (Projekte pro Tag, siehe lib/import-stundenrapport.ts)
-  // — eigener, unabhängiger Zustand vom Alt-Import oben.
-  const [srFile, setSrFile] = useState<File | null>(null);
+  // — eigener, unabhängiger Zustand vom Alt-Import oben. Mehrere Dateien
+  // gleichzeitig möglich (z.B. ein Workbook pro Monat statt eines
+  // gemeinsamen mit mehreren Blättern); jede .xlsx-Datei kann ihrerseits
+  // mehrere Blätter enthalten — die Vorschau zeigt deshalb eine blocks[]-
+  // Liste (ein Block pro Blatt/Datei), nicht eine einzelne Zusammenfassung.
+  const [srFiles, setSrFiles] = useState<File[]>([]);
   const [srCustomerName, setSrCustomerName] = useState("");
   const [srLoading, setSrLoading] = useState(false);
   const [srDone, setSrDone] = useState(false);
-  const [srPreview, setSrPreview] = useState<{
-    customerName: string; customerIsNew: boolean; newProjects: string[];
+  interface SrBlock {
+    fileName: string; sheetName: string | null;
+    customerName: string | null; customerIsNew: boolean; newProjects: string[];
     imported: number; skippedExisting: number; skippedLocked: number; totalRows: number;
     dateFrom: string | null; dateTo: string | null;
     errors: { rowNumber: number; message: string }[];
+  }
+  const [srPreview, setSrPreview] = useState<{
+    blocks: SrBlock[];
+    totalRows: number; totalImported: number; totalSkippedExisting: number; totalSkippedLocked: number;
   } | null>(null);
 
   const fetchProfile = useCallback(async () => {
@@ -494,6 +507,36 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
   };
 
+  const startEditProject = (project: ProjectData) => {
+    setEditingProjectId(project.id);
+    setEditProjectName(project.name);
+    setEditProjectRate(project.hourlyRate != null ? String(project.hourlyRate) : "");
+    setEditProjectBudget(project.budgetHours != null ? String(project.budgetHours) : "");
+  };
+
+  const saveEditProject = async () => {
+    if (!editingProjectId || !editProjectName.trim()) return;
+    setSavingProject(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingProjectId,
+          name: editProjectName.trim(),
+          hourlyRate: editProjectRate || null,
+          budgetHours: editProjectBudget || null,
+        }),
+      });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        toast.success(t("profile.projectSaved"));
+        setEditingProjectId(null);
+        await fetchProjects();
+      } else { toast.error(data?.error ?? t("profile.projectError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
+  };
+
   const toggleProjectActive = async (project: ProjectData) => {
     setSavingProject(true);
     try {
@@ -580,32 +623,53 @@ export default function ProfilePage() {
     }
   };
 
+  // Dateien werden angesammelt (nicht ersetzt) — die Person kann den
+  // Dialog mehrfach öffnen, um nach und nach mehrere Monatsdateien
+  // zusammenzustellen, statt in einem Rutsch alle auf einmal markieren zu
+  // müssen. e.target.value wird geleert, damit dieselbe Datei ein zweites
+  // Mal ausgewählt werden kann und erneut ein change-Event auslöst.
   const handleSrFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSrFile(e?.target?.files?.[0] ?? null);
+    const picked = Array.from(e?.target?.files ?? []);
+    if (picked.length > 0) {
+      setSrFiles((prev) => [...prev, ...picked]);
+      setSrPreview(null);
+      setSrDone(false);
+    }
+    e.target.value = "";
+  };
+
+  const removeSrFile = (index: number) => {
+    setSrFiles((prev) => prev.filter((_, i) => i !== index));
     setSrPreview(null);
     setSrDone(false);
   };
 
   // Wie runImport oben, zusätzlich mit optionalem Kunde-Override: die erste
-  // Vorschau übernimmt den aus der Datei gelesenen Vorschlag ins Eingabefeld,
-  // jeder weitere Aufruf (Vorschau erneut oder Commit) schickt den
-  // aktuellen — ggf. von Hand korrigierten — Feldwert mit.
+  // Vorschau übernimmt den Kundennamen ins Eingabefeld, aber NUR wenn alle
+  // Blöcke (Blätter/Dateien) denselben Kundennamen tragen — bei gemischten
+  // Kunden im selben Batch bleibt das Feld leer, damit kein einzelner
+  // Vorschlag versehentlich für alle übernommen wird. Jeder weitere Aufruf
+  // (Vorschau erneut oder Commit) schickt den aktuellen — ggf. von Hand
+  // korrigierten — Feldwert mit, für alle Dateien/Blätter gleichermassen.
   const runSrImport = async (mode: "preview" | "commit") => {
-    if (!srFile) return;
+    if (srFiles.length === 0) return;
     setSrLoading(true);
     try {
       const fd = new FormData();
-      fd.set("file", srFile);
+      for (const f of srFiles) fd.append("file", f);
       fd.set("mode", mode);
       if (srCustomerName.trim()) fd.set("customerName", srCustomerName.trim());
       const res = await fetch("/api/import/stundenrapport", { method: "POST", body: fd });
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
         setSrPreview(data);
-        if (!srCustomerName.trim() && data?.customerName) setSrCustomerName(data.customerName);
+        if (!srCustomerName.trim()) {
+          const names = new Set((data?.blocks ?? []).map((b: SrBlock) => b.customerName).filter(Boolean));
+          if (names.size === 1) setSrCustomerName([...names][0] as string);
+        }
         if (mode === "commit") {
           setSrDone(true);
-          toast.success(t("profile.srImportDone", { count: String(data?.imported ?? 0) }));
+          toast.success(t("profile.srImportDone", { count: String(data?.totalImported ?? 0) }));
         }
       } else {
         toast.error(data?.error ?? t("profile.importFileError"));
@@ -944,6 +1008,44 @@ export default function ProfilePage() {
           <div className="space-y-1.5">
             {projects.map((p) => {
               const customerName = customers.find((c) => c.id === p.customerId)?.name ?? "";
+              if (editingProjectId === p.id) {
+                return (
+                  <div key={p.id} className="bg-secondary rounded-xl px-3 py-2 text-sm space-y-2">
+                    <div className="text-xs text-muted-foreground">{customerName}</div>
+                    <input
+                      type="text"
+                      value={editProjectName}
+                      onChange={(e) => setEditProjectName(e.target.value)}
+                      className="w-full px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      autoFocus
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="5"
+                        value={editProjectRate}
+                        onChange={(e) => setEditProjectRate(e.target.value)}
+                        placeholder={t("profile.hourlyRate")}
+                        className="px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="5"
+                        value={editProjectBudget}
+                        onChange={(e) => setEditProjectBudget(e.target.value)}
+                        placeholder={t("profile.budgetHours")}
+                        className="px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 justify-end">
+                      <button onClick={saveEditProject} disabled={savingProject} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition"><CheckCircle className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => setEditingProjectId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div key={p.id} className={`flex items-center justify-between bg-secondary rounded-xl px-3 py-2 text-sm gap-2 ${!p.active ? "opacity-50" : ""}`}>
                   <div className="flex-1 min-w-0">
@@ -958,6 +1060,7 @@ export default function ProfilePage() {
                     <input type="checkbox" checked={p.active} onChange={() => toggleProjectActive(p)} className="accent-primary" />
                     {t("profile.active")}
                   </label>
+                  <button onClick={() => startEditProject(p)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition shrink-0"><Pencil className="w-3.5 h-3.5" /></button>
                   <button onClick={() => deleteProject(p.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               );
@@ -1096,17 +1199,32 @@ export default function ProfilePage() {
       </motion.div>
 
       {/* Stundenrapport-Import (Projekte pro Tag) — eigener Block, eigene
-          Route, unabhängig vom Alt-Import oben. */}
+          Route, unabhängig vom Alt-Import oben. Mehrere Dateien möglich
+          (z.B. ein Workbook pro Monat), jede .xlsx-Datei kann ihrerseits
+          mehrere Blätter enthalten (z.B. ein Blatt pro Monat in einer
+          Datei) — die Vorschau zeigt deshalb pro Blatt/Datei einen
+          eigenen Block. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.27 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Upload className="w-4 h-4 text-primary" /> {t("profile.srImport")}</h2>
         <p className="text-xs text-muted-foreground mb-3">{t("profile.srImportHint")}</p>
         <input
           type="file"
           accept=".xlsx,.csv"
+          multiple
           onChange={handleSrFileChange}
           className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-secondary file:text-foreground file:text-sm file:font-medium hover:file:bg-accent file:transition"
         />
-        {srFile && (
+        {srFiles.length > 0 && (
+          <div className="mt-3 space-y-1">
+            {srFiles.map((f, i) => (
+              <div key={`${f.name}-${i}`} className="flex items-center justify-between bg-secondary rounded-lg px-3 py-1.5 text-xs">
+                <span className="truncate flex-1 min-w-0">{f.name}</span>
+                <button onClick={() => removeSrFile(i)} className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        {srFiles.length > 0 && (
           <div className="mt-3">
             <label className="text-xs text-muted-foreground mb-1 block">{t("profile.srImportCustomerLabel")}</label>
             <input
@@ -1116,9 +1234,10 @@ export default function ProfilePage() {
               placeholder={t("profile.srImportCustomerPlaceholder")}
               className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
             />
+            <p className="text-xs text-muted-foreground mt-1">{t("profile.srImportCustomerHint")}</p>
           </div>
         )}
-        {srFile && !srPreview && (
+        {srFiles.length > 0 && !srPreview && (
           <button
             onClick={() => runSrImport("preview")}
             disabled={srLoading}
@@ -1128,55 +1247,67 @@ export default function ProfilePage() {
           </button>
         )}
         {srPreview && (
-          <div className="mt-3 bg-secondary rounded-xl p-3 text-sm space-y-1.5">
-            <p>{t("profile.importPreviewCount", { imported: String(srPreview.imported), total: String(srPreview.totalRows) })}</p>
-            {srPreview.dateFrom && srPreview.dateTo && (
-              <p className="text-xs text-muted-foreground">{srPreview.dateFrom} – {srPreview.dateTo}</p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              {srPreview.customerIsNew
-                ? t("profile.srImportNewCustomer", { name: srPreview.customerName })
-                : t("profile.srImportExistingCustomer", { name: srPreview.customerName })}
-            </p>
-            {srPreview.newProjects.length > 0 && (
-              <p className="text-xs text-muted-foreground">{t("profile.srImportNewProjects", { names: srPreview.newProjects.join(", ") })}</p>
-            )}
-            {srPreview.skippedExisting > 0 && (
-              <p className="text-xs text-muted-foreground">{t("profile.importSkippedExisting", { count: String(srPreview.skippedExisting) })}</p>
-            )}
-            {srPreview.skippedLocked > 0 && (
-              <p className="text-xs text-muted-foreground">{t("profile.importSkippedLocked", { count: String(srPreview.skippedLocked) })}</p>
-            )}
-            {srPreview.errors.length > 0 && (
-              <details className="text-xs text-destructive">
-                <summary className="cursor-pointer">{t("profile.importErrors", { count: String(srPreview.errors.length) })}</summary>
-                <ul className="mt-1 list-disc list-inside space-y-0.5">
-                  {srPreview.errors.slice(0, 30).map((e, i) => (
-                    <li key={i}>Zeile {e.rowNumber}: {e.message}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
+          <div className="mt-3 space-y-2">
+            <div className="bg-secondary rounded-xl p-3 text-sm space-y-2">
+              {srPreview.blocks.map((b, i) => (
+                <div key={i} className="rounded-lg bg-card p-2.5 text-xs space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium truncate">{b.fileName}{b.sheetName ? ` · ${b.sheetName}` : ""}</span>
+                    <span className="text-muted-foreground shrink-0">{b.imported}/{b.totalRows}</span>
+                  </div>
+                  {b.customerName && (
+                    <p className="text-muted-foreground">
+                      {b.customerIsNew
+                        ? t("profile.srImportNewCustomer", { name: b.customerName })
+                        : t("profile.srImportExistingCustomer", { name: b.customerName })}
+                      {b.dateFrom && b.dateTo && ` · ${b.dateFrom} – ${b.dateTo}`}
+                    </p>
+                  )}
+                  {b.newProjects.length > 0 && (
+                    <p className="text-muted-foreground">{t("profile.srImportNewProjects", { names: b.newProjects.join(", ") })}</p>
+                  )}
+                  {b.skippedExisting > 0 && (
+                    <p className="text-muted-foreground">{t("profile.importSkippedExisting", { count: String(b.skippedExisting) })}</p>
+                  )}
+                  {b.skippedLocked > 0 && (
+                    <p className="text-muted-foreground">{t("profile.importSkippedLocked", { count: String(b.skippedLocked) })}</p>
+                  )}
+                  {b.errors.length > 0 && (
+                    <details className="text-destructive">
+                      <summary className="cursor-pointer">{t("profile.importErrors", { count: String(b.errors.length) })}</summary>
+                      <ul className="mt-1 list-disc list-inside space-y-0.5">
+                        {b.errors.slice(0, 30).map((e, ei) => (
+                          <li key={ei}>Zeile {e.rowNumber}: {e.message}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              ))}
+              <p className="font-medium pt-1 border-t border-border">
+                {t("profile.importPreviewCount", { imported: String(srPreview.totalImported), total: String(srPreview.totalRows) })}
+              </p>
+            </div>
             {!srDone && (
               <button
                 onClick={() => runSrImport("preview")}
                 disabled={srLoading}
-                className="w-full mt-1 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50 border border-border"
+                className="w-full py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50 border border-border"
               >
                 {t("profile.importPreview")}
               </button>
             )}
-            {!srDone && srPreview.imported > 0 && (
+            {!srDone && srPreview.totalImported > 0 && (
               <button
                 onClick={() => runSrImport("commit")}
                 disabled={srLoading}
-                className="w-full mt-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+                className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
               >
-                {srLoading ? t("common.loading") : t("profile.srImportCommit", { count: String(srPreview.imported) })}
+                {srLoading ? t("common.loading") : t("profile.srImportCommit", { count: String(srPreview.totalImported) })}
               </button>
             )}
             {srDone && (
-              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.srImportDone", { count: String(srPreview.imported) })}</p>
+              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.srImportDone", { count: String(srPreview.totalImported) })}</p>
             )}
           </div>
         )}

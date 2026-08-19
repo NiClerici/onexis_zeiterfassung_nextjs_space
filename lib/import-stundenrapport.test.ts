@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import ExcelJS from "exceljs";
-import { parseStundenrapportWorkbook, parseStundenrapportCsv, parseStundenrapportGrid } from "@/lib/import-stundenrapport";
+import { parseStundenrapportWorkbook, parseStundenrapportWorkbookAllSheets, parseStundenrapportCsv, parseStundenrapportGrid } from "@/lib/import-stundenrapport";
 
 async function buildWorkbook(grid: (string | number)[][]): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
@@ -193,5 +193,83 @@ describe("Echte Referenzdatei (Swissgrid, Juli 2026)", () => {
     for (const r of result.rows) countsByDate.set(r.date, (countsByDate.get(r.date) ?? 0) + 1);
     const doubleDays = [...countsByDate.entries()].filter(([, n]) => n === 2).map(([d]) => d);
     expect(doubleDays.sort()).toEqual(["2026-07-14", "2026-07-15", "2026-07-20", "2026-07-27", "2026-07-29"]);
+  });
+});
+
+describe("parseStundenrapportWorkbookAllSheets", () => {
+  it("parst jedes Blatt unabhängig und überspringt Blätter ohne Datum+Std-Kopfzeile", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws1 = wb.addWorksheet("April");
+    for (const row of [...HEADER_KOPF, ["Datum", "Kürzel", "Projekt", "Tasks", "Std"], ["01.04.2026", "CLN", "Admin", "Setup", "6,00"]]) ws1.addRow(row);
+    const ws2 = wb.addWorksheet("Mai");
+    for (const row of [...HEADER_KOPF, ["Datum", "Kürzel", "Projekt", "Tasks", "Std"], ["05.05.2026", "CLN", "Admin", "Setup", "4,00"], ["06.05.2026", "CLN", "Support", "Ticket", "3,00"]]) ws2.addRow(row);
+    // Deckblatt ohne Detailtabelle — muss übersprungen werden, nicht als
+    // Fehler auftauchen.
+    const ws3 = wb.addWorksheet("Notizen");
+    ws3.addRow(["Nur ein paar interne Notizen, keine Tabelle."]);
+
+    const results = parseStundenrapportWorkbookAllSheets(wb);
+
+    expect(results.map((r) => r.sheetName)).toEqual(["April", "Mai"]);
+    expect(results[0].parsed.rows).toHaveLength(1);
+    expect(results[0].parsed.rows[0]).toMatchObject({ date: "2026-04-01", hours: 6 });
+    expect(results[1].parsed.rows).toHaveLength(2);
+    const mayTotal = results[1].parsed.rows.reduce((s, r) => s + r.hours, 0);
+    expect(mayTotal).toBe(7);
+  });
+});
+
+describe("Echte Referenzdatei mit 5 Monatsblättern (Swissgrid, April–August 2026)", () => {
+  const path = "/Users/nicoclerici/Documents/Arbeit/Zeiterfassung/ONEXIS_Stundenabbrechnung_April-26_NClerici.xlsx";
+
+  it("erkennt alle 5 Blätter mit den unabhängig ausgezählten Zeilen-/Stundensummen", async () => {
+    const buf = readFileSync(path);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+
+    const results = parseStundenrapportWorkbookAllSheets(wb);
+
+    expect(results.map((r) => r.sheetName)).toEqual([
+      "Swissgrid April",
+      "Swissgrid Mai",
+      "Swissgrid Juni",
+      "Swissgrid Juli",
+      "Swissgrid August",
+    ]);
+
+    const expected: Record<string, { rows: number; hours: number }> = {
+      "Swissgrid April": { rows: 17, hours: 102.75 },
+      "Swissgrid Mai": { rows: 15, hours: 67.75 },
+      "Swissgrid Juni": { rows: 10, hours: 45 },
+      "Swissgrid Juli": { rows: 18, hours: 91 },
+      "Swissgrid August": { rows: 13, hours: 63 },
+    };
+
+    // Die echte Datei ist nicht perfekt sauber — genau der Fall, den die
+    // Zeilenfehler statt eines stillen Datenverlusts abfangen sollen:
+    // "Swissgrid Juni" hat eine kaputte Zeile (01.07.2026 mit Kürzel, aber
+    // ohne Projekt/Tasks/Std — Überbleibsel vom Kopieren fürs Juli-Blatt).
+    // "Swissgrid August" ist der zum Datei-Stand noch laufende Monat: die
+    // restlichen Werktage bis Monatsende sind als Datums-Zeilen ohne
+    // Projekt/Std vorbereitet (Vorlage), aber noch nicht befüllt.
+    const expectedErrorCount: Record<string, number> = { "Swissgrid Juni": 1, "Swissgrid August": 10 };
+
+    let totalRows = 0;
+    let totalHours = 0;
+    for (const { sheetName, parsed } of results) {
+      expect(parsed.errors, `Fehler in Blatt "${sheetName}"`).toHaveLength(expectedErrorCount[sheetName] ?? 0);
+      for (const e of parsed.errors) {
+        expect(e.message, `Fehler in Blatt "${sheetName}"`).toMatch(/Projekt fehlt/);
+      }
+      expect(parsed.customerName).toBe("Swissgrid");
+      expect(parsed.rows, `Zeilenzahl in Blatt "${sheetName}"`).toHaveLength(expected[sheetName].rows);
+      const hours = parsed.rows.reduce((s, r) => s + r.hours, 0);
+      expect(hours, `Stundensumme in Blatt "${sheetName}"`).toBeCloseTo(expected[sheetName].hours, 5);
+      totalRows += parsed.rows.length;
+      totalHours += hours;
+    }
+
+    expect(totalRows).toBe(73);
+    expect(totalHours).toBeCloseTo(369.5, 5);
   });
 });

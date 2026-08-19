@@ -242,14 +242,10 @@ export function parseStundenrapportGrid(grid: string[][]): ParsedStundenrapport 
   return { customerName, year, month, rows, errors };
 }
 
-// .xlsx-Einstieg: Arbeitsblatt in ein string[][]-Raster wandeln (erstes
-// Blatt, wie die Referenzdatei — ein Blatt pro Kunde/Monat), dann
-// parseStundenrapportGrid.
-export function parseStundenrapportWorkbook(workbook: ExcelJS.Workbook): ParsedStundenrapport {
-  const sheet = workbook.worksheets[0];
-  if (!sheet) {
-    return { customerName: null, year: null, month: null, rows: [], errors: [{ rowNumber: 0, message: "Datei enthält kein Arbeitsblatt." }] };
-  }
+// Arbeitsblatt in ein string[][]-Raster wandeln — gemeinsam genutzt von
+// parseStundenrapportWorkbook (erstes Blatt) und
+// parseStundenrapportWorkbookAllSheets (alle Blätter).
+function worksheetToGrid(sheet: ExcelJS.Worksheet): string[][] {
   const grid: string[][] = [];
   const lastCol = sheet.columnCount;
   for (let r = 1; r <= sheet.rowCount; r++) {
@@ -261,7 +257,38 @@ export function parseStundenrapportWorkbook(workbook: ExcelJS.Workbook): ParsedS
     }
     grid.push(cells);
   }
-  return parseStundenrapportGrid(grid);
+  return grid;
+}
+
+// .xlsx-Einstieg (Einzelblatt, erstes Blatt) — für Aufrufer, die bewusst nur
+// EIN Blatt lesen wollen (heutige Unit-Tests). Reale Dateien haben oft
+// mehrere Blätter (ein Monat pro Blatt, siehe
+// parseStundenrapportWorkbookAllSheets) — dafür NICHT diese Funktion
+// verwenden, sonst gehen die übrigen Blätter stillschweigend verloren.
+export function parseStundenrapportWorkbook(workbook: ExcelJS.Workbook): ParsedStundenrapport {
+  const sheet = workbook.worksheets[0];
+  if (!sheet) {
+    return { customerName: null, year: null, month: null, rows: [], errors: [{ rowNumber: 0, message: "Datei enthält kein Arbeitsblatt." }] };
+  }
+  return parseStundenrapportGrid(worksheetToGrid(sheet));
+}
+
+// .xlsx-Einstieg (alle Blätter) — der Regelfall: ein Workbook mit einem
+// Blatt pro Monat (z.B. "Swissgrid April", "Swissgrid Mai", ...), alle für
+// denselben oder auch unterschiedliche Kunden. Jedes Blatt wird unabhängig
+// über parseStundenrapportGrid geparst (eigener Kopfblock, eigene
+// Detailzeilen). Blätter OHNE erkennbare Detail-Kopfzeile (kein "Datum" +
+// "Std") werden übersprungen statt einen Fehler zu erzeugen — deckt z.B.
+// eine zusätzliche Notiz-/Deckblatt-Seite im selben Workbook ab, ohne die
+// übrigen, echten Blätter zu blockieren.
+export function parseStundenrapportWorkbookAllSheets(workbook: ExcelJS.Workbook): { sheetName: string; parsed: ParsedStundenrapport }[] {
+  const results: { sheetName: string; parsed: ParsedStundenrapport }[] = [];
+  for (const sheet of workbook.worksheets) {
+    const grid = worksheetToGrid(sheet);
+    if (!grid.some((row) => rowContains(row, "datum") && rowContains(row, "std"))) continue;
+    results.push({ sheetName: sheet.name, parsed: parseStundenrapportGrid(grid) });
+  }
+  return results;
 }
 
 function cellText(v: unknown): string {

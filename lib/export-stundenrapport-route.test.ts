@@ -168,7 +168,7 @@ describe("Round-Trip: Import der Swissgrid-Referenzdatei, dann Export desselben 
       fd.set("mode", "commit");
       const importRes = await importPost(new Request("http://localhost/api/import/stundenrapport", { method: "POST", body: fd }));
       const importBody = await importRes.json();
-      expect(importBody.imported).toBe(18);
+      expect(importBody.totalImported).toBe(18);
 
       const customer = await prisma.customer.findFirst({ where: { orgId, name: "Swissgrid" } });
       expect(customer).not.toBeNull();
