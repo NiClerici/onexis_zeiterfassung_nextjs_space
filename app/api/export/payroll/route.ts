@@ -90,7 +90,9 @@ export async function GET(req: Request) {
       const eintraege = mapEintraege(entries);
       const payouts = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-      const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
+      // Lohnexport hat keine Kunden-Spalte — kundenstunden fliesst hier in
+      // keine Ausgabe ein, 0 ist deshalb korrekt statt eine echte Abfrage.
+      const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: 0 });
 
       const stundenByType: Record<string, number> = { arbeit: 0, ferien: 0, krank: 0, militaer: 0, unbezahlt: 0, feiertag: 0 };
       for (const e of eintraege) {

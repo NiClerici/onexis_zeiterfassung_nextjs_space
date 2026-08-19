@@ -53,11 +53,6 @@ export interface EintragInput {
 
 export interface EintragMitDatum extends EintragInput {
   date: Date | string;
-  customerId?: string | null;
-  // Verrechenbar — trägt jeder Eintrag jetzt selbst (MIGRATION.md Punkt 5),
-  // vorbelegt aus Projekt/Kunde beim Anlegen. Ersetzt die frühere
-  // Kunden-Lookup-Liste (KundeInput) für kundenstunden in kennzahlen().
-  billable?: boolean | null;
 }
 
 export interface PayoutInput {
@@ -74,6 +69,12 @@ export interface KennzahlenInput {
   changes: PensumChangeInput[];
   payouts: PayoutInput[];
   holidays: HolidayInput[];
+  // Kundenstunden kommen seit dem Wechsel auf monatliche Erfassung
+  // (Betrieb.md-Nachtrag, 18.08.2026) nicht mehr aus einzelnen
+  // Zeiteinträgen (die trugen früher billable/customerId), sondern werden
+  // vom Aufrufer aus CustomerMonth-Zeilen vorberechnet und hier nur noch
+  // durchgereicht — kennzahlen() bleibt dadurch weiterhin Prisma-frei.
+  kundenstunden: number;
 }
 
 export interface KennzahlenResult {
@@ -242,7 +243,6 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   const sollGesamt = summeSollstunden(from, to, input.profil, input.changes, input.holidays);
 
   let ist = 0;
-  let kundenstunden = 0;
   let geplantZukunft = 0;
   // Nur tatsächlich geleistete Arbeitszeit (typ="arbeit") zählt für die
   // ArG-Höchstarbeitszeit — Absenzen sind keine Arbeitszeit im Sinne des
@@ -256,9 +256,6 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     if (d.getTime() <= bisHeute.getTime()) {
       ist += stunden;
-      if (eintrag.typ === "arbeit" && eintrag.billable) {
-        kundenstunden += stunden;
-      }
       if (eintrag.typ === "arbeit" && d.getTime() >= from.getTime()) {
         const wochenSchluessel = montagDerWoche(d).getTime();
         arbeitsstundenProWoche.set(wochenSchluessel, (arbeitsstundenProWoche.get(wochenSchluessel) ?? 0) + stunden);
@@ -267,6 +264,8 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
       geplantZukunft += stunden;
     }
   }
+
+  const kundenstunden = input.kundenstunden;
 
   const payoutSum = input.payouts
     .filter((p) => {
@@ -305,43 +304,25 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
 export interface WochenSummary {
   // Montag der Kalenderwoche, "YYYY-MM-DD".
   montag: string;
-  // Tatsächliche/vorerfasste Arbeitszeit (nur typ="arbeit") in dieser Woche,
-  // innerhalb [from, to] — unabhängig davon, ob das Datum in der
-  // Vergangenheit oder Zukunft liegt (Punkt 8 braucht auch vorerfasste
-  // ZUKÜNFTIGE Wochen für die Auslastungsprognose).
+  // Tatsächliche Arbeitszeit (nur typ="arbeit") in dieser Woche, innerhalb
+  // [from, to].
   arbeitsstunden: number;
   // Anteil von arbeitsstunden über profil.maxWeeklyHours (Art. 12/13 ArG) — 0, wenn keine.
   ueberzeit: number;
-  // Davon verrechenbare Arbeitszeit (typ="arbeit" && billable).
-  kundenstunden: number;
-  // kundenstunden / arbeitsstunden * 100 — 0 bei arbeitsstunden = 0.
-  verrechnungsgrad: number;
-  // Volles Wochensoll (Mo–So laut sollStundenTag), unabhängig davon, ob
-  // [from, to] mitten in der Woche endet — Vereinfachung für eine
-  // konsistente Wochenkachel in Heatmap/Prognose statt eines an den
-  // Periodenrand angeschnittenen Teilsolls.
-  sollStunden: number;
-  // arbeitsstunden / sollStunden * 100 — 0 bei sollStunden = 0.
-  auslastung: number;
 }
 
 // Wochenweise Aufschlüsselung der Arbeitszeit — DICHT über jede Kalenderwoche
 // zwischen montagDerWoche(from) und montagDerWoche(to) (auch Wochen ganz ohne
 // Einträge erscheinen mit 0-Werten), nicht nur über Wochen mit Einträgen.
-// Dient gleich drei Zwecken, die dieselbe Wochen-Gruppierung brauchen und
-// deshalb bewusst eine gemeinsame Funktion sind statt drei fast identischer:
-//   - ArG-Kontrollexport (Punkt 7): arbeitsstunden + ueberzeit je Woche.
-//   - Teamsicht-Heatmap (Punkt 8): verrechnungsgrad je Mitarbeiter*in und Woche.
-//   - Teamsicht-Prognose (Punkt 8): auslastung (arbeitsstunden/sollStunden)
-//     für Wochen, deren Montag in der Zukunft liegt — "geplante Auslastung
-//     aus vorerfassten Einträgen".
-// kennzahlen() selbst bleibt unverändert, das hier ist eine zusätzliche,
-// rein additive Funktion.
+// Einziger verbleibender Verwender ist der ArG-Kontrollexport
+// (arbeitsstunden + ueberzeit je Woche) — Teamsicht-Heatmap und -Prognose
+// nutzten früher dieselbe Funktion für kundenbezogene/geplante Felder,
+// sind aber mit dem Wechsel auf monatliche Kundenstunden-Erfassung
+// entfallen (Betrieb.md-Nachtrag, 18.08.2026). kennzahlen() selbst bleibt
+// unverändert, das hier ist eine zusätzliche, rein additive Funktion.
 export function wochenUebersicht(
   eintraege: EintragMitDatum[],
   profil: Profil,
-  changes: PensumChangeInput[],
-  holidays: HolidayInput[],
   from: Date | string,
   to: Date | string
 ): WochenSummary[] {
@@ -350,7 +331,6 @@ export function wochenUebersicht(
   if (toD.getTime() < fromD.getTime()) return [];
 
   const arbeitMap = new Map<number, number>();
-  const kundenMap = new Map<number, number>();
   for (const eintrag of eintraege) {
     if (eintrag.typ !== "arbeit") continue;
     const d = toUTCDate(eintrag.date);
@@ -360,7 +340,6 @@ export function wochenUebersicht(
     const stunden = stundenAusEintrag(eintrag, 0);
     const key = montagDerWoche(d).getTime();
     arbeitMap.set(key, (arbeitMap.get(key) ?? 0) + stunden);
-    if (eintrag.billable) kundenMap.set(key, (kundenMap.get(key) ?? 0) + stunden);
   }
 
   const result: WochenSummary[] = [];
@@ -369,17 +348,10 @@ export function wochenUebersicht(
   while (montag.getTime() <= letzterMontag.getTime()) {
     const key = montag.getTime();
     const arbeitsstunden = round1(arbeitMap.get(key) ?? 0);
-    const kundenstunden = round1(kundenMap.get(key) ?? 0);
-    const wochenEnde = new Date(montag.getTime() + 6 * 24 * 60 * 60 * 1000);
-    const sollStunden = round1(summeSollstunden(montag, wochenEnde, profil, changes, holidays));
     result.push({
       montag: montag.toISOString().split("T")[0],
       arbeitsstunden,
       ueberzeit: round1(Math.max(0, arbeitsstunden - profil.maxWeeklyHours)),
-      kundenstunden,
-      verrechnungsgrad: arbeitsstunden > 0 ? round1((kundenstunden / arbeitsstunden) * 100) : 0,
-      sollStunden,
-      auslastung: sollStunden > 0 ? round1((arbeitsstunden / sollStunden) * 100) : 0,
     });
     montag = new Date(montag.getTime() + 7 * 24 * 60 * 60 * 1000);
   }
@@ -393,6 +365,8 @@ export interface TeamMemberInput {
   changes: PensumChangeInput[];
   eintraege: EintragMitDatum[];
   payouts: PayoutInput[];
+  // Aus CustomerMonth vorberechnet, siehe KennzahlenInput.kundenstunden.
+  kundenstunden: number;
 }
 
 export interface TeamMemberResult {
@@ -443,6 +417,7 @@ export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult
       changes: m.changes,
       payouts: m.payouts,
       holidays: input.holidays,
+      kundenstunden: m.kundenstunden,
     });
     return {
       userId: m.userId,

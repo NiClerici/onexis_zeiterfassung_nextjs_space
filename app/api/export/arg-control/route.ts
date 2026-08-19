@@ -68,7 +68,7 @@ function addKontrollSheet(
     byDay.get(key)!.push(e);
   }
 
-  const wochen = wochenUebersicht(eintraege, profil, changes, holidays, startDate, endDate);
+  const wochen = wochenUebersicht(eintraege, profil, startDate, endDate);
   const wochenMap = new Map(wochen.map((w) => [w.montag, w]));
 
   const current = new Date(startDate);

@@ -3,8 +3,9 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/access";
-import { teamKennzahlen, feriensaldo, wochenUebersicht, pensumAt, stundenAusEintrag, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
+import { teamKennzahlen, feriensaldo, pensumAt, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
+import { monthsInRange } from "@/lib/customer-months";
 
 export async function GET(req: Request) {
   try {
@@ -37,7 +38,6 @@ export async function GET(req: Request) {
     const holidays: HolidayInput[] = holidaysRaw.map((h) => ({ date: h.date, halfDay: h.halfDay }));
 
     const teamMembers: TeamMemberInput[] = [];
-    const heatmap: Array<{ userId: string; name: string; weeks: Array<{ montag: string; verrechnungsgrad: number; arbeitsstunden: number }> }> = [];
     const feriensaldoByUser: Record<string, { anspruch: number; bezogen: number; geplant: number; offen: number }> = {};
     // Zum Periodenende (endDate) gültiges Pensum für die Tabellenspalte —
     // NICHT membership.pensum (der heute aktuelle Wert), sonst zeigt eine
@@ -46,25 +46,28 @@ export async function GET(req: Request) {
     // 60% auf 80% erst per September 2026 galt). pensumAt() ist dieselbe
     // Auflösung, die sollStundenTag()/Soll unten schon korrekt verwendet.
     const pensumByUser: Record<string, number> = {};
-    // Für die Kunden-/Projektsicht: alle "arbeit"-Einträge der sichtbaren
-    // Mitglieder im Berichtszeitraum, projekt-/kundenbezogen aggregiert.
-    const projectHours = new Map<string, number>();
-    const customerHoursDirekt = new Map<string, number>(); // ohne projectId, nur customerId
 
-    // Vier Queries für ALLE sichtbaren Personen statt vier je Person
+    // Fünf Queries für ALLE sichtbaren Personen statt einer je Person
     // (HARDENING.md B4). Vorher lief die Schleife unten pro Mitglied einmal
-    // durch und setzte dort ihre Queries ab: bei 60 Mitgliedern 243 statt 3
+    // durch und setzte dort ihre Queries ab: bei 60 Mitgliedern 300+ statt 5
     // Queries, in 60 nacheinander abgearbeiteten Runden. Die Berechnung
     // selbst ist unverändert — nur das Laden ist gebündelt und wird unten
     // in-memory nach userId zugeordnet.
     const alleUserIds = memberships.map((m) => m.userId);
     const jahrStart = new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1));
     const jahrEnde = new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31));
-    const [alleChanges, alleEntries, allePayouts, alleFerien] = await Promise.all([
+    const monate = monthsInRange(startDate, endDate);
+    const [alleChanges, alleEntries, allePayouts, alleFerien, alleCustomerMonths] = await Promise.all([
       prisma.pensumChange.findMany({ where: { userId: { in: alleUserIds }, orgId }, orderBy: { effectiveFrom: "asc" } }),
       prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
       prisma.overtimePayout.findMany({ where: { userId: { in: alleUserIds }, orgId, date: { gte: startDate, lte: endDate } } }),
       prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, type: "ferien", date: { gte: jahrStart, lte: jahrEnde } } }),
+      monate.length === 0
+        ? Promise.resolve([])
+        : prisma.customerMonth.findMany({
+            where: { orgId, userId: { in: alleUserIds }, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
+            include: { customer: { select: { name: true, billable: true, hourlyRate: true } }, project: { select: { name: true, hourlyRate: true, budgetHours: true } } },
+          }),
     ]);
 
     // Gruppierung erhält die Reihenfolge der Query — für pensumChange ist das
@@ -84,6 +87,15 @@ export async function GET(req: Request) {
     const payoutsByUser = nachUser(allePayouts);
     const ferienByUser = nachUser(alleFerien);
 
+    // Kundenstunden je Person — nur bei verrechenbaren Kunden zählt es als
+    // "Kundenstunden" im Sinne von kennzahlen().verrechnungsgrad, analog zur
+    // früheren TimeEntry.billable-Regel, jetzt auf Kundenebene.
+    const kundenstundenByUser = new Map<string, number>();
+    for (const cm of alleCustomerMonths) {
+      if (!cm.customer.billable) continue;
+      kundenstundenByUser.set(cm.userId, (kundenstundenByUser.get(cm.userId) ?? 0) + cm.hours);
+    }
+
     for (const m of memberships) {
       const profil = buildProfil(m);
       const pensumChangesRaw = changesByUser.get(m.userId) ?? [];
@@ -95,49 +107,50 @@ export async function GET(req: Request) {
       const payouts = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
       const name = `${m.user.firstName} ${m.user.lastName}`;
 
-      teamMembers.push({ userId: m.userId, name, profil, changes, eintraege, payouts });
+      teamMembers.push({ userId: m.userId, name, profil, changes, eintraege, payouts, kundenstunden: kundenstundenByUser.get(m.userId) ?? 0 });
 
       const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
       feriensaldoByUser[m.userId] = fs;
       pensumByUser[m.userId] = pensumAt(endDate, profil, changes).pensum;
-
-      const heatmapWochen = wochenUebersicht(eintraege, profil, changes, holidays, startDate, endDate);
-      heatmap.push({
-        userId: m.userId,
-        name,
-        weeks: heatmapWochen.map((w) => ({ montag: w.montag, verrechnungsgrad: w.verrechnungsgrad, arbeitsstunden: w.arbeitsstunden })),
-      });
-
-      for (const e of entries) {
-        if (e.type !== "arbeit") continue;
-        if (e.date.getTime() < startDate.getTime() || e.date.getTime() > endDate.getTime()) continue;
-        // sollStundenDesTages ist für typ="arbeit" irrelevant, siehe wochenUebersicht oben.
-        const stunden = stundenAusEintrag({ typ: "arbeit", von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, 0);
-        if (e.projectId) {
-          projectHours.set(e.projectId, (projectHours.get(e.projectId) ?? 0) + stunden);
-        } else if (e.customerId) {
-          customerHoursDirekt.set(e.customerId, (customerHoursDirekt.get(e.customerId) ?? 0) + stunden);
-        }
-      }
     }
 
     const result = teamKennzahlen({ from: startDate, to: endDate, heute, holidays, members: teamMembers });
     const membersWithFerien = result.members.map((m) => ({ ...m, pensum: pensumByUser[m.userId], feriensaldo: feriensaldoByUser[m.userId] }));
 
-    // Kunden-/Projektsicht (MIGRATION.md Punkt 8, dritter Bullet) — nur
-    // Stunden der SICHTBAREN Mitglieder (bei manager: nur das eigene Team),
-    // Projekte/Kunden selbst sind org-weite Stammdaten.
-    const [projectsRaw, customersRaw] = await Promise.all([
-      prisma.project.findMany({ where: { orgId, active: true }, include: { customer: { select: { name: true, hourlyRate: true } } } }),
-      prisma.customer.findMany({ where: { orgId } }),
-    ]);
-    const projects = projectsRaw.map((p) => {
-      const stunden = Math.round((projectHours.get(p.id) ?? 0) * 100) / 100;
-      const rate = p.hourlyRate ?? p.customer.hourlyRate ?? 0;
+    // Kunden-/Projektsicht: dieselben CustomerMonth-Zeilen wie oben, hier
+    // nach Kunde bzw. Projekt statt nach Person aggregiert — über alle
+    // sichtbaren Mitglieder hinweg (bei manager: nur das eigene Team).
+    // Zeilen ohne projectId zählen zum Kunden direkt, Zeilen mit projectId
+    // zusätzlich zu ihrem Projekt.
+    const projectAgg = new Map<string, { name: string; customerName: string; customerId: string; hourlyRate: number | null; budgetHours: number | null; stunden: number }>();
+    const customerAgg = new Map<string, { name: string; hourlyRate: number | null; stunden: number }>();
+    for (const cm of alleCustomerMonths) {
+      const cur = customerAgg.get(cm.customerId) ?? { name: cm.customer.name, hourlyRate: cm.customer.hourlyRate, stunden: 0 };
+      cur.stunden += cm.hours;
+      customerAgg.set(cm.customerId, cur);
+
+      if (cm.projectId && cm.project) {
+        const p = projectAgg.get(cm.projectId) ?? {
+          name: cm.project.name,
+          customerName: cm.customer.name,
+          customerId: cm.customerId,
+          hourlyRate: cm.project.hourlyRate,
+          budgetHours: cm.project.budgetHours,
+          stunden: 0,
+        };
+        p.stunden += cm.hours;
+        projectAgg.set(cm.projectId, p);
+      }
+    }
+    const projects = Array.from(projectAgg.entries()).map(([id, p]) => {
+      const stunden = Math.round(p.stunden * 100) / 100;
+      // Fallback-Kette wie zuvor: eigener Stundensatz des Projekts, sonst
+      // der des Kunden, sonst 0.
+      const rate = p.hourlyRate ?? customerAgg.get(p.customerId)?.hourlyRate ?? 0;
       return {
-        id: p.id,
+        id,
         name: p.name,
-        customerName: p.customer.name,
+        customerName: p.customerName,
         hourlyRate: rate,
         budgetHours: p.budgetHours,
         stunden,
@@ -145,26 +158,33 @@ export async function GET(req: Request) {
         ueberzogen: p.budgetHours != null && stunden > p.budgetHours,
       };
     });
-    const customers = customersRaw.map((c) => {
-      const direktStunden = customerHoursDirekt.get(c.id) ?? 0;
-      // Nach customerId matchen, nicht nach Name — auch wenn der Name laut
-      // Schema (@@unique([orgId,name])) org-weit eindeutig ist, ist die ID
-      // der direktere, weniger fehleranfällige Schlüssel.
-      const projektStunden = projectsRaw.filter((p) => p.customerId === c.id).reduce((s, p) => s + (projectHours.get(p.id) ?? 0), 0);
-      const stunden = Math.round((direktStunden + projektStunden) * 100) / 100;
-      return { id: c.id, name: c.name, hourlyRate: c.hourlyRate, stunden, umsatz: Math.round(stunden * (c.hourlyRate ?? 0) * 100) / 100 };
+    const customers = Array.from(customerAgg.entries()).map(([id, c]) => {
+      const stunden = Math.round(c.stunden * 100) / 100;
+      return { id, name: c.name, hourlyRate: c.hourlyRate, stunden, umsatz: Math.round(stunden * (c.hourlyRate ?? 0) * 100) / 100 };
     });
 
     return NextResponse.json({
       members: membersWithFerien,
       totals: result.totals,
-      heatmap,
       customers,
       projects,
+      // Zeigt der Oberfläche, ob [startDate,endDate] nicht exakt auf
+      // Monatsgrenzen liegt — dann sind Kundenstunden/Umsatz nur eine
+      // Annäherung (volle überlappende Monate gezählt), siehe
+      // lib/customer-months.ts.
+      kundenstundenUnscharf: monate.length > 0 && !(isMonthStart(startDate) && isMonthEnd(endDate)),
     });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET team error:", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
+}
+
+function isMonthStart(d: Date): boolean {
+  return d.getUTCDate() === 1;
+}
+function isMonthEnd(d: Date): boolean {
+  const next = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+  return next.getUTCDate() === 1;
 }

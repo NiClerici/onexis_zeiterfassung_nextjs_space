@@ -17,6 +17,9 @@ import {
   styleHeaderRow,
   styleDataRow,
 } from "@/lib/export-helpers";
+import { monthsInRange, sumCustomerHours, sumCustomerHoursByUser } from "@/lib/customer-months";
+
+const MONTH_NAMES = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
 // Für scope=org (siehe GET unten): eine Zeile pro aktivem Mitglied statt der
 // vollen Tagesliste — ein kompletter Tagesbericht für jede Person in einem
@@ -61,11 +64,12 @@ async function buildOrgSummaryWorkbook(orgId: string, startDate: Date, endDate: 
   const alleUserIds = memberships.map((m) => m.userId);
   const jahrStart = new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1));
   const jahrEnde = new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31));
-  const [alleChanges, alleEntries, allePayouts, alleFerien] = await Promise.all([
+  const [alleChanges, alleEntries, allePayouts, alleFerien, kundenstundenByUser] = await Promise.all([
     prisma.pensumChange.findMany({ where: { userId: { in: alleUserIds }, orgId }, orderBy: { effectiveFrom: "asc" } }),
     prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
     prisma.overtimePayout.findMany({ where: { userId: { in: alleUserIds }, orgId, date: { gte: startDate, lte: endDate } } }),
     prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, type: "ferien", date: { gte: jahrStart, lte: jahrEnde } } }),
+    sumCustomerHoursByUser({ orgId, userIds: alleUserIds, from: startDate, to: endDate }),
   ]);
   // Gruppierung erhält die Query-Reihenfolge — für pensumChange also das
   // orderBy effectiveFrom asc, auf das sich pensumAt bei zwei Änderungen am
@@ -93,7 +97,7 @@ async function buildOrgSummaryWorkbook(orgId: string, startDate: Date, endDate: 
     const changes = mapChanges(pensumChangesRaw);
     const eintraege = mapEintraege(entries);
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
-    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenByUser.get(m.userId) ?? 0 });
     const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
 
     const row = ws.addRow({
@@ -162,21 +166,31 @@ export async function GET(req: Request) {
     const holidaysRaw = await prisma.holiday.findMany({ where: { orgId } });
     const holidays: HolidayInput[] = holidaysRaw.map((h) => ({ date: h.date, halfDay: h.halfDay }));
 
-    // Weiterhin gebraucht für die Kundenstunden-Aufschlüsselung (Sheet 2)
-    // unten — unabhängig davon, ob ein Kunde billable ist oder nicht.
-    const kundenRaw = await prisma.customer.findMany({ where: { orgId } });
-
     const entries = await prisma.timeEntry.findMany({
       where: { userId, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } },
       orderBy: { date: "asc" },
-      include: { customer: { select: { name: true } }, project: { select: { name: true } } },
     });
     const eintraege = mapEintraege(entries);
 
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
+    // Kundenstunden (Sheet 2) — monatlich erfasst, unabhängig vom Tageseintrag.
+    // Für [startDate,endDate] werden die überlappenden Monate voll gezählt
+    // (lib/customer-months.ts) — bei einem "custom"-Zeitraum, der keine
+    // Monatsgrenzen trifft, ist das eine Annäherung.
+    const monate = monthsInRange(startDate, endDate);
+    const customerMonths =
+      monate.length === 0
+        ? []
+        : await prisma.customerMonth.findMany({
+            where: { orgId, userId, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
+            include: { customer: { select: { name: true, billable: true } } },
+            orderBy: [{ year: "asc" }, { month: "asc" }],
+          });
+    const kundenstundenTotal = customerMonths.filter((cm) => cm.customer.billable).reduce((s, cm) => s + cm.hours, 0);
+
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });
 
     const allPayouts = await prisma.overtimePayout.findMany({ where: { userId, orgId } });
     const totalPaidOutHours = allPayouts.reduce((s, p) => s + p.hours, 0);
@@ -184,16 +198,18 @@ export async function GET(req: Request) {
     const netOvertime = k.ueberstunden;
     const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
 
-    // Stunden je Kunde im Zeitraum (arbeit-Einträge mit customerId), für Sheet 2
-    const customerBreakdown = kundenRaw
-      .map((kd) => {
-        const hours = eintraege
-          .filter((e) => e.customerId === kd.id && e.typ === "arbeit")
-          .reduce((sum, e) => sum + stundenAusEintrag(e, sollStundenTag(e.date, profil, changes, holidays)), 0);
-        return { name: kd.name, billable: kd.billable, hours };
-      })
-      .filter((c) => c.hours > 0)
-      .sort((a, b) => b.hours - a.hours);
+    // Für Sheet 2: CustomerMonth-Zeilen nach Jahr/Monat/Kunde zusammengefasst
+    // (eine allfällige Projektaufteilung wird hier wieder zum Kunden summiert
+    // — das Importformat kennt nur Jahr | Monat | Kunde | Stunden, siehe
+    // lib/import-timesheet.ts).
+    const customerBreakdownMap = new Map<string, { year: number; month: number; name: string; billable: boolean; hours: number }>();
+    for (const cm of customerMonths) {
+      const key = `${cm.year}-${cm.month}-${cm.customerId}`;
+      const cur = customerBreakdownMap.get(key) ?? { year: cm.year, month: cm.month, name: cm.customer.name, billable: cm.customer.billable, hours: 0 };
+      cur.hours += cm.hours;
+      customerBreakdownMap.set(key, cur);
+    }
+    const customerBreakdown = Array.from(customerBreakdownMap.values()).sort((a, b) => a.year - b.year || a.month - b.month || b.hours - a.hours);
 
     // ---- Feriensaldo für das Anzeigejahr ----
     const displayYear = startDate.getUTCFullYear();
@@ -217,10 +233,9 @@ export async function GET(req: Request) {
       { header: "Bis", key: "bis", width: 10 },
       { header: "Stunden", key: "hours", width: 12 },
       { header: "Typ", key: "type", width: 16 },
-      { header: "Kunde/Projekt", key: "projekt", width: 20 },
       { header: "Notiz", key: "notiz", width: 24 },
     ];
-    styleHeaderRow(ws1.getRow(1), 8);
+    styleHeaderRow(ws1.getRow(1), 7);
 
     const weekdayNames = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
     let sheet1TotalHours = 0;
@@ -232,11 +247,6 @@ export async function GET(req: Request) {
         tagesSoll
       );
       sheet1TotalHours += stunden;
-      // Kunde/Projekt aus der Relation statt dem alten Freitext (MIGRATION.md
-      // Punkt 5, Abschluss — die projekt-Spalte ist inzwischen gedroppt;
-      // vor dem Drop per SQL verifiziert, dass 0 Zeilen unmigrierten Freitext
-      // ohne projectId hatten).
-      const kundeProjekt = [entry.customer?.name, entry.project?.name].filter(Boolean).join(" – ") || "";
       const row = ws1.addRow({
         date: fmtDate(d),
         weekday: weekdayNames[d.getDay()] ?? "",
@@ -244,10 +254,9 @@ export async function GET(req: Request) {
         bis: entry.bis ?? "",
         hours: Math.round(stunden * 100) / 100,
         type: TYPE_LABELS[entry.type ?? ""] ?? entry.type ?? "",
-        projekt: kundeProjekt,
         notiz: entry.notiz ?? "",
       });
-      styleDataRow(row, 8);
+      styleDataRow(row, 7);
       const typeCell = row.getCell(6);
       if (entry.type === "ferien") typeCell.font = { color: { argb: "FF2563EB" } };
       else if (entry.type === "feiertag") typeCell.font = { color: { argb: "FF9333EA" } };
@@ -262,10 +271,9 @@ export async function GET(req: Request) {
       bis: "Total",
       hours: Math.round(sheet1TotalHours * 100) / 100,
       type: "",
-      projekt: "",
       notiz: "",
     });
-    for (let i = 1; i <= 8; i++) {
+    for (let i = 1; i <= 7; i++) {
       sumRow.getCell(i).border = { top: { style: "double", color: { argb: "FF1A56DB" } } };
       sumRow.getCell(i).font = { bold: true };
     }
@@ -276,24 +284,28 @@ export async function GET(req: Request) {
     // === Sheet 2: Kundenstunden ===
     const ws2 = workbook.addWorksheet("Kundenstunden");
     ws2.columns = [
+      { header: "Jahr", key: "year", width: 10 },
+      { header: "Monat", key: "month", width: 14 },
       { header: "Kunde", key: "customer", width: 28 },
       { header: "Verrechenbar", key: "billable", width: 14 },
       { header: "Stunden", key: "hours", width: 12 },
     ];
-    styleHeaderRow(ws2.getRow(1), 3);
+    styleHeaderRow(ws2.getRow(1), 5);
 
     for (const c of customerBreakdown) {
       const row = ws2.addRow({
+        year: c.year,
+        month: MONTH_NAMES[c.month - 1] ?? c.month,
         customer: c.name,
         billable: c.billable ? "Ja" : "Nein",
         hours: Math.round(c.hours * 100) / 100,
       });
-      styleDataRow(row, 3);
+      styleDataRow(row, 5);
     }
 
     if (customerBreakdown.length === 0) {
-      const emptyRow = ws2.addRow({ customer: "Keine Kundenstunden vorhanden", billable: "", hours: "" });
-      emptyRow.getCell(1).font = { italic: true, color: { argb: "FF999999" } };
+      const emptyRow = ws2.addRow({ year: "", month: "", customer: "Keine Kundenstunden vorhanden", billable: "", hours: "" });
+      emptyRow.getCell(3).font = { italic: true, color: { argb: "FF999999" } };
     }
 
     ws2.views = [{ state: "frozen", ySplit: 1 }];

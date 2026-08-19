@@ -70,11 +70,13 @@ beforeAll(async () => {
   const project = await prisma.project.create({ data: { orgId: ORG, customerId, name: "Team-Route-Projekt", hourlyRate: 200, budgetHours: 5 } });
   projectId = project.id;
 
-  // report arbeitet 6h an diesem Projekt — über dem Budget von 5h, für den
-  // "ueberzogen"-Sanity-Check.
+  // report arbeitet 6h — Kundenzuordnung liegt seit der Monatsumstellung
+  // nicht mehr am TimeEntry, sondern in CustomerMonth (August 2026, passend
+  // zu MONTH_QS unten).
   await prisma.timeEntry.create({
-    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-03"), type: "arbeit", von: "08:00", bis: "14:00", pauseMin: 0, customerId, projectId, billable: true },
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-03"), type: "arbeit", von: "08:00", bis: "14:00", pauseMin: 0 },
   });
+  await prisma.customerMonth.create({ data: { orgId: ORG, userId: reportId, year: 2026, month: 8, customerId, projectId, hours: 6 } });
 
   // A4: weder Projekt noch Kunde haben einen Stundensatz — der Umsatz muss
   // sauber 0 werden, nicht NaN und nicht null in einer Summe.
@@ -85,8 +87,9 @@ beforeAll(async () => {
   });
   rateLessProjectId = rateLessProject.id;
   await prisma.timeEntry.create({
-    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-04"), type: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0, customerId: rateLessCustomerId, projectId: rateLessProjectId, billable: true },
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-04"), type: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0 },
   });
+  await prisma.customerMonth.create({ data: { orgId: ORG, userId: reportId, year: 2026, month: 8, customerId: rateLessCustomerId, projectId: rateLessProjectId, hours: 4 } });
 
   // A4: Budget EXAKT erreicht (4h Budget, 4h gearbeitet) — Grenzfall der
   // Hervorhebung, darf nicht als überzogen markiert werden.
@@ -97,20 +100,23 @@ beforeAll(async () => {
   });
   exactBudgetProjectId = exactBudgetProject.id;
   await prisma.timeEntry.create({
-    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-05"), type: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0, customerId: exactBudgetCustomerId, projectId: exactBudgetProjectId, billable: true },
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-05"), type: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0 },
   });
+  await prisma.customerMonth.create({ data: { orgId: ORG, userId: reportId, year: 2026, month: 8, customerId: exactBudgetCustomerId, projectId: exactBudgetProjectId, hours: 4 } });
 
   // Kunde ohne jedes Projekt, 3h direkt verbucht — der Fall "nur Kunden
   // verrechnen" aus dem Bugfix.
   const directCustomer = await prisma.customer.create({ data: { orgId: ORG, name: "Direktkunde ohne Projekt", hourlyRate: 120 } });
   directCustomerId = directCustomer.id;
   await prisma.timeEntry.create({
-    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-06"), type: "arbeit", von: "08:00", bis: "11:00", pauseMin: 0, customerId: directCustomerId, billable: true },
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-08-06"), type: "arbeit", von: "08:00", bis: "11:00", pauseMin: 0 },
   });
+  await prisma.customerMonth.create({ data: { orgId: ORG, userId: reportId, year: 2026, month: 8, customerId: directCustomerId, hours: 3 } });
 });
 
 afterAll(async () => {
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
+  await prisma.customerMonth.deleteMany({ where: { orgId: ORG } });
   await prisma.pensumChange.deleteMany({ where: { orgId: ORG } });
   await prisma.project.deleteMany({ where: { orgId: ORG } });
   await prisma.customer.deleteMany({ where: { orgId: ORG } });
@@ -159,7 +165,7 @@ describe("GET /api/team — Berechtigungs-Scoping", () => {
   });
 });
 
-describe("GET /api/team — Kunden-/Projektsicht, Heatmap, Feriensaldo", () => {
+describe("GET /api/team — Kunden-/Projektsicht, Feriensaldo", () => {
   it("liefert Projektstunden, erkennt Budgetüberschreitung, und rechnet den Umsatz aus dem Stundensatz", async () => {
     setSession(adminId, ORG, "admin");
     const res = await teamGet(req(`/api/team?${MONTH_QS}`));
@@ -186,17 +192,13 @@ describe("GET /api/team — Kunden-/Projektsicht, Heatmap, Feriensaldo", () => {
     expect(body.projects.find((p: any) => p.customerName === "Direktkunde ohne Projekt")).toBeUndefined();
   });
 
-  it("jedes Mitglied hat einen Feriensaldo und eine Heatmap-Wochenliste", async () => {
+  it("jedes Mitglied hat einen Feriensaldo", async () => {
     setSession(adminId, ORG, "admin");
     const res = await teamGet(req(`/api/team?${MONTH_QS}`));
     const body = await res.json();
     const reportMember = body.members.find((m: any) => m.userId === reportId);
     expect(reportMember.feriensaldo).toBeTruthy();
     expect(typeof reportMember.feriensaldo.anspruch).toBe("number");
-
-    const reportHeatmap = body.heatmap.find((h: any) => h.userId === reportId);
-    expect(Array.isArray(reportHeatmap.weeks)).toBe(true);
-    expect(reportHeatmap.weeks.length).toBeGreaterThan(0);
   });
 
   it("totals sind über alle sichtbaren Mitglieder aggregiert", async () => {
@@ -252,7 +254,6 @@ describe("GET /api/team — Randfälle (HARDENING.md A4)", () => {
     expect(body.members.map((m: any) => m.userId)).toEqual([loneManagerId]);
     expect(body.totals.ist).toBe(0);
     expect(body.totals.verrechnungsgrad).toBe(0); // keine Division durch 0
-    expect(Array.isArray(body.heatmap)).toBe(true);
   });
 
   it("manager ohne direkt unterstellte Personen bekommt eine leere Genehmigungsliste, kein Crash", async () => {

@@ -37,6 +37,7 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(38.4);
   });
@@ -51,6 +52,7 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.sollGesamt).toBe(100.8);
   });
@@ -203,6 +205,7 @@ describe("Mehrfache Pensumsänderungen im selben Zeitraum (HARDENING.md A2)", ()
       changes,
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(Q2_SOLL);
     expect(result.sollGesamt).toBe(Q2_SOLL);
@@ -214,11 +217,11 @@ describe("Mehrfache Pensumsänderungen im selben Zeitraum (HARDENING.md A2)", ()
     expect(sollStundenTag("2026-06-15", profil, unsortiert, [])).toBeCloseTo(4.8, 5);
     const sortiertesSoll = kennzahlen({
       from: "2026-04-01", to: "2026-06-30", heute: "2026-07-01",
-      eintraege: [], profil, changes, holidays: [], payouts: [],
+      eintraege: [], profil, changes, holidays: [], payouts: [], kundenstunden: 0,
     }).soll;
     const unsortiertesSoll = kennzahlen({
       from: "2026-04-01", to: "2026-06-30", heute: "2026-07-01",
-      eintraege: [], profil, changes: unsortiert, holidays: [], payouts: [],
+      eintraege: [], profil, changes: unsortiert, holidays: [], payouts: [], kundenstunden: 0,
     }).soll;
     expect(unsortiertesSoll).toBe(sortiertesSoll);
   });
@@ -263,8 +266,8 @@ describe("Mehrfache Pensumsänderungen im selben Zeitraum (HARDENING.md A2)", ()
       heute: "2026-07-01",
       holidays: [],
       members: [
-        { userId: "mit", name: "Mit Wechseln", profil, changes, eintraege: [], payouts: [] },
-        { userId: "ohne", name: "Ohne Wechsel", profil, changes: [], eintraege: [], payouts: [] },
+        { userId: "mit", name: "Mit Wechseln", profil, changes, eintraege: [], payouts: [], kundenstunden: 0 },
+        { userId: "ohne", name: "Ohne Wechsel", profil, changes: [], eintraege: [], payouts: [], kundenstunden: 0 },
       ],
     });
     expect(result.members.find((m) => m.userId === "mit")!.soll).toBe(Q2_SOLL);
@@ -286,6 +289,7 @@ describe("Zeitraum komplett vor startDate", () => {
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(0);
     expect(result.sollGesamt).toBe(0);
@@ -314,6 +318,7 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(0);
     expect(result.sollGesamt).toBe(0);
@@ -331,6 +336,7 @@ describe("exitDate (Austritt, MIGRATION.md Punkt 4d)", () => {
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(40);
     expect(result.sollGesamt).toBe(40);
@@ -354,6 +360,7 @@ describe("Zeitraum komplett in der Zukunft", () => {
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(0);
     expect(result.sollGesamt).toBeGreaterThan(0);
@@ -372,26 +379,32 @@ describe("verrechnungsgrad", () => {
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.ist).toBe(0);
     expect(result.verrechnungsgrad).toBe(0);
     expect(Number.isNaN(result.verrechnungsgrad)).toBe(false);
   });
 
-  it("berechnet sich aus billable Kundenstunden / ist", () => {
+  // Kundenstunden kommen seit dem Wechsel auf monatliche Erfassung
+  // (Betrieb.md-Nachtrag, 18.08.2026) nicht mehr aus billable-Zeiteinträgen,
+  // sondern werden vom Aufrufer aus CustomerMonth vorberechnet (siehe
+  // lib/customer-months.ts) und hier nur noch durchgereicht.
+  it("reicht die übergebenen Kundenstunden durch und rechnet verrechnungsgrad daraus", () => {
     const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
     const result = kennzahlen({
       from: "2026-08-10",
       to: "2026-08-11",
       heute: "2026-08-12",
       eintraege: [
-        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, customerId: "billable", billable: true },
-        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, customerId: "nonbillable", billable: false },
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 },
       ],
       profil,
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 8,
     });
     expect(result.ist).toBe(16);
     expect(result.kundenstunden).toBe(8);
@@ -414,6 +427,7 @@ describe("ueberstunden berücksichtigt OvertimePayouts (Art. 321c OR)", () => {
       changes: [],
       holidays: [],
       payouts: [{ date: "2026-08-11", hours: 3 }],
+      kundenstunden: 0,
     });
     // ist = 20h, soll = 16h (2 Tage × 8h), Auszahlung 3h → ueberstunden = 20 - 16 - 3 = 1
     expect(result.ist).toBe(20);
@@ -444,6 +458,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.ueberzeit).toBe(5);
   });
@@ -465,6 +480,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.ueberzeit).toBe(0);
   });
@@ -488,6 +504,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.ueberzeit).toBe(0);
   });
@@ -513,6 +530,7 @@ describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => 
       changes: [],
       holidays: [],
       payouts: [],
+      kundenstunden: 0,
     });
     expect(result.ueberzeit).toBe(5);
   });
@@ -668,6 +686,7 @@ describe("Feiertage (MIGRATION.md Punkt 6c)", () => {
       changes: [],
       payouts: [],
       holidays,
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(32);
     expect(result.sollGesamt).toBe(32);
@@ -686,17 +705,20 @@ describe("Feiertage (MIGRATION.md Punkt 6c)", () => {
       changes: [],
       payouts: [],
       holidays,
+      kundenstunden: 0,
     });
     expect(result.soll).toBe(0);
     expect(result.ist).toBe(4);
   });
 });
 
-// MIGRATION.md Punkt 7/8 — ArG-Kontrollexport braucht die wöchentliche
-// Arbeitszeit und Überzeit separat je Woche; die Teamsicht (Punkt 8) braucht
-// zusätzlich verrechnungsgrad (Heatmap) und auslastung (Prognose) je Woche —
-// dieselbe Funktion deckt beides ab (siehe Kommentar bei wochenUebersicht).
-describe("wochenUebersicht (MIGRATION.md Punkt 7/8)", () => {
+// MIGRATION.md Punkt 7 — ArG-Kontrollexport braucht die wöchentliche
+// Arbeitszeit und Überzeit separat je Woche. Früher auch von der
+// Teamsicht-Heatmap/-Prognose genutzt (kundenstunden/verrechnungsgrad/
+// auslastung je Woche) — mit dem Wechsel auf monatliche Kundenstunden-
+// Erfassung entfallen (Betrieb.md-Nachtrag, 18.08.2026), siehe Kommentar
+// bei wochenUebersicht.
+describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
   const profil: Profil = {
     wochenstunden: 40,
     pensum: 100,
@@ -715,7 +737,7 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7/8)", () => {
       bis: "17:00",
       pauseMin: 0,
     }));
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
     expect(result).toHaveLength(1);
     expect(result[0].montag).toBe("2026-08-03");
     expect(result[0].arbeitsstunden).toBe(45);
@@ -731,7 +753,7 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7/8)", () => {
       bis: "18:00",
       pauseMin: 0,
     }));
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
     expect(result[0].arbeitsstunden).toBe(50);
     expect(result[0].ueberzeit).toBe(5);
   });
@@ -741,50 +763,29 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7/8)", () => {
       { date: "2026-08-10", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }, // KW2
       { date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }, // KW1
     ];
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-14");
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-14");
     expect(result.map((w) => w.montag)).toEqual(["2026-08-03", "2026-08-10"]);
   });
 
-  it("liefert auch Wochen ganz ohne Einträge mit 0-Werten (dichte Wochenliste für Heatmap/Prognose)", () => {
+  it("liefert auch Wochen ganz ohne Einträge mit 0-Werten (dichte Wochenliste)", () => {
     const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }];
     // Zeitraum über zwei Wochen (KW1 mit Eintrag, KW2 ganz leer).
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-14");
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-14");
     expect(result.map((w) => w.montag)).toEqual(["2026-08-03", "2026-08-10"]);
     expect(result[1].arbeitsstunden).toBe(0);
-    expect(result[1].verrechnungsgrad).toBe(0);
-    expect(result[1].auslastung).toBe(0);
   });
 
   it("ignoriert Einträge ausserhalb von [from, to]", () => {
     const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }];
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-10", "2026-08-14");
+    const result = wochenUebersicht(eintraege, profil, "2026-08-10", "2026-08-14");
     expect(result).toHaveLength(1);
     expect(result[0].arbeitsstunden).toBe(0);
   });
 
   it("zählt Absenzen nicht als Arbeitszeit", () => {
     const eintraege = [{ date: "2026-08-03", typ: "ferien" as const, hours: 8 }];
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
+    const result = wochenUebersicht(eintraege, profil, "2026-08-03", "2026-08-07");
     expect(result[0].arbeitsstunden).toBe(0);
-  });
-
-  it("verrechnungsgrad: nur billable Arbeitsstunden zählen als kundenstunden", () => {
-    const eintraege = [
-      { date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0, billable: true }, // 4h billable
-      { date: "2026-08-04", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0, billable: false }, // 4h nicht billable
-    ];
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
-    expect(result[0].arbeitsstunden).toBe(8);
-    expect(result[0].kundenstunden).toBe(4);
-    expect(result[0].verrechnungsgrad).toBe(50);
-  });
-
-  it("sollStunden/auslastung: volles Wochensoll (Mo–So) unabhängig vom Periodenrand", () => {
-    // Profil 40h/100% → Tagessoll 8h, Wochensoll Mo-Fr = 40h.
-    const eintraege = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0 }]; // 8h
-    const result = wochenUebersicht(eintraege, profil, [], [], "2026-08-03", "2026-08-07");
-    expect(result[0].sollStunden).toBe(40);
-    expect(result[0].auslastung).toBe(20); // 8h von 40h Soll
   });
 });
 
@@ -794,15 +795,15 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
   const profilB: Profil = { wochenstunden: 40, pensum: 50, ferientage: 25, startDate: null, exitDate: null, maxWeeklyHours: 45 };
 
   it("liefert pro Mitglied dieselben Werte wie ein direkter kennzahlen()-Aufruf", () => {
-    const eintraegeA = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0, billable: true }];
-    const direkt = kennzahlen({ from: "2026-08-03", to: "2026-08-07", heute: "2026-08-07", eintraege: eintraegeA, profil: profilA, changes: [], payouts: [], holidays: [] });
+    const eintraegeA = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 }];
+    const direkt = kennzahlen({ from: "2026-08-03", to: "2026-08-07", heute: "2026-08-07", eintraege: eintraegeA, profil: profilA, changes: [], payouts: [], holidays: [], kundenstunden: 5 });
 
     const result = teamKennzahlen({
       from: "2026-08-03",
       to: "2026-08-07",
       heute: "2026-08-07",
       holidays: [],
-      members: [{ userId: "u1", name: "A", profil: profilA, changes: [], eintraege: eintraegeA, payouts: [] }],
+      members: [{ userId: "u1", name: "A", profil: profilA, changes: [], eintraege: eintraegeA, payouts: [], kundenstunden: 5 }],
     });
 
     expect(result.members).toHaveLength(1);
@@ -813,8 +814,11 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
   });
 
   it("totals summieren soll/ist/ueberstunden/kundenstunden über alle Mitglieder", () => {
-    const eintraegeA = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0, billable: true }]; // 8h, alle billable
-    const eintraegeB = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0, billable: false }]; // 4h, nicht billable
+    // Kundenstunden kommen seit dem Wechsel auf monatliche Erfassung
+    // (Betrieb.md-Nachtrag, 18.08.2026) direkt als Parameter je Person,
+    // nicht mehr aus billable-Zeiteinträgen.
+    const eintraegeA = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0 }]; // 8h
+    const eintraegeB = [{ date: "2026-08-03", typ: "arbeit" as const, von: "08:00", bis: "12:00", pauseMin: 0 }]; // 4h
 
     const result = teamKennzahlen({
       from: "2026-08-03",
@@ -822,13 +826,13 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
       heute: "2026-08-03",
       holidays: [],
       members: [
-        { userId: "u1", name: "A", profil: profilA, changes: [], eintraege: eintraegeA, payouts: [] },
-        { userId: "u2", name: "B", profil: profilB, changes: [], eintraege: eintraegeB, payouts: [] },
+        { userId: "u1", name: "A", profil: profilA, changes: [], eintraege: eintraegeA, payouts: [], kundenstunden: 8 },
+        { userId: "u2", name: "B", profil: profilB, changes: [], eintraege: eintraegeB, payouts: [], kundenstunden: 0 },
       ],
     });
 
     expect(result.totals.ist).toBe(12); // 8h + 4h
-    expect(result.totals.kundenstunden).toBe(8); // nur A's Stunden sind billable
+    expect(result.totals.kundenstunden).toBe(8); // nur A hat Kundenstunden
     expect(result.totals.verrechnungsgrad).toBe(66.7); // 8/12*100, gerundet
   });
 
@@ -838,7 +842,7 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
       to: "2026-08-03",
       heute: "2026-08-03",
       holidays: [],
-      members: [{ userId: "u1", name: "A", profil: profilA, changes: [], eintraege: [], payouts: [] }],
+      members: [{ userId: "u1", name: "A", profil: profilA, changes: [], eintraege: [], payouts: [], kundenstunden: 0 }],
     });
     expect(result.totals.ist).toBe(0);
     expect(result.totals.verrechnungsgrad).toBe(0);
@@ -855,10 +859,10 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
       heute: "2026-08-07",
       holidays: [],
       members: [
-        { userId: "leer", name: "Ohne Einträge", profil, changes: [], eintraege: [], payouts: [] },
+        { userId: "leer", name: "Ohne Einträge", profil, changes: [], eintraege: [], payouts: [], kundenstunden: 0 },
         {
-          userId: "voll", name: "Mit Einträgen", profil, changes: [], payouts: [],
-          eintraege: [{ date: "2026-08-03", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, billable: true }],
+          userId: "voll", name: "Mit Einträgen", profil, changes: [], payouts: [], kundenstunden: 8,
+          eintraege: [{ date: "2026-08-03", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 }],
         },
       ],
     });
@@ -940,19 +944,19 @@ describe("Kalenderrandfälle (HARDENING.md A3)", () => {
     ];
 
     it("wochenUebersicht fasst die Woche zu EINEM Eintrag zusammen, nicht zu zwei Jahresteilen", () => {
-      const wochen = wochenUebersicht(eintraege, vollzeit, [], [], "2026-12-28", "2027-01-03");
+      const wochen = wochenUebersicht(eintraege, vollzeit, "2026-12-28", "2027-01-03");
       expect(wochen).toHaveLength(1);
       expect(wochen[0].montag).toBe("2026-12-28");
       expect(wochen[0].arbeitsstunden).toBe(50);
-      expect(wochen[0].sollStunden).toBe(40);
     });
 
     it("die Überzeit der Woche wird über den Jahreswechsel hinweg als eine Woche gerechnet", () => {
-      const wochen = wochenUebersicht(eintraege, vollzeit, [], [], "2026-12-28", "2027-01-03");
+      const wochen = wochenUebersicht(eintraege, vollzeit, "2026-12-28", "2027-01-03");
       expect(wochen[0].ueberzeit).toBe(5); // 50h − 45h
       const k = kennzahlen({
         from: "2026-12-28", to: "2027-01-03", heute: "2027-01-03",
         eintraege, profil: vollzeit, changes: [], holidays: [], payouts: [],
+        kundenstunden: 0,
       });
       // Eine einzige Woche über dem Limit, nicht zwei Teilwochen mit je 0.
       expect(k.ueberzeit).toBe(5);
@@ -970,10 +974,12 @@ describe("Kalenderrandfälle (HARDENING.md A3)", () => {
       const feb2026 = kennzahlen({
         from: "2026-02-01", to: "2026-02-28", heute: "2026-03-01",
         eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+ kundenstunden: 0,
       });
       const feb2028 = kennzahlen({
         from: "2028-02-01", to: "2028-02-29", heute: "2028-03-01",
         eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+ kundenstunden: 0,
       });
       expect(feb2026.soll).toBe(160); // 20 × 8h
       expect(feb2028.soll).toBe(168); // 21 × 8h
@@ -1006,7 +1012,7 @@ describe("Kalenderrandfälle (HARDENING.md A3)", () => {
         kennzahlen({
           from: datum, to: datum, heute: "2027-01-01",
           eintraege: [{ date: datum, typ: "arbeit", von: "22:00", bis: "06:00", pauseMin: 30 }],
-          profil: vollzeit, changes: [], holidays: [], payouts: [],
+          profil: vollzeit, changes: [], holidays: [], payouts: [], kundenstunden: 0,
         }).ist;
 
       expect(nacht("2026-03-28")).toBe(7.5); // Nacht auf den Frühjahrswechsel
@@ -1019,10 +1025,12 @@ describe("Kalenderrandfälle (HARDENING.md A3)", () => {
       const maerz = kennzahlen({
         from: "2026-03-23", to: "2026-03-29", heute: "2026-03-29",
         eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+ kundenstunden: 0,
       });
       const oktober = kennzahlen({
         from: "2026-10-19", to: "2026-10-25", heute: "2026-10-25",
         eintraege: [], profil: vollzeit, changes: [], holidays: [], payouts: [],
+ kundenstunden: 0,
       });
       expect(maerz.soll).toBe(40);
       expect(oktober.soll).toBe(40);
@@ -1035,6 +1043,7 @@ describe("Kalenderrandfälle (HARDENING.md A3)", () => {
         from: "2026-03-28", to: "2026-03-28", heute: "2026-03-29",
         eintraege: [{ date: "2026-03-28", typ: "arbeit", von: "22:00", bis: "06:00", pauseMin: 30 }],
         profil: vollzeit, changes: [], holidays: [], payouts: [],
+ kundenstunden: 0,
       });
       expect(k.ist).toBe(7.5);
       expect(k.soll).toBe(0); // Samstag

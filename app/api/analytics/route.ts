@@ -12,6 +12,7 @@ import {
   type PayoutInput,
   type HolidayInput,
 } from "@/lib/calc";
+import { monthsInRange } from "@/lib/customer-months";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
 // für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
@@ -41,8 +42,6 @@ function mapEintraege(entries: any[]): EintragMitDatum[] {
     bis: e.bis,
     pauseMin: e.pauseMin,
     hours: e.hours,
-    customerId: e.customerId,
-    billable: e.billable,
   }));
 }
 
@@ -97,7 +96,26 @@ export async function GET(req: Request) {
     const payoutsRaw = await prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: startDate, lte: endDate } } });
     const payouts: PayoutInput[] = payoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
 
-    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays });
+    // Kundenstunden je Kalendermonat im gewählten Zeitraum — einmal geladen,
+    // unten fürs Total und für die monatliche Aufschlüsselung (monthlyData)
+    // wiederverwendet, statt pro Monat eine eigene Query abzusetzen.
+    const monate = monthsInRange(startDate, endDate);
+    const customerMonthRows =
+      monate.length === 0
+        ? []
+        : await prisma.customerMonth.findMany({
+            where: { orgId, userId, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
+            include: { customer: { select: { billable: true } } },
+          });
+    const customerHoursByMonth = new Map<string, number>();
+    for (const cm of customerMonthRows) {
+      if (!cm.customer.billable) continue;
+      const key = `${cm.year}-${cm.month}`;
+      customerHoursByMonth.set(key, (customerHoursByMonth.get(key) ?? 0) + cm.hours);
+    }
+    const kundenstundenTotal = Array.from(customerHoursByMonth.values()).reduce((s, h) => s + h, 0);
+
+    const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });
 
     // Feiertagsstunden (bis heute) für die bestehende Feiertags-Karte
     const todayEnd = new Date();
@@ -134,9 +152,21 @@ export async function GET(req: Request) {
       const mStart = new Date(Date.UTC(mYear, mMonth - 1, 1));
       const mEndFull = new Date(Date.UTC(mYear, mMonth, 0));
       const mEnd = mEndFull > endDate ? endDate : mEndFull;
-      const mk = kennzahlen({ from: mStart, to: mEnd, heute, eintraege, profil, changes, payouts, holidays });
-      // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im Verlaufs-Chart
-      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [], holidays });
+      const mk = kennzahlen({
+        from: mStart,
+        to: mEnd,
+        heute,
+        eintraege,
+        profil,
+        changes,
+        payouts,
+        holidays,
+        kundenstunden: customerHoursByMonth.get(`${mYear}-${mMonth}`) ?? 0,
+      });
+      // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im
+      // Verlaufs-Chart — kundenstunden hier irrelevant, mkWork.kundenstunden
+      // wird nirgends gelesen (nur .ist für "work").
+      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [], holidays, kundenstunden: 0 });
       monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, work: mkWork.ist, customer: mk.kundenstunden });
       currentMonth.setUTCMonth(currentMonth.getUTCMonth() + 1);
     }

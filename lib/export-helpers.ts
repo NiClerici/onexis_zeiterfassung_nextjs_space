@@ -37,8 +37,6 @@ export function mapEintraege(entries: any[]): EintragMitDatum[] {
     bis: e.bis,
     pauseMin: e.pauseMin,
     hours: e.hours,
-    customerId: e.customerId,
-    billable: e.billable,
   }));
 }
 

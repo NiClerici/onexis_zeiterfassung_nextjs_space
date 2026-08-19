@@ -29,6 +29,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   memberships      Membership[]
   monthLocks       MonthLock[]
+  customerMonths   CustomerMonth[]
   absenceRequests  AbsenceRequest[]
 }
 
@@ -68,6 +69,7 @@ model Organization {
   holidays        Holiday[]
   monthLocks      MonthLock[]
   absenceRequests AbsenceRequest[]
+  customerMonths  CustomerMonth[]
 }
 
 // Monatsabschluss (MIGRATION.md Punkt 6e). Existenz einer Zeile = der Monat
@@ -320,6 +322,7 @@ model Customer {
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   timeEntries TimeEntry[]
   projects  Project[]
+  customerMonths CustomerMonth[]
 
   @@unique([orgId, name])
 }
@@ -339,9 +342,46 @@ model Project {
   org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
   timeEntries TimeEntry[]
+  customerMonths CustomerMonth[]
 
   @@unique([orgId, customerId, name])
   @@index([orgId])
+}
+
+// Kundenstunden pro Monat statt pro Tag (Betrieb.md-Nachtrag, 18.08.2026) —
+// Nico erfasst sie separat vom Arbeitszeit-Eintrag, nicht mehr über
+// customerId/projectId/billable an TimeEntry (diese Felder bleiben dort
+// erhalten, werden aber nicht mehr beschrieben — Rückfalloption, falls die
+// Migration der Bestandsdaten etwas übersieht). Optional auf ein Projekt
+// des Kunden aufteilbar (projectId), sonst gilt die Zeile dem Kunden direkt.
+//
+// Kein @@unique auf (orgId, userId, year, month, customerId, projectId):
+// in PostgreSQL gelten zwei NULL-Werte in einem Unique-Index als
+// verschieden, ein solcher Constraint würde also mehrere Zeilen ohne
+// projectId für denselben Kunden/Monat NICHT verhindern. Die Eindeutigkeit
+// wird deshalb in app/api/customer-months/route.ts geprüft (dort wird pro
+// Monat ohnehin der komplette Zeilensatz ersetzt, nicht einzeln
+// hinzugefügt) — hier bewusst kein Constraint, der nicht hält, was er
+// verspricht.
+model CustomerMonth {
+  id         String   @id @default(cuid())
+  orgId      String
+  userId     String
+  year       Int
+  month      Int      // 1-12
+  customerId String
+  projectId  String?
+  hours      Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  project  Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, year, month])
+  @@index([userId, year, month])
 }
 
 model OvertimePayout {
