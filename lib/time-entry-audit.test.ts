@@ -155,4 +155,9 @@ describe("/api/time-entries — Fehlerpfade (HARDENING.md B2)", () => {
     const res = await tePut(jsonReq("/api/time-entries", "PUT", { hours: 3 }));
     expect([400, 404]).toContain(res.status);
   });
+
+  it("POST mit einer projectId, die es nicht gibt, liefert 400", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-09-02", type: "arbeit", von: "08:00", bis: "12:00", projectId: "gibtesnicht" }));
+    expect(res.status).toBe(400);
+  });
 });

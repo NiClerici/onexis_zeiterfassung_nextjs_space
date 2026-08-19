@@ -205,6 +205,9 @@ model Membership {
   basePensum      Float?
   vacationDays    Float     @default(25)
   startDate       DateTime?
+  // Kürzel für den Stundenrapport-Export (z.B. "CLN") — frei pflegbar im
+  // Profil, keine Ableitungslogik aus dem Namen (nicht immer eindeutig).
+  kuerzel         String?
   stdHoursMon     Float     @default(0)
   stdHoursTue     Float     @default(0)
   stdHoursWed     Float     @default(0)

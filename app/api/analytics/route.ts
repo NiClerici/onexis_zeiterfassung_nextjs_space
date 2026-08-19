@@ -12,7 +12,7 @@ import {
   type PayoutInput,
   type HolidayInput,
 } from "@/lib/calc";
-import { monthsInRange } from "@/lib/customer-months";
+import { billableHoursByUserAndMonth } from "@/lib/customer-months";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
 // für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
@@ -98,21 +98,10 @@ export async function GET(req: Request) {
 
     // Kundenstunden je Kalendermonat im gewählten Zeitraum — einmal geladen,
     // unten fürs Total und für die monatliche Aufschlüsselung (monthlyData)
-    // wiederverwendet, statt pro Monat eine eigene Query abzusetzen.
-    const monate = monthsInRange(startDate, endDate);
-    const customerMonthRows =
-      monate.length === 0
-        ? []
-        : await prisma.customerMonth.findMany({
-            where: { orgId, userId, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
-            include: { customer: { select: { billable: true } } },
-          });
-    const customerHoursByMonth = new Map<string, number>();
-    for (const cm of customerMonthRows) {
-      if (!cm.customer.billable) continue;
-      const key = `${cm.year}-${cm.month}`;
-      customerHoursByMonth.set(key, (customerHoursByMonth.get(key) ?? 0) + cm.hours);
-    }
+    // wiederverwendet, statt pro Monat eine eigene Query abzusetzen. Neu aus
+    // TimeEntry berechnet, mit Fallback auf CustomerMonth für noch nicht
+    // nacherfasste Monate (lib/customer-months.ts).
+    const customerHoursByMonth = (await billableHoursByUserAndMonth({ orgId, userIds: [userId], from: startDate, to: endDate })).get(userId) ?? new Map<string, number>();
     const kundenstundenTotal = Array.from(customerHoursByMonth.values()).reduce((s, h) => s + h, 0);
 
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });

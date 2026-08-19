@@ -25,6 +25,10 @@ export async function GET() {
       baseWeeklyHours: membership?.baseWeeklyHours ?? null,
       basePensum: membership?.basePensum ?? null,
       vacationDays: membership?.vacationDays ?? 25,
+      // Kürzel für den Stundenrapport-Export (lib/import-stundenrapport.ts /
+      // app/api/export/stundenrapport) — frei pflegbar, keine Ableitung aus
+      // dem Namen.
+      kuerzel: membership?.kuerzel ?? "",
       // Gesetzliche Höchstarbeitszeit der Organisation (Art. 12/13 ArG,
       // MIGRATION.md Punkt 6a) — für die Kalender-Kennzahlenberechnung.
       maxWeeklyHours: (membership as any)?.org?.maxWeeklyHours ?? 45,
@@ -68,6 +72,7 @@ export async function PUT(req: Request) {
     if (body?.pensum !== undefined) membershipUpdateData.pensum = body.pensum;
     if (body?.vacationDays !== undefined) membershipUpdateData.vacationDays = body.vacationDays;
     if (body?.startDate !== undefined) membershipUpdateData.startDate = body.startDate ? new Date(body.startDate) : null;
+    if (body?.kuerzel !== undefined) membershipUpdateData.kuerzel = body.kuerzel?.trim?.() || null;
 
     // Standard week (Stunden pro Wochentag, 0-24 clamped)
     const clampDay = (v: any) => Math.max(0, Math.min(24, Number(v) || 0));

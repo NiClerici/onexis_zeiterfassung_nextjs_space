@@ -16,7 +16,23 @@ export interface DayTimeEntry {
   bis: string | null;
   pauseMin: number;
   notiz: string | null;
+  customerId: string | null;
+  projectId: string | null;
+  billable: boolean;
   hours: number | null;
+}
+
+export interface DayCustomer {
+  id: string;
+  name: string;
+  billable: boolean;
+}
+
+export interface DayProject {
+  id: string;
+  customerId: string;
+  name: string;
+  active: boolean;
 }
 
 interface DraftRow {
@@ -27,6 +43,9 @@ interface DraftRow {
   bis: string;
   pauseMin: string;
   notiz: string;
+  customerId: string;
+  projectId: string;
+  billable: boolean;
   hours: string;
   // Nur für type==="arbeit" relevant: Eingabe über Von/Bis/Pause (false,
   // Standard) oder direkt über eine Stundenzahl (true) — im zweiten Fall
@@ -45,6 +64,9 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
     bis: entry.bis ?? "17:00",
     pauseMin: String(entry.pauseMin ?? 0),
     notiz: entry.notiz ?? "",
+    customerId: entry.customerId ?? "",
+    projectId: entry.projectId ?? "",
+    billable: entry.billable ?? false,
     hours: entry.hours != null ? String(entry.hours) : fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
@@ -60,6 +82,9 @@ function newDraft(fallbackHours: number): DraftRow {
     bis: "17:00",
     pauseMin: "0",
     notiz: "",
+    customerId: "",
+    projectId: "",
+    billable: false,
     hours: fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
@@ -72,6 +97,8 @@ interface DayEntryDialogProps {
   dateStr: string;
   dayLabel: string;
   entries: DayTimeEntry[];
+  customers: DayCustomer[];
+  projects: DayProject[];
   tagesSoll: number;
   onChanged: () => void;
   // Monatsabschluss (MIGRATION.md Punkt 6e) — true, wenn der angezeigte Monat
@@ -81,7 +108,7 @@ interface DayEntryDialogProps {
   locked?: boolean;
 }
 
-export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, tagesSoll, onChanged, locked = false }: DayEntryDialogProps) {
+export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged, locked = false }: DayEntryDialogProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<DraftRow[]>([]);
 
@@ -92,6 +119,23 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, tage
 
   const updateRow = (key: string, patch: Partial<DraftRow>) => {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  };
+
+  // Kunde ist keine eigene Auswahl mehr — er ergibt sich aus dem gewählten
+  // Projekt (Project.customerId ist required, siehe app/api/time-entries/
+  // route.ts:resolveProjectAndCustomer). billable wird beim Projektwechsel
+  // aus dem Standard-Flag des zugehörigen Kunden neu vorbelegt, bleibt aber
+  // per Checkbox überschreibbar (MIGRATION.md Punkt 5).
+  const handleProjectChange = (key: string, projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.key !== key) return r;
+        if (!project) return { ...r, projectId: "", customerId: "", billable: false };
+        const customer = customers.find((c) => c.id === project.customerId);
+        return { ...r, projectId, customerId: project.customerId, billable: customer?.billable ?? r.billable };
+      })
+    );
   };
 
   const handleTypeChange = (key: string, type: EintragTyp) => {
@@ -126,6 +170,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, tage
         bis: isArbeit ? (arbeitszeit?.bis ?? row.bis) : null,
         pauseMin: isArbeit ? (arbeitszeit?.pauseMin ?? Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0))) : 0,
         notiz: row.notiz.trim() || null,
+        customerId: row.customerId || null,
+        projectId: row.projectId || null,
+        billable: row.billable,
         // hours ist nur für Absenzen relevant — bei arbeit wird aus von/bis/pauseMin berechnet
         hours: isArbeit || row.hours === "" ? null : Math.max(0, Math.min(24, parseFloat(row.hours) || 0)),
       };
@@ -333,6 +380,37 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, tage
                             </div>
                           </div>
                         )}
+                        <div>
+                          <label htmlFor={`project-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.project")}</label>
+                          <select
+                            id={`project-${row.key}`}
+                            value={row.projectId}
+                            onChange={(e) => handleProjectChange(row.key, e.target.value)}
+                            className="w-full px-2 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                          >
+                            <option value="">{t("calendar.projectNone")}</option>
+                            {customers.map((c) => {
+                              const custProjects = projects.filter((p) => p.customerId === c.id && p.active);
+                              if (custProjects.length === 0) return null;
+                              return (
+                                <optgroup key={c.id} label={c.name}>
+                                  {custProjects.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                  ))}
+                                </optgroup>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={row.billable}
+                            onChange={(e) => updateRow(row.key, { billable: e.target.checked })}
+                            className="accent-primary"
+                          />
+                          {t("calendar.billable")}
+                        </label>
                       </>
                     ) : (
                       <div>
@@ -351,13 +429,16 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, tage
                     )}
 
                     <div>
-                      <label htmlFor={`notiz-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.notiz")}</label>
+                      {/* Bei Arbeitszeit dient das Feld als Tätigkeitsbeschreibung
+                          (Tasks, passend zum Stundenrapport-Format), bei
+                          Absenzen bleibt es eine freie Notiz. */}
+                      <label htmlFor={`notiz-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{isArbeit ? t("calendar.tasks") : t("calendar.notiz")}</label>
                       <input
                         id={`notiz-${row.key}`}
                         type="text"
                         value={row.notiz}
                         onChange={(e) => updateRow(row.key, { notiz: e.target.value })}
-                        placeholder={t("calendar.notizPlaceholder")}
+                        placeholder={isArbeit ? t("calendar.tasksPlaceholder") : t("calendar.notizPlaceholder")}
                         className="w-full px-2 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                       />
                     </div>

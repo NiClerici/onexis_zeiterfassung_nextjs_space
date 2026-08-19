@@ -9,8 +9,9 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput, type HolidayInput, type EintragMitDatum } from "@/lib/calc";
 import { pruefeCompliance } from "@/lib/compliance";
-import { DayEntryDialog, type DayTimeEntry } from "@/components/day-entry-dialog";
-import { CustomerMonthCard } from "@/components/customer-month-card";
+import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
+import { ProjectMonthSummary, type ProjectSummaryRow } from "@/components/project-month-summary";
+import { downloadBlob } from "@/lib/download-blob";
 
 interface UserProfile {
   firstName: string;
@@ -68,6 +69,8 @@ export default function CalendarPage() {
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
   const [entries, setEntries] = useState<DayTimeEntry[]>([]);
+  const [customers, setCustomers] = useState<DayCustomer[]>([]);
+  const [projects, setProjects] = useState<DayProject[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -104,6 +107,26 @@ export default function CalendarPage() {
       }
     } catch (err: any) { console.error(err); }
   }, [currentDate?.year, currentDate?.month]);
+
+  const fetchCustomers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/customers");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setCustomers(data?.customers ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
+
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch("/api/projects");
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setProjects(data?.projects ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, []);
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -161,7 +184,7 @@ export default function CalendarPage() {
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
   useEffect(() => { fetchMonthLocks(); }, [fetchMonthLocks]);
-  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); }, [fetchProfile, fetchPensumChanges, fetchHolidays]);
+  useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchHolidays, fetchCustomers, fetchProjects]);
 
   // Close month picker on outside click
   useEffect(() => {
@@ -258,6 +281,47 @@ export default function CalendarPage() {
       (sum, e) => sum + stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll),
       0
     );
+  };
+
+  // Projektstunden-Übersicht des angezeigten Monats — ersetzt die frühere,
+  // separat editierbare CustomerMonth-Karte (components/customer-month-card.tsx)
+  // durch eine reine Auswertung der ohnehin schon geladenen Tageseinträge
+  // (kein eigener Fetch nötig). Nur "arbeit"-Einträge zählen; Einträge ohne
+  // Projekt fliessen in unassignedHours statt eine Zeile "kein Projekt" zu
+  // erzeugen.
+  const projectSummary = (() => {
+    const byProject = new Map<string, ProjectSummaryRow>();
+    let unassigned = 0;
+    let total = 0;
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayEntries = getEntriesForDay(day);
+      if (dayEntries.length === 0) continue;
+      const tagesSoll = getTagesSoll(day);
+      for (const e of dayEntries) {
+        if (e.type !== "arbeit") continue;
+        const stunden = stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll);
+        total += stunden;
+        if (!e.projectId) { unassigned += stunden; continue; }
+        const project = projects.find((p) => p.id === e.projectId);
+        const customer = project ? customers.find((c) => c.id === project.customerId) : undefined;
+        const existing = byProject.get(e.projectId);
+        if (existing) existing.hours += stunden;
+        else byProject.set(e.projectId, {
+          projectId: e.projectId,
+          projectName: project?.name ?? "?",
+          customerId: project?.customerId ?? "",
+          customerName: customer?.name ?? "?",
+          hours: stunden,
+        });
+      }
+    }
+    return { rows: Array.from(byProject.values()).sort((a, b) => b.hours - a.hours), unassignedHours: unassigned, totalHours: total };
+  })();
+
+  const exportCustomerRapport = async (customerId: string, customerName: string) => {
+    const url = `/api/export/stundenrapport?year=${currentDate.year}&month=${currentDate.month}&customerId=${customerId}`;
+    const fileName = `Stundenrapport_${customerName}_${currentDate.month}-${currentDate.year}.xlsx`;
+    await downloadBlob(url, fileName, (msg) => toast.error(msg), t("calendar.exportError"));
   };
 
   const isToday = (day: number) => {
@@ -532,12 +596,22 @@ export default function CalendarPage() {
               const isMissing = dayEntries.length === 0 && isWorkday && tagesSoll > 0;
               const holiday = getHolidayForDay(day);
               const violations = dayEntries.length > 0 ? getComplianceViolations(day) : [];
+              // Distinkte Projektnamen des Tages — Zelle ist zu schmal für
+              // mehr als eine kurze Anzeige, der volle Titel steht im
+              // title-Attribut (Hover).
+              const dayProjectNames = Array.from(
+                new Set(dayEntries.map((e) => (e.projectId ? projects.find((p) => p.id === e.projectId)?.name : null)).filter((n): n is string => !!n))
+              );
+              const titleParts = [
+                holiday ? `${holiday.name}${holiday.halfDay ? " (halber Tag)" : ""}` : null,
+                dayProjectNames.length > 0 ? dayProjectNames.join(" · ") : null,
+              ].filter(Boolean);
 
               return (
                 <button
                   key={di}
                   onClick={() => openDayModal(day)}
-                  title={holiday ? `${holiday.name}${holiday.halfDay ? " (halber Tag)" : ""}` : undefined}
+                  title={titleParts.length > 0 ? titleParts.join(" — ") : undefined}
                   className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm hover:bg-accent cursor-pointer ${isToday(day) ? 'ring-2 ring-primary/30' : ''} ${holiday ? 'bg-purple-50 dark:bg-purple-950/30' : ''}`}
                 >
                   {violations.length > 0 && (
@@ -561,6 +635,11 @@ export default function CalendarPage() {
                   <span className={`text-[10px] font-mono mt-0.5 leading-none ${isMissing ? 'text-red-500 font-semibold' : 'text-muted-foreground'}`}>
                     {dayEntries.length > 0 ? `${round1(totalHours)}h` : isMissing ? `${round1(tagesSoll)}h` : ' '}
                   </span>
+                  {dayProjectNames.length > 0 && (
+                    <span className="text-[8px] leading-none mt-0.5 max-w-full truncate text-primary/70">
+                      {dayProjectNames[0]}{dayProjectNames.length > 1 ? ` +${dayProjectNames.length - 1}` : ""}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -568,8 +647,14 @@ export default function CalendarPage() {
         ))}
       </motion.div>
 
-      {/* Kundenstunden des angezeigten Monats */}
-      <CustomerMonthCard year={currentDate.year} month={currentDate.month} locked={isMember && isCurrentMonthLocked} />
+      {/* Projektstunden des angezeigten Monats — berechnet aus den
+          Tageseinträgen, siehe projectSummary oben. */}
+      <ProjectMonthSummary
+        rows={projectSummary.rows}
+        unassignedHours={projectSummary.unassignedHours}
+        totalHours={projectSummary.totalHours}
+        onExportCustomer={exportCustomerRapport}
+      />
 
       {/* Legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
@@ -586,6 +671,8 @@ export default function CalendarPage() {
         dateStr={selectedDateStr}
         dayLabel={selectedDayLabel}
         entries={selectedDayEntries}
+        customers={customers}
+        projects={projects}
         tagesSoll={selectedDayTagesSoll}
         onChanged={fetchEntries}
         locked={isMember && isCurrentMonthLocked}

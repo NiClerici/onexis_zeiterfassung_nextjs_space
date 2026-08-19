@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload, ChevronDown, ChevronUp } from "lucide-react";
+import { User, Briefcase, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
+import { downloadBlob } from "@/lib/download-blob";
 
 interface ProfileData {
   firstName: string;
@@ -15,6 +16,7 @@ interface ProfileData {
   pensum: number;
   vacationDays: number;
   startDate: string | null;
+  kuerzel?: string | null;
   language: string;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
 }
@@ -79,6 +81,7 @@ export default function ProfilePage() {
   const [pensum, setPensum] = useState("");
   const [vacationDays, setVacationDays] = useState("");
   const [startDate, setStartDate] = useState("");
+  const [kuerzel, setKuerzel] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
@@ -119,19 +122,6 @@ export default function ProfilePage() {
   const [newProjectBudget, setNewProjectBudget] = useState("");
   const [savingProject, setSavingProject] = useState(false);
 
-  // Kundenstunden monatlich (Plan "Kundenstunden monatlich statt täglich",
-  // Teil 2 — Erfassung). cmDirectHours: Stunden direkt beim Kunden
-  // (CustomerMonth ohne projectId), cmProjectHours: Stunden pro Projekt
-  // (mit projectId) — beides kann parallel befüllt sein, siehe
-  // app/api/team/route.ts Kommentar zu CustomerMonth-Aggregation.
-  const [cmMonth, setCmMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
-  const [cmDirectHours, setCmDirectHours] = useState<Record<string, string>>({});
-  const [cmProjectHours, setCmProjectHours] = useState<Record<string, string>>({});
-  const [cmExpanded, setCmExpanded] = useState<Record<string, boolean>>({});
-  const [cmArbeitsstunden, setCmArbeitsstunden] = useState(0);
-  const [cmLoading, setCmLoading] = useState(false);
-  const [cmSaving, setCmSaving] = useState(false);
-
   // Overtime payouts state
   const [overtimePayouts, setOvertimePayouts] = useState<OvertimePayoutData[]>([]);
   const [payoutDate, setPayoutDate] = useState("");
@@ -167,6 +157,19 @@ export default function ProfilePage() {
     errors: { rowNumber: number; message: string; sheet: string }[];
   } | null>(null);
 
+  // Stundenrapport-Import (Projekte pro Tag, siehe lib/import-stundenrapport.ts)
+  // — eigener, unabhängiger Zustand vom Alt-Import oben.
+  const [srFile, setSrFile] = useState<File | null>(null);
+  const [srCustomerName, setSrCustomerName] = useState("");
+  const [srLoading, setSrLoading] = useState(false);
+  const [srDone, setSrDone] = useState(false);
+  const [srPreview, setSrPreview] = useState<{
+    customerName: string; customerIsNew: boolean; newProjects: string[];
+    imported: number; skippedExisting: number; skippedLocked: number; totalRows: number;
+    dateFrom: string | null; dateTo: string | null;
+    errors: { rowNumber: number; message: string }[];
+  } | null>(null);
+
   const fetchProfile = useCallback(async () => {
     setLoading(true);
     try {
@@ -182,6 +185,7 @@ export default function ProfilePage() {
         setBaseWeeklyHours(data?.baseWeeklyHours ?? null);
         setVacationDays(String(data?.vacationDays ?? 25));
         setStartDate(data?.startDate ? data.startDate.split("T")?.[0] ?? "" : "");
+        setKuerzel(data?.kuerzel ?? "");
         const sw = data?.standardWeek ?? {};
         setStdMon(String(sw?.mon ?? 0));
         setStdTue(String(sw?.tue ?? 0));
@@ -234,26 +238,6 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); }
   }, []);
 
-  const fetchCustomerMonth = useCallback(async (month: string) => {
-    setCmLoading(true);
-    try {
-      const [y, m] = month.split("-");
-      const res = await fetch(`/api/customer-months?year=${y}&month=${parseInt(m, 10)}`);
-      if (res?.ok) {
-        const data = await res?.json?.().catch(() => ({}));
-        const direct: Record<string, string> = {};
-        const proj: Record<string, string> = {};
-        for (const r of data?.rows ?? []) {
-          if (r.projectId) proj[r.projectId] = String(r.hours);
-          else direct[r.customerId] = String(r.hours);
-        }
-        setCmDirectHours(direct);
-        setCmProjectHours(proj);
-        setCmArbeitsstunden(data?.arbeitsstunden ?? 0);
-      }
-    } catch (err: any) { console.error(err); } finally { setCmLoading(false); }
-  }, []);
-
   const fetchTeamMembers = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/team");
@@ -267,8 +251,6 @@ export default function ProfilePage() {
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchOvertimePayouts(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchOvertimePayouts, fetchCustomers, fetchProjects]);
 
   useEffect(() => { if (isOrgAdmin) fetchTeamMembers(); }, [isOrgAdmin, fetchTeamMembers]);
-
-  useEffect(() => { fetchCustomerMonth(cmMonth); }, [cmMonth, fetchCustomerMonth]);
 
   // Check if effectiveFrom is in the past
   useEffect(() => {
@@ -294,6 +276,7 @@ export default function ProfilePage() {
           pensum: parseFloat(pensum) || 100,
           vacationDays: parseFloat(vacationDays) || 25,
           startDate: startDate || null,
+          kuerzel: kuerzel?.trim?.() || null,
         }),
       });
       if (res?.ok) { toast.success(t("profile.saved")); await fetchProfile(); }
@@ -537,40 +520,6 @@ export default function ProfilePage() {
     } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
   };
 
-  const toggleCmExpanded = (customerId: string) => setCmExpanded((prev) => ({ ...prev, [customerId]: !prev[customerId] }));
-
-  const cmTotalEntered =
-    Object.values(cmDirectHours).reduce((s, v) => s + (parseFloat(v) || 0), 0) +
-    Object.values(cmProjectHours).reduce((s, v) => s + (parseFloat(v) || 0), 0);
-
-  const saveCustomerMonth = async () => {
-    setCmSaving(true);
-    try {
-      const [y, m] = cmMonth.split("-");
-      const rows: { customerId: string; projectId?: string; hours: number }[] = [];
-      for (const c of customers) {
-        const h = parseFloat(cmDirectHours[c.id]);
-        if (Number.isFinite(h) && h > 0) rows.push({ customerId: c.id, hours: h });
-      }
-      for (const p of projects) {
-        const h = parseFloat(cmProjectHours[p.id]);
-        if (Number.isFinite(h) && h > 0) rows.push({ customerId: p.customerId, projectId: p.id, hours: h });
-      }
-      const res = await fetch("/api/customer-months", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ year: parseInt(y, 10), month: parseInt(m, 10), rows }),
-      });
-      if (res?.ok) {
-        toast.success(t("profile.customerMonthSaved"));
-        await fetchCustomerMonth(cmMonth);
-      } else {
-        const data = await res?.json?.().catch(() => ({}));
-        toast.error(data?.error || t("profile.customerMonthError"));
-      }
-    } catch (err: any) { console.error(err); toast.error(t("profile.customerMonthError")); } finally { setCmSaving(false); }
-  };
-
   // Zeitraum-Query-String, gemeinsam für alle drei Export-Endpunkte
   // (MIGRATION.md Punkt 7) — dieselbe type=month|year|custom-Logik wie schon
   // vorher, nur extrahiert statt dreimal dupliziert.
@@ -591,29 +540,9 @@ export default function ProfilePage() {
     return "";
   };
 
-  async function downloadBlob(url: string, filename: string, onError?: (msg: string) => void) {
-    try {
-      const res = await fetch(url);
-      if (res?.ok) {
-        const blob = await res?.blob?.();
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob ?? new Blob());
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(a.href);
-      } else {
-        const data = await res?.json?.().catch(() => ({}));
-        onError?.(data?.error ?? t("profile.error"));
-      }
-    } catch (err: any) {
-      console.error(err);
-      onError?.(t("profile.error"));
-    }
-  }
-
   const handleExport = async () => {
     const url = `/api/export?${buildRangeQuery()}${buildScopeQuery()}`;
-    await downloadBlob(url, `zeiterfassung_${exportType}_${Date.now()}.xlsx`, (msg) => toast.error(msg));
+    await downloadBlob(url, `zeiterfassung_${exportType}_${Date.now()}.xlsx`, (msg) => toast.error(msg), t("profile.error"));
   };
 
   const handleImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -651,17 +580,55 @@ export default function ProfilePage() {
     }
   };
 
+  const handleSrFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSrFile(e?.target?.files?.[0] ?? null);
+    setSrPreview(null);
+    setSrDone(false);
+  };
+
+  // Wie runImport oben, zusätzlich mit optionalem Kunde-Override: die erste
+  // Vorschau übernimmt den aus der Datei gelesenen Vorschlag ins Eingabefeld,
+  // jeder weitere Aufruf (Vorschau erneut oder Commit) schickt den
+  // aktuellen — ggf. von Hand korrigierten — Feldwert mit.
+  const runSrImport = async (mode: "preview" | "commit") => {
+    if (!srFile) return;
+    setSrLoading(true);
+    try {
+      const fd = new FormData();
+      fd.set("file", srFile);
+      fd.set("mode", mode);
+      if (srCustomerName.trim()) fd.set("customerName", srCustomerName.trim());
+      const res = await fetch("/api/import/stundenrapport", { method: "POST", body: fd });
+      const data = await res?.json?.().catch(() => ({}));
+      if (res?.ok) {
+        setSrPreview(data);
+        if (!srCustomerName.trim() && data?.customerName) setSrCustomerName(data.customerName);
+        if (mode === "commit") {
+          setSrDone(true);
+          toast.success(t("profile.srImportDone", { count: String(data?.imported ?? 0) }));
+        }
+      } else {
+        toast.error(data?.error ?? t("profile.importFileError"));
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(t("profile.importFileError"));
+    } finally {
+      setSrLoading(false);
+    }
+  };
+
   const handleArgControlExport = async () => {
     setExportingArgControl(true);
     const url = `/api/export/arg-control?${buildRangeQuery()}${buildScopeQuery()}`;
-    await downloadBlob(url, `arg_kontrollexport_${Date.now()}.xlsx`, (msg) => toast.error(msg));
+    await downloadBlob(url, `arg_kontrollexport_${Date.now()}.xlsx`, (msg) => toast.error(msg), t("profile.error"));
     setExportingArgControl(false);
   };
 
   const handlePayrollExport = async () => {
     setExportingPayroll(true);
     const url = `/api/export/payroll?year=${payrollYear}&month=${payrollMonth}`;
-    await downloadBlob(url, `lohnexport_${payrollYear}-${String(payrollMonth).padStart(2, "0")}.csv`, (msg) => toast.error(msg));
+    await downloadBlob(url, `lohnexport_${payrollYear}-${String(payrollMonth).padStart(2, "0")}.csv`, (msg) => toast.error(msg), t("profile.error"));
     setExportingPayroll(false);
   };
 
@@ -690,6 +657,7 @@ export default function ProfilePage() {
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.pensum")}</label><input type="number" step="5" min="0" max="200" value={pensum} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPensum(clampNumInput(e?.target?.value ?? "", 0, 200))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.vacationDays")}</label><input type="number" step="0.5" min="0" max="100" value={vacationDays} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVacationDays(clampNumInput(e?.target?.value ?? "", 0, 100))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label><input type="date" value={startDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStartDate(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
+          <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.kuerzel")}</label><input type="text" maxLength={10} value={kuerzel} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKuerzel(e?.target?.value ?? "")} placeholder={t("profile.kuerzelPlaceholder")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
         </div>
         <button onClick={saveProfile} disabled={saving} className="mt-3 w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
           {saving ? t("common.loading") : <><CheckCircle className="w-4 h-4" /> {t("profile.save")}</>}
@@ -1000,88 +968,6 @@ export default function ProfilePage() {
         )}
       </motion.div>
 
-      {/* Kundenstunden monatlich (statt am Tageseintrag) */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Calendar className="w-4 h-4 text-primary" /> {t("profile.customerMonth")}</h2>
-        <p className="text-xs text-muted-foreground mb-3">{t("profile.customerMonthDesc")}</p>
-
-        <div className="mb-3">
-          <MonthYearPicker value={cmMonth} onChange={setCmMonth} />
-        </div>
-
-        {customers.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center">{t("profile.noCustomers")}</p>
-        ) : (
-          <div className={`space-y-1.5 ${cmLoading ? "opacity-50 pointer-events-none" : ""}`}>
-            {customers.map((c) => {
-              const customerProjects = projects.filter((p) => p.customerId === c.id);
-              const expanded = !!cmExpanded[c.id];
-              return (
-                <div key={c.id} className="bg-secondary rounded-xl px-3 py-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.25"
-                      value={cmDirectHours[c.id] ?? ""}
-                      onChange={(e) => setCmDirectHours((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                      placeholder="0"
-                      className="w-24 px-2 py-1 rounded-lg bg-card text-sm text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                    />
-                    <span className="text-xs text-muted-foreground shrink-0">h</span>
-                    {customerProjects.length > 0 && (
-                      <button
-                        onClick={() => toggleCmExpanded(c.id)}
-                        className="flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-lg px-2 py-1 shrink-0 transition"
-                      >
-                        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                        {expanded ? t("profile.customerMonthCollapse") : t("profile.customerMonthSplit")}
-                      </button>
-                    )}
-                  </div>
-                  {expanded && customerProjects.length > 0 && (
-                    <div className="mt-1.5 pl-3 space-y-1 border-l-2 border-border">
-                      {customerProjects.map((p) => (
-                        <div key={p.id} className="flex items-center gap-2 text-xs">
-                          <span className="flex-1 min-w-0 truncate text-muted-foreground">{p.name}</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.25"
-                            value={cmProjectHours[p.id] ?? ""}
-                            onChange={(e) => setCmProjectHours((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                            placeholder="0"
-                            className="w-24 px-2 py-1 rounded-lg bg-card text-xs text-right focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
-                          />
-                          <span className="text-xs text-muted-foreground shrink-0">h</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {customers.length > 0 && (
-          <>
-            <div className="flex items-center justify-between text-xs text-muted-foreground mt-3 mb-3 px-1">
-              <span>{t("profile.customerMonthEntered", { hours: cmTotalEntered.toFixed(2) })}</span>
-              <span>{t("profile.customerMonthWorked", { hours: cmArbeitsstunden.toFixed(2) })}</span>
-            </div>
-            <button
-              onClick={saveCustomerMonth}
-              disabled={cmSaving || cmLoading}
-              className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5"
-            >
-              <CheckCircle className="w-4 h-4" /> {cmSaving ? t("common.loading") : t("profile.customerMonthSave")}
-            </button>
-          </>
-        )}
-      </motion.div>
-
       {/* Change Password */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-primary" /> {t("profile.changePassword")}</h2>
@@ -1204,6 +1090,93 @@ export default function ProfilePage() {
             )}
             {importDone && (
               <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.importDone", { count: String(importPreview.imported + importPreview.importedCustomerMonths) })}</p>
+            )}
+          </div>
+        )}
+      </motion.div>
+
+      {/* Stundenrapport-Import (Projekte pro Tag) — eigener Block, eigene
+          Route, unabhängig vom Alt-Import oben. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.27 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2"><Upload className="w-4 h-4 text-primary" /> {t("profile.srImport")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("profile.srImportHint")}</p>
+        <input
+          type="file"
+          accept=".xlsx,.csv"
+          onChange={handleSrFileChange}
+          className="w-full text-sm file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-secondary file:text-foreground file:text-sm file:font-medium hover:file:bg-accent file:transition"
+        />
+        {srFile && (
+          <div className="mt-3">
+            <label className="text-xs text-muted-foreground mb-1 block">{t("profile.srImportCustomerLabel")}</label>
+            <input
+              type="text"
+              value={srCustomerName}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSrCustomerName(e?.target?.value ?? "")}
+              placeholder={t("profile.srImportCustomerPlaceholder")}
+              className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+            />
+          </div>
+        )}
+        {srFile && !srPreview && (
+          <button
+            onClick={() => runSrImport("preview")}
+            disabled={srLoading}
+            className="w-full mt-3 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50"
+          >
+            {srLoading ? t("common.loading") : t("profile.importPreview")}
+          </button>
+        )}
+        {srPreview && (
+          <div className="mt-3 bg-secondary rounded-xl p-3 text-sm space-y-1.5">
+            <p>{t("profile.importPreviewCount", { imported: String(srPreview.imported), total: String(srPreview.totalRows) })}</p>
+            {srPreview.dateFrom && srPreview.dateTo && (
+              <p className="text-xs text-muted-foreground">{srPreview.dateFrom} – {srPreview.dateTo}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {srPreview.customerIsNew
+                ? t("profile.srImportNewCustomer", { name: srPreview.customerName })
+                : t("profile.srImportExistingCustomer", { name: srPreview.customerName })}
+            </p>
+            {srPreview.newProjects.length > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.srImportNewProjects", { names: srPreview.newProjects.join(", ") })}</p>
+            )}
+            {srPreview.skippedExisting > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.importSkippedExisting", { count: String(srPreview.skippedExisting) })}</p>
+            )}
+            {srPreview.skippedLocked > 0 && (
+              <p className="text-xs text-muted-foreground">{t("profile.importSkippedLocked", { count: String(srPreview.skippedLocked) })}</p>
+            )}
+            {srPreview.errors.length > 0 && (
+              <details className="text-xs text-destructive">
+                <summary className="cursor-pointer">{t("profile.importErrors", { count: String(srPreview.errors.length) })}</summary>
+                <ul className="mt-1 list-disc list-inside space-y-0.5">
+                  {srPreview.errors.slice(0, 30).map((e, i) => (
+                    <li key={i}>Zeile {e.rowNumber}: {e.message}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {!srDone && (
+              <button
+                onClick={() => runSrImport("preview")}
+                disabled={srLoading}
+                className="w-full mt-1 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50 border border-border"
+              >
+                {t("profile.importPreview")}
+              </button>
+            )}
+            {!srDone && srPreview.imported > 0 && (
+              <button
+                onClick={() => runSrImport("commit")}
+                disabled={srLoading}
+                className="w-full mt-1 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+              >
+                {srLoading ? t("common.loading") : t("profile.srImportCommit", { count: String(srPreview.imported) })}
+              </button>
+            )}
+            {srDone && (
+              <p className="text-primary font-medium flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> {t("profile.srImportDone", { count: String(srPreview.imported) })}</p>
             )}
           </div>
         )}

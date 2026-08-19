@@ -84,11 +84,17 @@ export async function POST(req: Request) {
       where: { userId, orgId, deletedAt: null, date: { gte: fromDate, lte: toDate } },
       select: { id: true, date: true, type: true, von: true, bis: true, pauseMin: true, hours: true },
     });
-    const existingMap = new Map<string, { id: string; type: string; von: string | null; bis: string | null; pauseMin: number; hours: number | null }>();
+    // Map auf ein Array pro Tag, nicht eine einzelne Zeile — ein Tag kann
+    // mehrere Zeilen haben (z.B. auf mehrere Projekte aufgeteilte
+    // Arbeitszeit). Siehe skippedMultiple unten für die Entscheidung, wie
+    // damit umgegangen wird.
+    const existingMap = new Map<string, { id: string; type: string; von: string | null; bis: string | null; pauseMin: number; hours: number | null }[]>();
     for (const e of existing) {
       const d = new Date(e.date);
       const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-      existingMap.set(key, { id: e.id, type: e.type, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours });
+      const list = existingMap.get(key) ?? [];
+      list.push({ id: e.id, type: e.type, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours });
+      existingMap.set(key, list);
     }
 
     // Gesperrte Monate für member read-only (MIGRATION.md Punkt 6e) — als Set
@@ -107,6 +113,7 @@ export async function POST(req: Request) {
     let skippedZero = 0;
     let skippedProtected = 0; // Ferien/Feiertage werden nie überschrieben
     let skippedLocked = 0; // gesperrter Monat (member)
+    let skippedMultiple = 0; // Tag hat bereits mehrere Zeilen (z.B. Projektaufteilung) — wird nie angefasst
 
     const current = new Date(fromDate);
     // entryId → alt/neu für den Audit-Trail bei Updates (MIGRATION.md Punkt
@@ -129,8 +136,17 @@ export async function POST(req: Request) {
       } else if (hours <= 0) {
         skippedZero++;
       } else {
-        const ex = existingMap.get(key);
-        if (ex) {
+        const exList = existingMap.get(key) ?? [];
+        if (exList.length > 1) {
+          // Mehrere Zeilen an einem Tag (z.B. auf Projekte aufgeteilte
+          // Arbeitszeit) — welche Zeile "die" zu ersetzende wäre, ist
+          // mehrdeutig. Bulk-apply fasst solche Tage grundsätzlich nicht an,
+          // auch nicht mit overwriteExisting, statt eine der Zeilen zufällig
+          // zu überschreiben und die andere(n) als Karteileiche stehen zu
+          // lassen.
+          skippedMultiple++;
+        } else if (exList.length === 1) {
+          const ex = exList[0];
           // Ferien/Feiertage immer schützen
           if (ex.type === "ferien" || ex.type === "feiertag") {
             skippedProtected++;
@@ -184,6 +200,7 @@ export async function POST(req: Request) {
       skippedZero,
       skippedProtected,
       skippedLocked,
+      skippedMultiple,
       totalDays: diffDays,
     });
   } catch (error: any) {

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/access";
 import { teamKennzahlen, feriensaldo, pensumAt, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
-import { monthsInRange } from "@/lib/customer-months";
+import { monthsInRange, sumCustomerHoursByUser } from "@/lib/customer-months";
 
 export async function GET(req: Request) {
   try {
@@ -57,17 +57,28 @@ export async function GET(req: Request) {
     const jahrStart = new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1));
     const jahrEnde = new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31));
     const monate = monthsInRange(startDate, endDate);
-    const [alleChanges, alleEntries, allePayouts, alleFerien, alleCustomerMonths] = await Promise.all([
+    const [alleChanges, alleEntries, allePayouts, alleFerien, alleCustomerMonths, kundenstundenByUser] = await Promise.all([
       prisma.pensumChange.findMany({ where: { userId: { in: alleUserIds }, orgId }, orderBy: { effectiveFrom: "asc" } }),
       prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, date: { gte: startDate, lte: endDate } } }),
       prisma.overtimePayout.findMany({ where: { userId: { in: alleUserIds }, orgId, date: { gte: startDate, lte: endDate } } }),
       prisma.timeEntry.findMany({ where: { userId: { in: alleUserIds }, orgId, deletedAt: null, type: "ferien", date: { gte: jahrStart, lte: jahrEnde } } }),
+      // Nur noch für die Kunden-/Projekt-Umsatzsicht unten (customers[]/
+      // projects[]) — die zeigt weiterhin ausschliesslich Monate, die über
+      // die alte monatliche Kundenstunden-Erfassung liefen. Seit dem
+      // Nachtrag "Projektstunden pro Tag" entstehen hier keine neuen Zeilen
+      // mehr; eine Umstellung dieser Sicht auf TimeEntry-Projektstunden
+      // (inkl. Stundensatz/Budget je Projekt) ist ein eigenes, noch
+      // ausstehendes Stück Arbeit.
       monate.length === 0
         ? Promise.resolve([])
         : prisma.customerMonth.findMany({
             where: { orgId, userId: { in: alleUserIds }, OR: monate.map((mo) => ({ year: mo.year, month: mo.month })) },
             include: { customer: { select: { name: true, billable: true, hourlyRate: true } }, project: { select: { name: true, hourlyRate: true, budgetHours: true } } },
           }),
+      // Kundenstunden für kennzahlen().verrechnungsgrad je Person — neu aus
+      // TimeEntry berechnet, mit Fallback auf CustomerMonth für noch nicht
+      // nacherfasste Monate (lib/customer-months.ts).
+      sumCustomerHoursByUser({ orgId, userIds: alleUserIds, from: startDate, to: endDate }),
     ]);
 
     // Gruppierung erhält die Reihenfolge der Query — für pensumChange ist das
@@ -86,15 +97,6 @@ export async function GET(req: Request) {
     const entriesByUser = nachUser(alleEntries);
     const payoutsByUser = nachUser(allePayouts);
     const ferienByUser = nachUser(alleFerien);
-
-    // Kundenstunden je Person — nur bei verrechenbaren Kunden zählt es als
-    // "Kundenstunden" im Sinne von kennzahlen().verrechnungsgrad, analog zur
-    // früheren TimeEntry.billable-Regel, jetzt auf Kundenebene.
-    const kundenstundenByUser = new Map<string, number>();
-    for (const cm of alleCustomerMonths) {
-      if (!cm.customer.billable) continue;
-      kundenstundenByUser.set(cm.userId, (kundenstundenByUser.get(cm.userId) ?? 0) + cm.hours);
-    }
 
     for (const m of memberships) {
       const profil = buildProfil(m);

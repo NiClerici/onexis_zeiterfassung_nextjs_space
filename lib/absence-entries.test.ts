@@ -143,3 +143,56 @@ describe("createAbsenceEntries mit mehrfachen Pensumsänderungen (HARDENING.md A
     expect(keys).toEqual(["2026-07-06", "2026-07-09", "2026-07-10"]);
   });
 });
+
+// HARDENING.md A2-Nachtrag (Projektaufteilung): ein Tag kann mehrere
+// TimeEntry-Zeilen haben (z.B. Arbeitszeit auf zwei Projekte verteilt).
+// createAbsenceEntries darf beim Überschreiben nicht nur eine der Zeilen
+// umbauen und die andere als Karteileiche liegen lassen.
+describe("createAbsenceEntries an einem Tag mit mehreren Zeilen (Projektaufteilung)", () => {
+  it("ohne overwriteExisting: Tag mit mehreren Arbeitszeilen wird komplett übersprungen", async () => {
+    await prisma.timeEntry.deleteMany({ where: { orgId: ORG, userId } });
+    const day = new Date("2026-07-13"); // Mo
+    await prisma.timeEntry.create({ data: { orgId: ORG, userId, date: day, type: "arbeit", hours: 4, notiz: "Projekt A" } });
+    await prisma.timeEntry.create({ data: { orgId: ORG, userId, date: day, type: "arbeit", hours: 4, notiz: "Projekt B" } });
+
+    const result = await createAbsenceEntries({
+      orgId: ORG, userId, changedBy: userId,
+      fromDate: day, toDate: day, type: "ferien",
+    });
+    expect(result.created).toBe(0);
+    expect(result.updated).toBe(0);
+    expect(result.skipped).toBe(1);
+
+    const rows = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId, deletedAt: null } });
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.type === "arbeit")).toBe(true);
+  });
+
+  it("mit overwriteExisting: eine Zeile wird zur Absenz, die übrigen Zeilen desselben Tages werden weich gelöscht statt liegen zu bleiben", async () => {
+    await prisma.timeEntry.deleteMany({ where: { orgId: ORG, userId } });
+    const day = new Date("2026-07-13"); // Mo
+    await prisma.timeEntry.create({ data: { orgId: ORG, userId, date: day, type: "arbeit", hours: 4, notiz: "Projekt A" } });
+    await prisma.timeEntry.create({ data: { orgId: ORG, userId, date: day, type: "arbeit", hours: 4, notiz: "Projekt B" } });
+
+    const result = await createAbsenceEntries({
+      orgId: ORG, userId, changedBy: userId,
+      fromDate: day, toDate: day, type: "ferien",
+      overwriteExisting: true,
+    });
+    expect(result.created).toBe(0);
+    expect(result.updated).toBe(1);
+
+    const activeRows = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId, deletedAt: null } });
+    expect(activeRows).toHaveLength(1);
+    expect(activeRows[0].type).toBe("ferien");
+
+    const allRows = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId } });
+    expect(allRows).toHaveLength(2); // die zweite Zeile existiert noch, aber soft-deleted
+    const deletedRow = allRows.find((r) => r.id !== activeRows[0].id)!;
+    expect(deletedRow.deletedAt).not.toBeNull();
+    expect(deletedRow.type).toBe("arbeit"); // Typ der gelöschten Zeile bleibt unverändert, nur deletedAt gesetzt
+
+    const auditRows = await prisma.timeEntryAudit.findMany({ where: { orgId: ORG, entryId: deletedRow.id } });
+    expect(auditRows.some((a) => a.field === "deletedAt")).toBe(true);
+  });
+});

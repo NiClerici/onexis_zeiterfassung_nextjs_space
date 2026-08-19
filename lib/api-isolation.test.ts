@@ -133,6 +133,14 @@ describe("Isolation: time-entries", () => {
     expect(stillThere).not.toBeNull();
   });
 
+  it("POST mit customerId aus der fremden Org wird abgelehnt (Relation, nicht nur direkte ID)", async () => {
+    setSession(a1, ORG_A, "owner");
+    const res = await tePost(
+      jsonReq("/api/time-entries", "POST", { date: "2026-11-03", type: "arbeit", von: "08:00", bis: "12:00", customerId: customerB })
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("Härtetest: derselbe Nutzer in zwei Organisationen — Session-orgId entscheidet, nicht userId allein", async () => {
     // Das ist der einzige Fall, in dem userId-Filterung ALLEIN nicht mehr
     // zwischen Organisationen disambiguiert (beide Einträge haben denselben

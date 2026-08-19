@@ -188,7 +188,11 @@ export async function GET(req: Request) {
             include: { customer: { select: { name: true, billable: true } } },
             orderBy: [{ year: "asc" }, { month: "asc" }],
           });
-    const kundenstundenTotal = customerMonths.filter((cm) => cm.customer.billable).reduce((s, cm) => s + cm.hours, 0);
+    // Für kennzahlen().verrechnungsgrad: neu aus TimeEntry berechnet, mit
+    // Fallback auf CustomerMonth für noch nicht nacherfasste Monate
+    // (lib/customer-months.ts) — unabhängig von customerMonths oben, das
+    // weiterhin nur das Sheet-2-Display speist.
+    const kundenstundenTotal = await sumCustomerHours({ orgId, userId, from: startDate, to: endDate });
 
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });
 

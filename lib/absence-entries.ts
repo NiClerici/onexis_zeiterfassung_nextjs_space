@@ -83,9 +83,17 @@ export async function createAbsenceEntries(params: {
     where: { userId, orgId, deletedAt: null, date: { gte: fromDate, lte: toDate } },
     select: { id: true, date: true, type: true, hours: true },
   });
-  const existingMap = new Map<string, { id: string; type: string; hours: number | null }>();
+  // Array pro Tag statt einer einzelnen Zeile — ein Tag kann mehrere Zeilen
+  // haben (z.B. auf mehrere Projekte aufgeteilte Arbeitszeit). Ohne das
+  // würde beim Überschreiben nur die zuletzt in der Liste stehende Zeile
+  // umgebaut und alle übrigen Zeilen desselben Tages blieben als
+  // Karteileichen neben dem neuen Absenz-Eintrag liegen.
+  const existingMap = new Map<string, { id: string; type: string; hours: number | null }[]>();
   for (const e of existing) {
-    existingMap.set(dateKey(new Date(e.date)), { id: e.id, type: e.type, hours: e.hours });
+    const key = dateKey(new Date(e.date));
+    const list = existingMap.get(key) ?? [];
+    list.push({ id: e.id, type: e.type, hours: e.hours });
+    existingMap.set(key, list);
   }
 
   let created = 0;
@@ -93,8 +101,10 @@ export async function createAbsenceEntries(params: {
   let skipped = 0;
 
   type PlannedUpdate = { id: string; before: { type: string; hours: number | null }; after: { type: string; hours: number } };
+  type PlannedDelete = { id: string; before: { type: string; hours: number | null } };
   const creates: Array<{ date: Date; hours: number }> = [];
   const updatesToApply: PlannedUpdate[] = [];
+  const deletesToApply: PlannedDelete[] = [];
 
   const current = new Date(fromDate);
   while (current <= toDate) {
@@ -115,30 +125,37 @@ export async function createAbsenceEntries(params: {
 
     const hours = Math.round(getDailyRateForDate(current) * 100) / 100;
 
-    const ex = existingMap.get(key);
-    if (ex) {
-      // Feiertage werden nie überschrieben; ein bereits vorhandener Eintrag
-      // desselben Typs ist idempotent (nichts zu tun).
-      if (ex.type === "feiertag" || ex.type === type) {
-        skipped++;
-      } else if (!overwriteExisting) {
-        skipped++;
-      } else {
-        updatesToApply.push({ id: ex.id, before: { type: ex.type, hours: ex.hours }, after: { type, hours } });
-        updated++;
-      }
-    } else {
+    const exList = existingMap.get(key) ?? [];
+    if (exList.length === 0) {
       creates.push({ date: dbDate, hours });
       created++;
+    } else if (exList.some((e) => e.type === "feiertag" || e.type === type)) {
+      // Feiertage werden nie überschrieben; ein bereits vorhandener Eintrag
+      // desselben Typs ist idempotent (nichts zu tun) — beides gilt, sobald
+      // IRGENDEINE Zeile des Tages das erfüllt, auch wenn daneben noch
+      // andere Zeilen (z.B. Projektaufteilung) liegen.
+      skipped++;
+    } else if (!overwriteExisting) {
+      skipped++;
+    } else {
+      // Erste Zeile zum Absenztyp umbauen, alle weiteren Zeilen desselben
+      // Tages (z.B. mehrere Projekt-Zeilen) weich löschen statt sie als
+      // Karteileiche neben dem neuen Absenz-Eintrag liegen zu lassen.
+      const [first, ...rest] = exList;
+      updatesToApply.push({ id: first.id, before: { type: first.type, hours: first.hours }, after: { type, hours } });
+      for (const extra of rest) {
+        deletesToApply.push({ id: extra.id, before: { type: extra.type, hours: extra.hours } });
+      }
+      updated++;
     }
 
     current.setUTCDate(current.getUTCDate() + 1);
   }
 
   // Alle Operationen atomar in einer Transaktion ausführen, inkl.
-  // Audit-Trail für jedes Update (MIGRATION.md Punkt 6b) — Erstellungen
-  // werden bewusst nicht auditiert (siehe lib/audit.ts).
-  if (creates.length > 0 || updatesToApply.length > 0) {
+  // Audit-Trail für jedes Update/Löschen (MIGRATION.md Punkt 6b) —
+  // Erstellungen werden bewusst nicht auditiert (siehe lib/audit.ts).
+  if (creates.length > 0 || updatesToApply.length > 0 || deletesToApply.length > 0) {
     await prisma.$transaction(
       async (tx) => {
         for (const c of creates) {
@@ -152,6 +169,16 @@ export async function createAbsenceEntries(params: {
               data: changes.map((c) => ({ entryId: u.id, orgId, changedBy, field: c.field, oldValue: c.oldValue, newValue: c.newValue })),
             });
           }
+        }
+        // Zeitgleich mit dem Umbau der ersten Zeile: überzählige Zeilen
+        // desselben Tages (Projektaufteilung) weich löschen — gleiches
+        // Muster wie DELETE /api/time-entries (app/api/time-entries/route.ts).
+        for (const d of deletesToApply) {
+          const deletedAt = new Date();
+          await tx.timeEntry.update({ where: { id: d.id }, data: { deletedAt } });
+          await tx.timeEntryAudit.create({
+            data: { entryId: d.id, orgId, changedBy, field: "deletedAt", oldValue: null, newValue: deletedAt.toISOString() },
+          });
         }
       },
       { timeout: 30000 }
