@@ -21,17 +21,17 @@ export interface ProjectSummaryRow {
 
 interface ProjectMonthSummaryProps {
   rows: ProjectSummaryRow[];
-  unassignedHours: number;
+  unbilledHours: number;
   totalHours: number;
   onExportCustomer?: (customerId: string, customerName: string) => void;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-export function ProjectMonthSummary({ rows, unassignedHours, totalHours, onExportCustomer }: ProjectMonthSummaryProps) {
+export function ProjectMonthSummary({ rows, unbilledHours, totalHours, onExportCustomer }: ProjectMonthSummaryProps) {
   const { t } = useI18n();
 
-  if (rows.length === 0 && unassignedHours <= 0) return null;
+  if (rows.length === 0 && totalHours <= 0) return null;
 
   // Nach Kunde gruppieren, innerhalb nach Projekt — für den Export-Knopf
   // (ein Rapport pro Kunde) und für eine übersichtlichere Darstellung bei
@@ -48,7 +48,7 @@ export function ProjectMonthSummary({ rows, unassignedHours, totalHours, onExpor
   return (
     <div className="mt-3 bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-display font-semibold">{t("calendar.projectSummary")}</h2>
+        <h2 className="text-sm font-display font-semibold">{t("calendar.workSummary")}</h2>
         <span className="text-sm font-mono text-muted-foreground">{round1(totalHours)}h</span>
       </div>
       <div className="space-y-3">
@@ -78,8 +78,8 @@ export function ProjectMonthSummary({ rows, unassignedHours, totalHours, onExpor
             </ul>
           </div>
         ))}
-        {unassignedHours > 0 && (
-          <p className="text-xs text-muted-foreground px-1">{t("calendar.unassignedHours", { hours: String(round1(unassignedHours)) })}</p>
+        {unbilledHours > 0 && (
+          <p className="text-xs text-muted-foreground px-1">{t("calendar.unbilledHours", { hours: String(round1(unbilledHours)) })}</p>
         )}
       </div>
     </div>

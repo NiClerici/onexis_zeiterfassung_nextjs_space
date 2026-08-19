@@ -110,10 +110,10 @@ const translations: Record<string, string> = {
   "calendar.noEntries": "Keine Einträge",
   "calendar.deleteConfirm": "Wirklich löschen?",
   "calendar.selectMonth": "Monat wählen",
-  "calendar.projectSummary": "Projektstunden",
+  "calendar.workSummary": "Arbeitsstunden",
   "calendar.exportCustomer": "Exportieren",
   "calendar.exportError": "Export fehlgeschlagen.",
-  "calendar.unassignedHours": "{hours}h ohne Projekt",
+  "calendar.unbilledHours": "{hours}h nicht verrechnet",
   // Kundenstunden im Kalender (CustomerMonth, Betrieb.md-Nachtrag) — Block
   // existierte vor dem Vision-Ausbau schon einmal (damals auf dem
   // inzwischen ersetzten CustomerHour-Modell), Keys hier neu vergeben statt

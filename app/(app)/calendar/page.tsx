@@ -289,15 +289,19 @@ export default function CalendarPage() {
       );
   };
 
-  // Projektstunden-Übersicht des angezeigten Monats — ersetzt die frühere,
+  // Arbeitsstunden-Übersicht des angezeigten Monats — ersetzt die frühere,
   // separat editierbare CustomerMonth-Karte (components/customer-month-card.tsx)
   // durch eine reine Auswertung der ohnehin schon geladenen Tageseinträge
-  // (kein eigener Fetch nötig). Nur "arbeit"-Einträge zählen; Einträge ohne
-  // Projekt fliessen in unassignedHours statt eine Zeile "kein Projekt" zu
-  // erzeugen.
+  // (kein eigener Fetch nötig). Nur "arbeit"-Einträge zählen. totalHours ist
+  // die echte Arbeitszeit (countsAsWorktime !== false, gleicher Filter wie
+  // getDayTotalHours oben und kennzahlen() in lib/calc.ts) — migrierte
+  // Kundenzuordnungen (countsAsWorktime:false) zählen zwar weiter als
+  // Projektzeile in byProject (sie SIND einem Kunden zugeordnet), aber nicht
+  // nochmal zur Arbeitszeit, sonst würde dieselbe Arbeit doppelt gezählt.
+  // unbilledHours = totalHours abzüglich der einem Projekt/Kunden
+  // zugeordneten Stunden.
   const projectSummary = (() => {
     const byProject = new Map<string, ProjectSummaryRow>();
-    let unassigned = 0;
     let total = 0;
     for (let day = 1; day <= daysInMonth; day++) {
       const dayEntries = getEntriesForDay(day);
@@ -306,11 +310,11 @@ export default function CalendarPage() {
       for (const e of dayEntries) {
         if (e.type !== "arbeit") continue;
         const stunden = stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll);
-        total += stunden;
-        if (!e.projectId && !e.customerId) { unassigned += stunden; continue; }
+        if (e.countsAsWorktime !== false) total += stunden;
+        if (!e.projectId && !e.customerId) continue;
         // Kunde ohne konkretes Projekt (z.B. migrierte Altzeilen) läuft unter
-        // einem eigenen Schlüssel pro Kunde statt in unassignedHours zu
-        // landen — die Stunden SIND einem Kunden zugeordnet, nur keinem
+        // einem eigenen Schlüssel pro Kunde statt keiner Zeile zugeordnet zu
+        // werden — die Stunden SIND einem Kunden zugeordnet, nur keinem
         // Projekt.
         const key = e.projectId ?? `customer-${e.customerId}`;
         const project = e.projectId ? projects.find((p) => p.id === e.projectId) : undefined;
@@ -327,7 +331,9 @@ export default function CalendarPage() {
         });
       }
     }
-    return { rows: Array.from(byProject.values()).sort((a, b) => b.hours - a.hours), unassignedHours: unassigned, totalHours: total };
+    const rows = Array.from(byProject.values()).sort((a, b) => b.hours - a.hours);
+    const assigned = rows.reduce((sum, r) => sum + r.hours, 0);
+    return { rows, unbilledHours: Math.max(0, total - assigned), totalHours: total };
   })();
 
   const exportCustomerRapport = async (customerId: string, customerName: string) => {
@@ -663,7 +669,7 @@ export default function CalendarPage() {
           Tageseinträgen, siehe projectSummary oben. */}
       <ProjectMonthSummary
         rows={projectSummary.rows}
-        unassignedHours={projectSummary.unassignedHours}
+        unbilledHours={projectSummary.unbilledHours}
         totalHours={projectSummary.totalHours}
         onExportCustomer={exportCustomerRapport}
       />
