@@ -281,6 +281,12 @@ export async function POST(req: Request) {
             userId, orgId, date: new Date(`${row.date}T00:00:00Z`), type: "arbeit",
             hours: row.hours, notiz: row.task, projectId, customerId,
             billable: customer?.billable ?? false,
+            // Migrierte Projekt-/Kundenzuordnung, keine neu erfasste Arbeitszeit
+            // — zählt bewusst nicht zusätzlich zu Soll/Ist, falls der Tag schon
+            // eine "echte" Arbeitszeit-Zeile hat (siehe TimeEntry.countsAsWorktime
+            // in prisma/schema.prisma). Sobald jemand die Zeile aktiv im
+            // Tagesdialog speichert, setzt PUT /api/time-entries das wieder auf true.
+            countsAsWorktime: false,
           };
         }),
       });

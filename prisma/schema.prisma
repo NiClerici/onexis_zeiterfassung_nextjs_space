@@ -277,6 +277,16 @@ model TimeEntry {
   // im Tagesdialog überschreibbar. Ersetzt die frühere Kunden-Lookup-Liste in
   // kennzahlen() (MIGRATION.md Punkt 5).
   billable   Boolean  @default(false)
+  // true = zählt zu Soll/Ist/Überzeit (kennzahlen() in lib/calc.ts) — der
+  // bisherige, einzige Zustand. false = reine Projekt-/Kundenzuordnung ohne
+  // Wirkung auf die Arbeitszeit-Kennzahlen, aber weiterhin wirksam für alles
+  // Projekt-/Kundenbezogene (Verrechnungsgrad, Projektstunden, Export).
+  // Nur der Stundenrapport-Import (app/api/import/stundenrapport/route.ts)
+  // setzt hier bewusst false, damit migrierte Alt-Zuordnungen die parallel
+  // schon erfasste, echte Arbeitszeit desselben Tages nicht verdoppeln.
+  // Sobald jemand die Zeile aktiv im Tagesdialog speichert, setzt
+  // PUT /api/time-entries dieses Feld wieder auf true ("Graduierung").
+  countsAsWorktime Boolean @default(true)
   // Soft-Delete statt Hard-Delete (MIGRATION.md Punkt 6b) — die gesetzliche
   // Aufbewahrungspflicht von 5 Jahren verlangt, dass gelöschte Einträge
   // rekonstruierbar bleiben. Alle lesenden Queries filtern auf deletedAt: null.

@@ -163,7 +163,10 @@ describe("POST /api/import/stundenrapport — Einzeldatei (ein Block)", () => {
 
     const stored = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId: memberId }, orderBy: { date: "asc" } });
     expect(stored).toHaveLength(2);
-    expect(stored[0]).toMatchObject({ type: "arbeit", hours: 6, notiz: "SPI und SF anbindung", projectId: project!.id, customerId: customer!.id });
+    // countsAsWorktime:false — Import-Zeilen sind Projekt-/Kundenzuordnung,
+    // keine neue Arbeitszeit (sonst würde ein Tag mit schon vorhandener
+    // Arbeitszeit beim Import verdoppelt gezählt).
+    expect(stored[0]).toMatchObject({ type: "arbeit", hours: 6, notiz: "SPI und SF anbindung", projectId: project!.id, customerId: customer!.id, countsAsWorktime: false });
 
     // Zweiter Import derselben Datei: Kunde/Projekt existieren schon,
     // Zeilen werden als Duplikate erkannt.
@@ -245,7 +248,32 @@ describe("POST /api/import/stundenrapport — Einzeldatei (ein Block)", () => {
     expect(body.blocks[0].errors).toEqual([]);
 
     const row = await prisma.timeEntry.findFirst({ where: { orgId: ORG, userId: memberId, date: new Date("2026-07-21T00:00:00Z") } });
-    expect(row).toMatchObject({ hours: 3, notiz: "CSV-Test" });
+    expect(row).toMatchObject({ hours: 3, notiz: "CSV-Test", countsAsWorktime: false });
+  });
+
+  it("verdoppelt die Arbeitszeit nicht: eine bereits vorhandene Arbeitszeit-Zeile am selben Tag bleibt unangetastet, die Import-Zeile zählt separat", async () => {
+    await prisma.timeEntry.deleteMany({ where: { orgId: ORG, userId: memberId } });
+    // Simuliert eine schon vorhandene, manuell erfasste Arbeitszeit ohne
+    // Projekt (Von/Bis, wie im Tagesdialog) — genau das gemeldete Szenario.
+    const existing = await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: memberId, date: new Date("2026-07-22T00:00:00Z"), type: "arbeit", von: "08:00", bis: "16:30", pauseMin: 30 },
+    });
+    expect(existing.countsAsWorktime).toBe(true);
+
+    setSession(memberId, ORG, "member");
+    const buf = await buildXlsx([["22.07.2026", "CLN", "Salesforce <> IAM", "Doppelte-Zeit-Test", 9]]);
+    const res = await importPost(uploadXlsxReq(buf, "commit"));
+    const body = await res.json();
+    expect(body.totalImported).toBe(1);
+
+    const rows = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId: memberId, date: new Date("2026-07-22T00:00:00Z") } });
+    expect(rows).toHaveLength(2);
+    // Die alte Zeile bleibt exakt wie sie war (zählt weiter zur Arbeitszeit).
+    const oldRow = rows.find((r) => r.id === existing.id)!;
+    expect(oldRow).toMatchObject({ von: "08:00", bis: "16:30", countsAsWorktime: true });
+    // Die neue Import-Zeile zählt bewusst NICHT zusätzlich zur Arbeitszeit.
+    const importedRow = rows.find((r) => r.id !== existing.id)!;
+    expect(importedRow).toMatchObject({ hours: 9, countsAsWorktime: false });
   });
 });
 

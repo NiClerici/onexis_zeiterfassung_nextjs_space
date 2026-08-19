@@ -49,6 +49,12 @@ export interface EintragInput {
   bis?: string | null;
   pauseMin?: number | null;
   hours?: number | null;
+  // true/fehlend = zählt zu Soll/Ist/Überzeit (der Normalfall — fehlt bei
+  // Aufrufern, die das Feld nicht kennen, wird wie true behandelt). false =
+  // reine Projekt-/Kundenzuordnung ohne Wirkung auf die Arbeitszeit-
+  // Kennzahlen (Migrations-Import, siehe TimeEntry.countsAsWorktime in
+  // prisma/schema.prisma).
+  countsAsWorktime?: boolean;
 }
 
 export interface EintragMitDatum extends EintragInput {
@@ -260,6 +266,10 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     // monoton statt monatsweise).
     if (d.getTime() > to.getTime()) continue;
     if (d.getTime() < from.getTime()) continue;
+    // Migrierte Projekt-/Kundenzuordnung ohne Wirkung auf die Arbeitszeit
+    // (siehe EintragInput.countsAsWorktime) — für Soll/Ist/Überzeit/
+    // geplantZukunft so behandelt, als gäbe es die Zeile nicht.
+    if (eintrag.countsAsWorktime === false) continue;
     const tagesSoll = sollStundenTag(d, input.profil, input.changes, input.holidays);
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     if (d.getTime() <= bisHeute.getTime()) {

@@ -82,6 +82,7 @@ export async function GET(req: Request) {
         projectId: e?.projectId ?? null,
         billable: e?.billable ?? false,
         hours: e?.hours ?? null,
+        countsAsWorktime: e?.countsAsWorktime ?? true,
       })) ?? [],
     });
   } catch (error: any) {
@@ -206,6 +207,13 @@ export async function PUT(req: Request) {
       projectId: nextProjectId !== undefined ? nextProjectId : existing.projectId,
       billable: billable !== undefined ? Boolean(billable) : defaultBillable,
       hours: clampedHours !== undefined ? clampedHours : existing.hours,
+      // "Graduierung": jedes aktive Speichern über den Tagesdialog macht die
+      // Zeile zu echter Arbeitszeit, unabhängig vom bisherigen Wert — nur der
+      // Stundenrapport-Import setzt countsAsWorktime bewusst auf false (siehe
+      // TimeEntry.countsAsWorktime in prisma/schema.prisma). Ein Mensch, der
+      // die Zeile im Kalender öffnet und speichert, bestätigt sie damit als
+      // reale Arbeitszeit.
+      countsAsWorktime: true,
     };
     const changes = diffTimeEntryFields(existing, nextState);
 

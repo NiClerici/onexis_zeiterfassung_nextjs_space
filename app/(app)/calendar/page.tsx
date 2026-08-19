@@ -277,10 +277,16 @@ export default function CalendarPage() {
   };
 
   const getDayTotalHours = (day: number, dayEntries: DayTimeEntry[], tagesSoll: number): number => {
-    return dayEntries.reduce(
-      (sum, e) => sum + stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll),
-      0
-    );
+    // Migrierte Projekt-/Kundenzuordnung (countsAsWorktime:false, siehe
+    // TimeEntry.countsAsWorktime) zählt bewusst nicht zur Arbeitszeit-Summe
+    // — sonst würde ein Tag mit schon vorhandener Arbeitszeit hier verdoppelt
+    // angezeigt (kennzahlen() in lib/calc.ts filtert dieselben Einträge).
+    return dayEntries
+      .filter((e) => e.countsAsWorktime)
+      .reduce(
+        (sum, e) => sum + stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll),
+        0
+      );
   };
 
   // Projektstunden-Übersicht des angezeigten Monats — ersetzt die frühere,

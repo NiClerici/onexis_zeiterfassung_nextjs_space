@@ -80,6 +80,41 @@ describe("TimeEntry Audit-Trail (PUT)", () => {
   });
 });
 
+// "Graduierung" (Nachtrag Stundenrapport-Import): eine importierte Zeile
+// (countsAsWorktime:false, siehe app/api/import/stundenrapport/route.ts)
+// zählt bewusst nicht zur Arbeitszeit, bis ein Mensch sie aktiv im
+// Tagesdialog speichert — PUT setzt das Feld dabei immer auf true, egal ob
+// sich sonst etwas ändert.
+describe("TimeEntry countsAsWorktime — Graduierung beim aktiven Speichern (PUT)", () => {
+  it("PUT setzt countsAsWorktime von false auf true, auch ohne inhaltliche Änderung, und protokolliert es", async () => {
+    const created = await prisma.timeEntry.create({
+      data: { userId, orgId: ORG, date: new Date("2026-09-10"), type: "arbeit", hours: 9, countsAsWorktime: false },
+    });
+    expect(created.countsAsWorktime).toBe(false);
+
+    const res = await tePut(jsonReq("/api/time-entries", "PUT", { id: created.id, notiz: "bestätigt" }));
+    expect(res.status).toBe(200);
+
+    const updated = await prisma.timeEntry.findUnique({ where: { id: created.id } });
+    expect(updated?.countsAsWorktime).toBe(true);
+
+    const audit = await prisma.timeEntryAudit.findFirst({ where: { entryId: created.id, field: "countsAsWorktime" } });
+    expect(audit).not.toBeNull();
+    expect(audit?.oldValue).toBe("false");
+    expect(audit?.newValue).toBe("true");
+  });
+
+  it("GET liefert countsAsWorktime mit", async () => {
+    const created = await prisma.timeEntry.create({
+      data: { userId, orgId: ORG, date: new Date("2026-09-11"), type: "arbeit", hours: 5, countsAsWorktime: false },
+    });
+    const res = await teGet(req("/api/time-entries?year=2026&month=9"));
+    const body = await res.json();
+    const entry = body.entries.find((e: any) => e.id === created.id);
+    expect(entry?.countsAsWorktime).toBe(false);
+  });
+});
+
 describe("TimeEntry Soft-Delete (DELETE)", () => {
   it("setzt deletedAt statt den Datensatz zu löschen, und protokolliert es", async () => {
     const res = await teDelete(jsonReq("/api/time-entries", "DELETE", { id: entryId }));

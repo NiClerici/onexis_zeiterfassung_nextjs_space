@@ -459,6 +459,67 @@ describe("kennzahlen() schneidet Einträge ausserhalb von [from, to] weg", () =>
   });
 });
 
+// Migrations-Import (Stundenrapport, app/api/import/stundenrapport/route.ts)
+// schreibt Projekt-/Kundenzuordnung ohne Wirkung auf die Arbeitszeit — sonst
+// würde ein Tag mit schon vorhandener echter Arbeitszeit beim Import
+// verdoppelt gezählt (genau der gemeldete Bug: 8h echte Arbeitszeit + 9h
+// importierte Projektzeile = fälschlich 17h Ist).
+describe("kennzahlen() ignoriert Einträge mit countsAsWorktime:false", () => {
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+
+  it("ist bleibt bei der echten Arbeitszeit, die importierte Zeile zählt nicht dazu", () => {
+    const result = kennzahlen({
+      from: "2026-08-01", to: "2026-08-31", heute: "2026-08-20",
+      eintraege: [
+        { date: "2026-08-03", typ: "arbeit", von: "08:00", bis: "16:30", pauseMin: 30 }, // echte Arbeitszeit, 8h
+        { date: "2026-08-03", typ: "arbeit", hours: 9, countsAsWorktime: false }, // Import, 9h, zählt nicht
+      ],
+      profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(result.ist).toBe(8);
+  });
+
+  it("fehlendes countsAsWorktime wird wie true behandelt (Rückwärtskompatibilität)", () => {
+    const result = kennzahlen({
+      from: "2026-08-01", to: "2026-08-31", heute: "2026-08-20",
+      eintraege: [{ date: "2026-08-03", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 }],
+      profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(result.ist).toBe(8);
+  });
+
+  it("zählt auch nicht zur ArG-Überzeit (arbeitsstundenProWoche) und nicht zu geplantZukunft", () => {
+    const ueberzeitResult = kennzahlen({
+      from: "2026-08-03", to: "2026-08-07", heute: "2026-08-20",
+      eintraege: [
+        { date: "2026-08-03", typ: "arbeit", hours: 50, countsAsWorktime: false }, // würde ArG-Limit sprengen, zählt aber nicht
+      ],
+      profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(ueberzeitResult.ueberzeit).toBe(0);
+
+    const zukunftResult = kennzahlen({
+      from: "2026-08-01", to: "2026-08-31", heute: "2026-01-01",
+      eintraege: [{ date: "2026-08-03", typ: "arbeit", hours: 8, countsAsWorktime: false }],
+      profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(zukunftResult.geplantZukunft).toBe(0);
+  });
+
+  it("soll bleibt unverändert — hängt nicht an Einträgen", () => {
+    const mitImport = kennzahlen({
+      from: "2026-08-03", to: "2026-08-03", heute: "2026-08-20",
+      eintraege: [{ date: "2026-08-03", typ: "arbeit", hours: 9, countsAsWorktime: false }],
+      profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    const ohneEintrag = kennzahlen({
+      from: "2026-08-03", to: "2026-08-03", heute: "2026-08-20",
+      eintraege: [], profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(mitImport.soll).toBe(ohneEintrag.soll);
+  });
+});
+
 describe("ueberstunden berücksichtigt OvertimePayouts (Art. 321c OR)", () => {
   it("zieht Auszahlungen im Zeitraum ab", () => {
     const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };

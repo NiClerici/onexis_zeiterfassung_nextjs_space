@@ -14,6 +14,7 @@ export const AUDITED_TIME_ENTRY_FIELDS = [
   "projectId",
   "billable",
   "hours",
+  "countsAsWorktime",
 ] as const;
 
 export type AuditedTimeEntryField = (typeof AUDITED_TIME_ENTRY_FIELDS)[number];

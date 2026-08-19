@@ -20,6 +20,11 @@ export interface DayTimeEntry {
   projectId: string | null;
   billable: boolean;
   hours: number | null;
+  // false nur bei aus dem Stundenrapport-Import migrierten Zeilen (siehe
+  // TimeEntry.countsAsWorktime in prisma/schema.prisma) — zählt bewusst
+  // nicht zur Arbeitszeit, bis diese Zeile hier gespeichert wird (der
+  // Server setzt das dann automatisch auf true).
+  countsAsWorktime: boolean;
 }
 
 export interface DayCustomer {
@@ -53,6 +58,7 @@ interface DraftRow {
   // ab, die Datenstruktur beim Server bleibt identisch.
   hoursMode: boolean;
   saving: boolean;
+  countsAsWorktime: boolean;
 }
 
 function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
@@ -70,6 +76,7 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
     hours: entry.hours != null ? String(entry.hours) : fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
+    countsAsWorktime: entry.countsAsWorktime ?? true,
   };
 }
 
@@ -88,6 +95,7 @@ function newDraft(fallbackHours: number): DraftRow {
     hours: fallbackHours.toFixed(2),
     hoursMode: false,
     saving: false,
+    countsAsWorktime: true,
   };
 }
 
@@ -292,6 +300,12 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
+
+                    {!row.countsAsWorktime && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                        {t("calendar.countsAsWorktimeHint")}
+                      </p>
+                    )}
 
                     {isArbeit ? (
                       <>

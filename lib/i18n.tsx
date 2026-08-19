@@ -92,6 +92,7 @@ const translations: Record<string, string> = {
   "calendar.notizPlaceholder": "Optionale Notiz",
   "calendar.tasks": "Tasks",
   "calendar.tasksPlaceholder": "Was wurde am Projekt gemacht?",
+  "calendar.countsAsWorktimeHint": "Nur Projektzeit aus dem Import — zählt erst zur Arbeitszeit, sobald diese Zeile hier gespeichert wird.",
   "calendar.customer": "Kunde",
   "calendar.customerNone": "Kein Kunde",
   "calendar.project": "Projekt",

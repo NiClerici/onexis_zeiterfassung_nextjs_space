@@ -42,6 +42,7 @@ function mapEintraege(entries: any[]): EintragMitDatum[] {
     bis: e.bis,
     pauseMin: e.pauseMin,
     hours: e.hours,
+    countsAsWorktime: e.countsAsWorktime,
   }));
 }
 
