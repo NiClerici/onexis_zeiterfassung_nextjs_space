@@ -398,6 +398,10 @@ const translations: Record<string, string> = {
   "absences.teamCalendarHint": "Abwesenheiten im gewählten Monat ({teamSize} sichtbare Mitglieder). Rot markierte Tage: ungewöhnlich viele gleichzeitig abwesend.",
   "absences.warningHint": "Ungewöhnlich viele Mitglieder gleichzeitig abwesend",
   "absences.noAbsences": "Keine Abwesenheiten in diesem Monat",
+  "absences.noAbsencesYear": "Keine Abwesenheiten in diesem Jahr",
+  "absences.teamCalendarHintYear": "Abwesenheiten im Jahr {year} ({teamSize} sichtbare Mitglieder). Ferienbilanz in Tagen.",
+  "absences.colEntitlement": "Anspruch",
+  "absences.colRemaining": "Offen",
   "absences.dayOne": "Tag",
   "absences.dayMany": "Tage",
   // Billing/Trial (MIGRATION.md Punkt 12)

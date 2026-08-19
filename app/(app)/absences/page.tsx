@@ -7,6 +7,7 @@ import { CalendarOff, Check, X, Trash2, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
+import { AbsenceYearOverview, type Feriensaldo } from "@/components/absence-year-overview";
 
 const ABSENCE_TYPES = ["ferien", "krank", "militaer", "unbezahlt"] as const;
 
@@ -86,12 +87,15 @@ export default function AbsencesPage() {
   const [teamRequests, setTeamRequests] = useState<AbsenceRequestRow[]>([]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
 
+  const [calPeriod, setCalPeriod] = useState<"month" | "year">("month");
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear());
   const [calendarDays, setCalendarDays] = useState<string[]>([]);
   const [calendarMembers, setCalendarMembers] = useState<CalendarMember[]>([]);
   const [calendarRanges, setCalendarRanges] = useState<AbsenceRangeRow[]>([]);
   const [dayWarning, setDayWarning] = useState<Record<string, boolean>>({});
   const [teamSize, setTeamSize] = useState(0);
+  const [feriensaldi, setFeriensaldi] = useState<Record<string, Feriensaldo>>({});
 
   const fetchMine = useCallback(async () => {
     try {
@@ -111,18 +115,30 @@ export default function AbsencesPage() {
   const fetchCalendar = useCallback(async () => {
     if (!isTeamLead) return;
     try {
-      const [y, m] = calMonth.split("-");
-      const res = await fetch(`/api/absences/calendar?type=month&year=${y}&month=${m}`);
-      if (res?.ok) {
-        const d = await res?.json?.().catch(() => ({}));
+      const rangeQuery = calPeriod === "year" ? `type=year&year=${calYear}` : (() => { const [y, m] = calMonth.split("-"); return `type=month&year=${y}&month=${m}`; })();
+      const requests: Promise<Response>[] = [fetch(`/api/absences/calendar?${rangeQuery}`)];
+      // Ferienbilanz (Anspruch/Bezogen/Geplant/Offen) kommt aus derselben
+      // Berechnung wie die Teamsicht (feriensaldo() in lib/calc.ts) — für
+      // die Jahresansicht zusätzlich abgefragt, damit man Abwesenheiten und
+      // verbleibende Ferientage auf einen Blick sieht.
+      if (calPeriod === "year") requests.push(fetch(`/api/team?type=year&year=${calYear}`));
+      const [calRes, teamRes] = await Promise.all(requests);
+      if (calRes?.ok) {
+        const d = await calRes?.json?.().catch(() => ({}));
         setCalendarDays(d?.days ?? []);
         setCalendarMembers(d?.members ?? []);
         setCalendarRanges(d?.ranges ?? []);
         setDayWarning(d?.dayWarning ?? {});
         setTeamSize(d?.teamSize ?? 0);
       }
+      if (teamRes?.ok) {
+        const d = await teamRes?.json?.().catch(() => ({}));
+        const byUser: Record<string, Feriensaldo> = {};
+        for (const m of d?.members ?? []) byUser[m.userId] = m.feriensaldo;
+        setFeriensaldi(byUser);
+      }
     } catch (err: any) { console.error(err); }
-  }, [isTeamLead, calMonth]);
+  }, [isTeamLead, calPeriod, calMonth, calYear]);
 
   useEffect(() => { fetchMine(); }, [fetchMine]);
   useEffect(() => { fetchTeam(); }, [fetchTeam]);
@@ -281,16 +297,44 @@ export default function AbsencesPage() {
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
             <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
               <h2 className="text-sm font-display font-semibold flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> {t("absences.teamCalendar")}</h2>
-              <MonthYearPicker
-                value={calMonth}
-                onChange={setCalMonth}
-                selectClassName="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
-                yearInputClassName="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex rounded-xl bg-secondary p-0.5 text-xs">
+                  {(["month", "year"] as const).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setCalPeriod(p)}
+                      className={`px-3 py-1 rounded-lg font-medium transition ${calPeriod === p ? "bg-card shadow-sm" : "text-muted-foreground"}`}
+                    >
+                      {t(p === "month" ? "profile.exportMonth" : "profile.exportYear")}
+                    </button>
+                  ))}
+                </div>
+                {calPeriod === "month" ? (
+                  <MonthYearPicker
+                    value={calMonth}
+                    onChange={setCalMonth}
+                    selectClassName="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    yearInputClassName="px-3 py-1.5 rounded-xl bg-secondary text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                ) : (
+                  <input
+                    type="number"
+                    min="2020"
+                    max="2030"
+                    value={calYear}
+                    onChange={(e) => setCalYear(parseInt(e.target.value) || new Date().getFullYear())}
+                    className="px-3 py-1.5 rounded-xl bg-secondary text-xs w-20 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                )}
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground mb-3">{t("absences.teamCalendarHint", { teamSize: String(teamSize) })}</p>
+            <p className="text-xs text-muted-foreground mb-3">
+              {calPeriod === "year" ? t("absences.teamCalendarHintYear", { year: String(calYear), teamSize: String(teamSize) }) : t("absences.teamCalendarHint", { teamSize: String(teamSize) })}
+            </p>
             {calendarMembers.length === 0 || calendarDays.length === 0 ? (
-              <p className="text-xs text-muted-foreground">{t("absences.noAbsences")}</p>
+              <p className="text-xs text-muted-foreground">{calPeriod === "year" ? t("absences.noAbsencesYear") : t("absences.noAbsences")}</p>
+            ) : calPeriod === "year" ? (
+              <AbsenceYearOverview members={calendarMembers} feriensaldi={feriensaldi} typeColor={TYPE_CELL_COLOR} />
             ) : (
               <>
                 {/* Raster: Personen als Zeilen, Tage als Spalten — dasselbe
