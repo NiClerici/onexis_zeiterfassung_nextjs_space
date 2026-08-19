@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useI18n } from "@/lib/i18n";
-import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload } from "lucide-react";
+import { User, Briefcase, Calendar, Lock, Download, LogOut, CheckCircle, Shield, TrendingUp, Trash2, AlertTriangle, Plus, CalendarClock, Banknote, Users, Pencil, X, FileSpreadsheet, FileText, Upload, ChevronDown, ChevronUp } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -1033,8 +1033,9 @@ export default function ProfilePage() {
                     {customerProjects.length > 0 && (
                       <button
                         onClick={() => toggleCmExpanded(c.id)}
-                        className="text-xs text-muted-foreground hover:text-primary px-1.5 py-1 shrink-0 transition"
+                        className="flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 border border-primary/30 rounded-lg px-2 py-1 shrink-0 transition"
                       >
+                        {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         {expanded ? t("profile.customerMonthCollapse") : t("profile.customerMonthSplit")}
                       </button>
                     )}
