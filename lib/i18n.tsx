@@ -102,6 +102,23 @@ const translations: Record<string, string> = {
   "calendar.noEntries": "Keine Einträge",
   "calendar.deleteConfirm": "Wirklich löschen?",
   "calendar.selectMonth": "Monat wählen",
+  // Kundenstunden im Kalender (CustomerMonth, Betrieb.md-Nachtrag) — Block
+  // existierte vor dem Vision-Ausbau schon einmal (damals auf dem
+  // inzwischen ersetzten CustomerHour-Modell), Keys hier neu vergeben statt
+  // der damaligen wiederverwendet, weil die Erfassung jetzt monatsweise
+  // über Kunde+optionales Projekt läuft statt als reine Textzeile.
+  "calendar.customerHours": "Kundenstunden",
+  "calendar.addCustomer": "Kunde hinzufügen",
+  "calendar.editCustomer": "Bearbeiten",
+  "calendar.deleteCustomer": "Löschen",
+  "calendar.customerHoursNoCustomers": "Noch keine Kunden angelegt. Kunden können im Profil unter \"Kundenverwaltung\" erstellt werden.",
+  "calendar.customerHoursSelectCustomer": "Kunde wählen",
+  "calendar.customerHoursSelectProject": "— kein Projekt —",
+  "calendar.customerHoursHoursLabel": "Stunden",
+  "calendar.customerHoursDuplicate": "Für diese Kombination aus Kunde und Projekt existiert in diesem Monat bereits ein Eintrag — bitte diesen bearbeiten statt einen neuen anzulegen.",
+  "calendar.customerHoursSaved": "Kundenstunden gespeichert",
+  "calendar.customerHoursDeleted": "Eintrag gelöscht",
+  "calendar.customerHoursError": "Fehler beim Speichern der Kundenstunden",
   // Monatsabschluss (MIGRATION.md Punkt 6e)
   "calendar.monthLocked": "Dieser Monat ist abgeschlossen und schreibgeschützt. Bei Korrekturbedarf wende dich an eine admin-berechtigte Person.",
   // Weekdays
@@ -247,9 +264,9 @@ const translations: Record<string, string> = {
   "profile.projectError": "Fehler beim Speichern des Projekts",
   // Kundenstunden monatlich (statt am Tageseintrag)
   "profile.customerMonth": "Kundenstunden",
-  "profile.customerMonthDesc": "Kundenstunden werden einmal pro Monat erfasst, nicht am einzelnen Tageseintrag. Optional auf Projekte des Kunden aufteilbar.",
-  "profile.customerMonthSplit": "aufteilen",
-  "profile.customerMonthCollapse": "zuklappen",
+  "profile.customerMonthDesc": "Kundenstunden werden einmal pro Monat erfasst, nicht am einzelnen Tageseintrag. Bei Kunden mit mindestens einem Projekt kannst du die Stunden über \"Auf Projekte aufteilen\" aufsplitten.",
+  "profile.customerMonthSplit": "Auf Projekte aufteilen",
+  "profile.customerMonthCollapse": "Zuklappen",
   "profile.customerMonthSave": "Monat speichern",
   "profile.customerMonthSaved": "Kundenstunden gespeichert",
   "profile.customerMonthError": "Fehler beim Speichern der Kundenstunden",

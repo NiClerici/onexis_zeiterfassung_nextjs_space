@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { sollStundenTag, stundenAusEintrag, type EintragTyp, type Profil, type PensumChangeInput, type HolidayInput, type EintragMitDatum } from "@/lib/calc";
 import { pruefeCompliance } from "@/lib/compliance";
 import { DayEntryDialog, type DayTimeEntry } from "@/components/day-entry-dialog";
+import { CustomerMonthCard } from "@/components/customer-month-card";
 
 interface UserProfile {
   firstName: string;
@@ -566,6 +567,9 @@ export default function CalendarPage() {
           </div>
         ))}
       </motion.div>
+
+      {/* Kundenstunden des angezeigten Monats */}
+      <CustomerMonthCard year={currentDate.year} month={currentDate.month} locked={isMember && isCurrentMonthLocked} />
 
       {/* Legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
