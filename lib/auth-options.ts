@@ -75,12 +75,32 @@ export const authOptions: NextAuthOptions = {
         token.role = user?.role ?? null;
         token.plan = user?.plan ?? null;
         token.trialEndsAt = user?.trialEndsAt ?? null;
+        token.planCheckedAt = Date.now();
       }
       // Wird von set-password/page.tsx nach erfolgreichem Setzen des neuen
       // Passworts über useSession().update() ausgelöst, damit die Sperre ohne
       // Neu-Login verschwindet.
       if (trigger === "update" && session?.mustSetPassword !== undefined) {
         token.mustSetPassword = session.mustSetPassword;
+      }
+      // plan/trialEndsAt landeten bisher nur beim Login im Token. updateAge
+      // erneuert das Token zwar stündlich, übernimmt dabei aber unverändert
+      // die alten Claims — ein manueller Planwechsel (scripts/set-plan.ts)
+      // oder ein tatsächlicher Trial-Ablauf wirkte dadurch erst nach erneutem
+      // Login (Banner "Testphase läuft bis ..." blieb stehen, obwohl die
+      // Organisation längst auf "pro" stand). Deshalb hier stündlich gegen
+      // die DB validieren, TTL identisch zu session.updateAge.
+      const PLAN_TTL_MS = 60 * 60 * 1000;
+      if (!user && token?.orgId && (!token.planCheckedAt || Date.now() - token.planCheckedAt > PLAN_TTL_MS)) {
+        const org = await prisma.organization.findUnique({
+          where: { id: token.orgId },
+          select: { plan: true, trialEndsAt: true },
+        });
+        if (org) {
+          token.plan = org.plan;
+          token.trialEndsAt = org.trialEndsAt;
+        }
+        token.planCheckedAt = Date.now();
       }
       return token;
     },
