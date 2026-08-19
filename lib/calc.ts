@@ -251,12 +251,20 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
 
   for (const eintrag of input.eintraege) {
     const d = toUTCDate(eintrag.date);
+    // Beide Grenzen prüfen: kennzahlen() wertet ausschliesslich [from, to] aus.
+    // Die Untergrenze fehlte, weil alle Aufrufer die Einträge ohnehin schon auf
+    // den Zeitraum geladen hatten — bis auf die Monatsschleife in
+    // app/api/analytics/route.ts, die dasselbe Periodenarray an jeden
+    // Monatsaufruf gibt und nur `to` variiert. Dort wurden `ist`/geplantZukunft
+    // dadurch zu Laufsummen ab Periodenbeginn ("Monatlicher Verlauf" stieg
+    // monoton statt monatsweise).
     if (d.getTime() > to.getTime()) continue;
+    if (d.getTime() < from.getTime()) continue;
     const tagesSoll = sollStundenTag(d, input.profil, input.changes, input.holidays);
     const stunden = stundenAusEintrag(eintrag, tagesSoll);
     if (d.getTime() <= bisHeute.getTime()) {
       ist += stunden;
-      if (eintrag.typ === "arbeit" && d.getTime() >= from.getTime()) {
+      if (eintrag.typ === "arbeit") {
         const wochenSchluessel = montagDerWoche(d).getTime();
         arbeitsstundenProWoche.set(wochenSchluessel, (arbeitsstundenProWoche.get(wochenSchluessel) ?? 0) + stunden);
       }

@@ -412,6 +412,53 @@ describe("verrechnungsgrad", () => {
   });
 });
 
+// Analytics-Chart "Monatlicher Verlauf" zeigte eine Laufsumme statt
+// Monatswerte, weil kennzahlen() bei ist/geplantZukunft nur `to` prüfte,
+// nicht `from` — für Aufrufer, die (wie app/api/analytics/route.ts) dasselbe
+// Periodenarray an mehrere kennzahlen()-Aufrufe mit wachsendem `to` geben,
+// wurden dadurch auch Einträge vor `from` mitgezählt.
+describe("kennzahlen() schneidet Einträge ausserhalb von [from, to] weg", () => {
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+  const eintraege = [
+    { date: "2026-06-15", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0 }, // Juni, 8h
+    { date: "2026-07-15", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0 }, // Juli, 8h
+    { date: "2026-08-15", typ: "arbeit" as const, von: "08:00", bis: "16:00", pauseMin: 0 }, // August, 8h
+  ];
+
+  it("Einträge vor `from` zählen nicht mehr in ist/geplantZukunft (Regressionstest)", () => {
+    // Nur der August-Eintrag liegt im Bereich — Juni/Juli müssen ignoriert werden.
+    const nurAugust = kennzahlen({
+      from: "2026-08-01", to: "2026-08-31", heute: "2026-08-20",
+      eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    const nurAugustEintrag = kennzahlen({
+      from: "2026-08-01", to: "2026-08-31", heute: "2026-08-20",
+      eintraege: [eintraege[2]], profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(nurAugust.ist).toBe(8);
+    expect(nurAugust.ist).toBe(nurAugustEintrag.ist);
+  });
+
+  it("dasselbe gilt für geplantZukunft (Bereich komplett in der Zukunft)", () => {
+    const nurAugustZukunft = kennzahlen({
+      from: "2026-08-01", to: "2026-08-31", heute: "2026-01-01",
+      eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(nurAugustZukunft.ist).toBe(0);
+    expect(nurAugustZukunft.geplantZukunft).toBe(8);
+  });
+
+  it("Monatsschleife (wie im Analytics-Chart): jeder Monat bekommt sein eigenes ist, keine Laufsumme", () => {
+    const heute = "2026-08-20";
+    const juni = kennzahlen({ from: "2026-06-01", to: "2026-06-30", heute, eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0 });
+    const juli = kennzahlen({ from: "2026-07-01", to: "2026-07-31", heute, eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0 });
+    const august = kennzahlen({ from: "2026-08-01", to: "2026-08-31", heute, eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0 });
+    expect(juni.ist).toBe(8);
+    expect(juli.ist).toBe(8);
+    expect(august.ist).toBe(8);
+  });
+});
+
 describe("ueberstunden berücksichtigt OvertimePayouts (Art. 321c OR)", () => {
   it("zieht Auszahlungen im Zeitraum ab", () => {
     const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
