@@ -4,17 +4,28 @@
 // stunden pro Tag" wird die Zuordnung wieder am einzelnen TimeEntry über
 // projectId/customerId gepflegt (siehe components/day-entry-dialog.tsx).
 //
-// sumCustomerHours()/sumCustomerHoursByUser() liefern deshalb pro Monat die
-// SUMME aus beiden Quellen (combineCustomerHours(), Betrieb.md-Nachtrag
-// 20.08.2026): CustomerMonth deckt bei einer unterjährigen Migration nur die
-// Tage VOR dem Umstieg ab, TimeEntry nur die Tage AB dem Umstieg — beide
-// zusammen ergeben erst den vollständigen Monat. Voraussetzung dafür ist,
-// dass sich die beiden Quellen für denselben Monat nicht überschneiden
-// (genau das ist bei einer unterjährigen Migration der Fall, siehe
-// combineCustomerHours()). Die Entscheidung läuft je (userId, Jahr, Monat),
-// nicht über den ganzen angefragten Zeitraum — sonst würde ein Monat ohne
-// CustomerMonth-Zeilen fälschlich den Altwert eines ANDEREN Monats im
-// selben Aufruf übernehmen.
+// Drei Quellen fliessen zusammen (Betrieb.md-Nachtrag 20.08.2026):
+//
+// 1. Laufende Tageserfassung: TimeEntry mit countsAsWorktime=true — echte,
+//    tagesgenaue Arbeitszeit.
+// 2. CustomerMonth: manuell im Profil nacherfasste Monatssummen für
+//    migrierte Altmonate.
+// 3. Legacy-TimeEntry-Zeilen aus dem inzwischen entfernten Stundenrapport-
+//    Import (Commit 751dd9b) — erkennbar an countsAsWorktime=false
+//    (prisma/schema.prisma TimeEntry.countsAsWorktime). Bilden dieselbe
+//    Migration ab wie CustomerMonth, nur in einem anderen Format.
+//
+// combineCustomerHours() addiert (1) mit dem GEWINNER aus (2)/(3) — niemals
+// alle drei, sonst zählt ein migrierter Monat doppelt, sobald für ihn sowohl
+// Legacy-Zeilen als auch ein manuell erfasster CustomerMonth-Wert existieren
+// (das war der Bug: April–Juli hatten beides, wurden also verdoppelt).
+// CustomerMonth gewinnt über Legacy, weil ein Abgleich mit den Original-
+// Stundenrapporten zeigte, dass die Legacy-Zeilen unvollständig sein können
+// (April: 96.75h Legacy vs. 102.75h im Rapport = 102.8h CustomerMonth) —
+// Legacy ist nur noch Fallback für Monate, die nie manuell nacherfasst
+// wurden. Die Auflösung läuft pro (userId, Jahr, Monat, Kunde), nicht nur
+// pro Monat, damit zwei Kunden im selben Monat sich nicht gegenseitig
+// verdecken.
 //
 // Für einen Zeitraum [from, to], der keine vollen Kalendermonate trifft
 // (z.B. "custom"-Export vom 10. bis 20. eines Monats), werden die
@@ -42,27 +53,35 @@ export function monthsInRange(from: Date, to: Date): { year: number; month: numb
   return months;
 }
 
-// Die zwei Rohquellen für einen (userId, Jahr, Monat)-Schlüssel, VOR der
-// Kombinationsentscheidung — siehe combineCustomerHours() für die Regel.
+// Die bereits pro Kunde aufgelösten Summen für einen (userId, Jahr, Monat)-
+// Schlüssel — siehe combineCustomerHours() für die Kombinationsregel.
+// fromMigration ist selbst schon das Ergebnis von "CustomerMonth gewinnt
+// über Legacy-TimeEntry-Zeilen" (siehe Modulkommentar), pro Kunde einzeln
+// entschieden und über alle Kunden des Monats aufsummiert.
 export interface MonthlyCustomerHours {
   fromEntries: number;
-  fromCustomerMonth: number;
+  fromMigration: number;
 }
 
-// Kombinationsregel zwischen neuer (TimeEntry) und alter (CustomerMonth)
-// Quelle für EINEN Monat — an dieser einzigen Stelle gekapselt, damit sie
-// sich später ändern lässt, ohne jeden Aufrufer einzeln anzufassen.
-// ADDITIV (Betrieb.md-Nachtrag 20.08.2026, geklärt mit Nico): bei einer
-// unterjährigen Migration deckt die CustomerMonth-Zeile eines Monats nur die
-// Tage VOR dem Umstieg ab (z.B. 1.–17. August), die TimeEntry-Summe
-// desselben Monats nur die Tage AB dem Umstieg (18.–31. August) — beide
-// zusammen ergeben den vollständigen Monat, keine Zeile zählt doppelt.
-// Setzt voraus, dass niemand für bereits migrierte Tage zusätzlich rückwirkend
-// TimeEntry-Zeilen mit Kundenzuordnung anlegt; das würde diese Tage doppelt
-// zählen, ist aber kein Fall, den das Datenmodell unterscheiden kann (Monats-
-// statt Tagesgranularität in CustomerMonth).
+// Kombinationsregel: laufende Tageserfassung (fromEntries) plus Migration
+// (fromMigration, bereits pro Kunde zwischen CustomerMonth und Legacy-
+// TimeEntry-Zeilen aufgelöst — siehe Modulkommentar) — an dieser einzigen
+// Stelle gekapselt, damit sie sich später ändern lässt, ohne jeden Aufrufer
+// einzeln anzufassen.
 export function combineCustomerHours(v: MonthlyCustomerHours): number {
-  return v.fromEntries + v.fromCustomerMonth;
+  return v.fromEntries + v.fromMigration;
+}
+
+// Dreifach verschachtelte Summe: userId -> "Jahr-Monat" -> customerId ->
+// Stunden. Gemeinsame Hilfsstruktur für die drei Rohquellen unten.
+type NestedSums = Map<string, Map<string, Map<string, number>>>;
+
+function addToNested(map: NestedSums, userId: string, monthKey: string, customerId: string, hours: number): void {
+  const perMonth = map.get(userId) ?? new Map<string, Map<string, number>>();
+  const perCustomer = perMonth.get(monthKey) ?? new Map<string, number>();
+  perCustomer.set(customerId, (perCustomer.get(customerId) ?? 0) + hours);
+  perMonth.set(monthKey, perCustomer);
+  map.set(userId, perMonth);
 }
 
 // Kundenstunden je (userId, Jahr, Monat) — die eigentliche, für alle
@@ -71,9 +90,9 @@ export function combineCustomerHours(v: MonthlyCustomerHours): number {
 // Sinne von kennzahlen().verrechnungsgrad (Betrieb.md-Nachtrag, 19.08.2026 —
 // vorher gab es zusätzlich einen "billable"-Haken pro Kunde/Eintrag, der
 // entfiel, weil die Zuordnung selbst schon die einzig relevante Aussage ist).
-// Liefert beide Rohquellen unkombiniert zurück (siehe MonthlyCustomerHours)
-// — Aufrufer, die nur die Summe brauchen, nutzen combineCustomerHours() oder
-// direkt sumCustomerHours()/sumCustomerHoursByUser() unten.
+// Liefert die bereits kombinierten Summen zurück (siehe MonthlyCustomerHours)
+// — Aufrufer, die nur die Gesamtsumme brauchen, nutzen combineCustomerHours()
+// oder direkt sumCustomerHours()/sumCustomerHoursByUser() unten.
 export async function billableHoursByUserAndMonth(params: {
   orgId: string;
   userIds: string[];
@@ -90,45 +109,59 @@ export async function billableHoursByUserAndMonth(params: {
   const lastMonth = months[months.length - 1];
   const monthEnd = new Date(Date.UTC(lastMonth.year, lastMonth.month, 0));
 
-  // Neue Quelle: TimeEntry mit Kundenzuordnung. "arbeit" braucht kein
-  // Tagessoll (stundenAusEintrag rechnet für diesen Typ direkt aus
-  // von/bis/pauseMin bzw. hours), deshalb genügt ein einzelnes Query ohne
-  // Pensum-/Feiertagsauflösung.
+  // Laufende Tageserfassung (countsAsWorktime=true) UND Legacy-Zeilen aus
+  // dem entfernten Stundenrapport-Import (countsAsWorktime=false) getrennt
+  // summieren, je (userId, Monat, Kunde) — siehe Modulkommentar, warum diese
+  // Trennung nötig ist. "arbeit" braucht kein Tagessoll (stundenAusEintrag
+  // rechnet für diesen Typ direkt aus von/bis/pauseMin bzw. hours), deshalb
+  // genügt ein einzelnes Query ohne Pensum-/Feiertagsauflösung.
   const entries = await prisma.timeEntry.findMany({
     where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, customerId: { not: null }, date: { gte: monthStart, lte: monthEnd } },
-    select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true },
+    select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true, customerId: true, countsAsWorktime: true },
   });
-  const neuByUserMonth = new Map<string, Map<string, number>>();
+  const fromEntriesSums: NestedSums = new Map();
+  const legacySums: NestedSums = new Map();
   for (const e of entries) {
     const d = new Date(e.date);
-    const key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
+    const monthKey = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
     const stunden = stundenAusEintrag({ typ: "arbeit", von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, 0);
-    const perMonth = neuByUserMonth.get(e.userId) ?? new Map<string, number>();
-    perMonth.set(key, (perMonth.get(key) ?? 0) + stunden);
-    neuByUserMonth.set(e.userId, perMonth);
+    const target = e.countsAsWorktime ? fromEntriesSums : legacySums;
+    addToNested(target, e.userId, monthKey, e.customerId as string, stunden);
   }
 
-  // Alte Quelle: CustomerMonth, wird additiv zur TimeEntry-Summe desselben
-  // Monats gezählt (siehe Modulkommentar und combineCustomerHours()).
+  // CustomerMonth: manuell nacherfasste Migrationswerte, je (userId, Monat,
+  // Kunde) — gewinnt über die Legacy-Zeilen desselben Kunden/Monats (siehe
+  // Modulkommentar).
   const oldRows = await prisma.customerMonth.findMany({
     where: { orgId, userId: { in: userIds }, OR: months.map((mo) => ({ year: mo.year, month: mo.month })) },
   });
-  const altByUserMonth = new Map<string, Map<string, number>>();
+  const customerMonthSums: NestedSums = new Map();
   for (const r of oldRows) {
-    const key = `${r.year}-${r.month}`;
-    const perMonth = altByUserMonth.get(r.userId) ?? new Map<string, number>();
-    perMonth.set(key, (perMonth.get(key) ?? 0) + r.hours);
-    altByUserMonth.set(r.userId, perMonth);
+    addToNested(customerMonthSums, r.userId, `${r.year}-${r.month}`, r.customerId, r.hours);
   }
 
   for (const userId of userIds) {
     const perMonth = new Map<string, MonthlyCustomerHours>();
     for (const mo of months) {
-      const key = `${mo.year}-${mo.month}`;
-      perMonth.set(key, {
-        fromEntries: neuByUserMonth.get(userId)?.get(key) ?? 0,
-        fromCustomerMonth: altByUserMonth.get(userId)?.get(key) ?? 0,
-      });
+      const monthKey = `${mo.year}-${mo.month}`;
+      const fromEntriesByCustomer = fromEntriesSums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+      const legacyByCustomer = legacySums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+      const customerMonthByCustomer = customerMonthSums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+
+      let fromEntries = 0;
+      for (const h of fromEntriesByCustomer.values()) fromEntries += h;
+
+      // Pro Kunde einzeln auflösen: CustomerMonth gewinnt über Legacy, sonst
+      // würden sich zwei Kunden im selben Monat gegenseitig verdecken.
+      const customerIds = new Set([...legacyByCustomer.keys(), ...customerMonthByCustomer.keys()]);
+      let fromMigration = 0;
+      for (const customerId of customerIds) {
+        const cm = customerMonthByCustomer.get(customerId) ?? 0;
+        const legacy = legacyByCustomer.get(customerId) ?? 0;
+        fromMigration += cm > 0 ? cm : legacy;
+      }
+
+      perMonth.set(monthKey, { fromEntries, fromMigration });
     }
     result.set(userId, perMonth);
   }

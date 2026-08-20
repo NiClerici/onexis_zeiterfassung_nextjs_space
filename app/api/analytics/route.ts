@@ -107,7 +107,7 @@ export async function GET(req: Request) {
     // Anteil von kundenstundenTotal, der aus der CustomerMonth-Migration
     // stammt (statt aus Tageseinträgen) — rein informativ für die
     // Kundenstunden-Karte, ist bereits in kundenstundenTotal enthalten.
-    const kundenstundenAusMigration = Array.from(customerHoursByMonth.values()).reduce((s, v) => s + v.fromCustomerMonth, 0);
+    const kundenstundenAusMigration = Array.from(customerHoursByMonth.values()).reduce((s, v) => s + v.fromMigration, 0);
 
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });
 
@@ -155,7 +155,7 @@ export async function GET(req: Request) {
         changes,
         payouts,
         holidays,
-        kundenstunden: combineCustomerHours(customerHoursByMonth.get(`${mYear}-${mMonth}`) ?? { fromEntries: 0, fromCustomerMonth: 0 }),
+        kundenstunden: combineCustomerHours(customerHoursByMonth.get(`${mYear}-${mMonth}`) ?? { fromEntries: 0, fromMigration: 0 }),
       });
       // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im
       // Verlaufs-Chart — kundenstunden hier irrelevant, mkWork.kundenstunden

@@ -310,17 +310,17 @@ export default function CalendarPage() {
   // durch eine reine Auswertung der ohnehin schon geladenen Tageseinträge
   // (kein eigener Fetch nötig). Nur "arbeit"-Einträge zählen. totalHours ist
   // die echte Arbeitszeit (countsAsWorktime !== false, gleicher Filter wie
-  // getDayTotalHours oben und kennzahlen() in lib/calc.ts) — migrierte
-  // Kundenzuordnungen (countsAsWorktime:false) zählen zwar weiter als
-  // Projektzeile in byProject (sie SIND einem Kunden zugeordnet), aber nicht
-  // nochmal zur Arbeitszeit, sonst würde dieselbe Arbeit doppelt gezählt.
-  // unbilledHours = totalHours abzüglich der einem Projekt/Kunden
-  // zugeordneten Stunden UND der CustomerMonth-Migrationsstunden (siehe
-  // unten) — sonst würden bereits migrierte, additiv gezählte Kundenstunden
-  // (lib/customer-months.ts combineCustomerHours()) hier fälschlich nochmal
-  // als "nicht verrechnet" auftauchen.
+  // getDayTotalHours oben und kennzahlen() in lib/calc.ts) — Legacy-Zeilen
+  // aus dem entfernten Stundenrapport-Import (countsAsWorktime=false) zählen
+  // NICHT zur Arbeitszeit und laufen unten als eigene Migrationsquelle,
+  // nicht als normale Projektzeile — sonst stünden dieselben Stunden doppelt
+  // da, sobald für denselben Kunden/Monat auch ein CustomerMonth-Wert
+  // existiert (lib/customer-months.ts combineCustomerHours() derselbe Fall).
+  // unbilledHours = totalHours abzüglich der zugeordneten UND der
+  // Migrationsstunden.
   const projectSummary = (() => {
     const byProject = new Map<string, ProjectSummaryRow>();
+    const legacyByCustomer = new Map<string, number>();
     let total = 0;
     for (let day = 1; day <= daysInMonth; day++) {
       const dayEntries = getEntriesForDay(day);
@@ -331,10 +331,16 @@ export default function CalendarPage() {
         const stunden = stundenAusEintrag({ typ: e.type as EintragTyp, von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, tagesSoll);
         if (e.countsAsWorktime !== false) total += stunden;
         if (!e.projectId && !e.customerId) continue;
-        // Kunde ohne konkretes Projekt (z.B. migrierte Altzeilen) läuft unter
-        // einem eigenen Schlüssel pro Kunde statt keiner Zeile zugeordnet zu
-        // werden — die Stunden SIND einem Kunden zugeordnet, nur keinem
-        // Projekt.
+        // Legacy-Zeilen aus dem Alt-Import sind Migration, keine Projektzeile
+        // — separat sammeln, unten ggf. mit dem CustomerMonth-Wert desselben
+        // Kunden zusammenführen (CustomerMonth gewinnt, siehe combineCustomerHours()).
+        if (e.countsAsWorktime === false) {
+          if (e.customerId) legacyByCustomer.set(e.customerId, (legacyByCustomer.get(e.customerId) ?? 0) + stunden);
+          continue;
+        }
+        // Kunde ohne konkretes Projekt läuft unter einem eigenen Schlüssel
+        // pro Kunde statt keiner Zeile zugeordnet zu werden — die Stunden
+        // SIND einem Kunden zugeordnet, nur keinem Projekt.
         const key = e.projectId ?? `customer-${e.customerId}`;
         const project = e.projectId ? projects.find((p) => p.id === e.projectId) : undefined;
         const customerId = project?.customerId ?? e.customerId ?? "";
@@ -351,17 +357,22 @@ export default function CalendarPage() {
       }
     }
 
-    // Kundenstunden aus der CustomerMonth-Migration dieses Monats als eigene
-    // Zeile je Kunde einhängen — dieselbe additive Kombination wie Analytics/
-    // Teamsicht/Export (lib/customer-months.ts combineCustomerHours()), damit
-    // die Kundensumme hier und dort übereinstimmt. Nicht in "total" (der
-    // reinen Tageseintrags-Arbeitszeit) enthalten, wohl aber in "assigned"
-    // unten — sonst würden diese Stunden fälschlich als unverrechnet zählen.
-    const migrationByCustomer = new Map<string, number>();
+    // Migrationsstunden dieses Monats als eigene Zeile je Kunde einhängen —
+    // CustomerMonth gewinnt über Legacy-Zeilen desselben Kunden (lib/
+    // customer-months.ts combineCustomerHours(), dieselbe Regel wie in
+    // Analytics/Teamsicht/Export), damit die Kundensumme hier und dort
+    // übereinstimmt. Nicht in "total" (reine Tageseintrags-Arbeitszeit)
+    // enthalten, wohl aber in "assigned" unten — sonst würden diese Stunden
+    // fälschlich als unverrechnet zählen.
+    const customerMonthByCustomer = new Map<string, number>();
     for (const r of customerMonthRows) {
-      migrationByCustomer.set(r.customerId, (migrationByCustomer.get(r.customerId) ?? 0) + r.hours);
+      customerMonthByCustomer.set(r.customerId, (customerMonthByCustomer.get(r.customerId) ?? 0) + r.hours);
     }
-    for (const [customerId, hours] of migrationByCustomer) {
+    const migrationCustomerIds = new Set([...legacyByCustomer.keys(), ...customerMonthByCustomer.keys()]);
+    for (const customerId of migrationCustomerIds) {
+      const cm = customerMonthByCustomer.get(customerId) ?? 0;
+      const legacy = legacyByCustomer.get(customerId) ?? 0;
+      const hours = cm > 0 ? cm : legacy;
       if (hours <= 0) continue;
       const customer = customers.find((c) => c.id === customerId);
       byProject.set(`migration-${customerId}`, {
