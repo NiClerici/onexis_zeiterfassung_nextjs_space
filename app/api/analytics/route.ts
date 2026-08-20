@@ -12,7 +12,7 @@ import {
   type PayoutInput,
   type HolidayInput,
 } from "@/lib/calc";
-import { billableHoursByUserAndMonth } from "@/lib/customer-months";
+import { billableHoursByUserAndMonth, combineCustomerHours, type MonthlyCustomerHours } from "@/lib/customer-months";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
 // für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
@@ -99,11 +99,15 @@ export async function GET(req: Request) {
 
     // Kundenstunden je Kalendermonat im gewählten Zeitraum — einmal geladen,
     // unten fürs Total und für die monatliche Aufschlüsselung (monthlyData)
-    // wiederverwendet, statt pro Monat eine eigene Query abzusetzen. Neu aus
-    // TimeEntry berechnet, mit Fallback auf CustomerMonth für noch nicht
-    // nacherfasste Monate (lib/customer-months.ts).
-    const customerHoursByMonth = (await billableHoursByUserAndMonth({ orgId, userIds: [userId], from: startDate, to: endDate })).get(userId) ?? new Map<string, number>();
-    const kundenstundenTotal = Array.from(customerHoursByMonth.values()).reduce((s, h) => s + h, 0);
+    // wiederverwendet, statt pro Monat eine eigene Query abzusetzen. Additive
+    // Summe aus TimeEntry und CustomerMonth-Migration (lib/customer-months.ts
+    // combineCustomerHours()).
+    const customerHoursByMonth = (await billableHoursByUserAndMonth({ orgId, userIds: [userId], from: startDate, to: endDate })).get(userId) ?? new Map<string, MonthlyCustomerHours>();
+    const kundenstundenTotal = Array.from(customerHoursByMonth.values()).reduce((s, v) => s + combineCustomerHours(v), 0);
+    // Anteil von kundenstundenTotal, der aus der CustomerMonth-Migration
+    // stammt (statt aus Tageseinträgen) — rein informativ für die
+    // Kundenstunden-Karte, ist bereits in kundenstundenTotal enthalten.
+    const kundenstundenAusMigration = Array.from(customerHoursByMonth.values()).reduce((s, v) => s + v.fromCustomerMonth, 0);
 
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });
 
@@ -151,7 +155,7 @@ export async function GET(req: Request) {
         changes,
         payouts,
         holidays,
-        kundenstunden: customerHoursByMonth.get(`${mYear}-${mMonth}`) ?? 0,
+        kundenstunden: combineCustomerHours(customerHoursByMonth.get(`${mYear}-${mMonth}`) ?? { fromEntries: 0, fromCustomerMonth: 0 }),
       });
       // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im
       // Verlaufs-Chart — kundenstunden hier irrelevant, mkWork.kundenstunden
@@ -165,6 +169,10 @@ export async function GET(req: Request) {
       targetHours: k.soll,
       actualHours: k.ist,
       customerHours: k.kundenstunden,
+      // Anteil von customerHours aus der CustomerMonth-Migration (bereits
+      // enthalten, nicht zusätzlich) — rein informativ für die Aufschlüsselung
+      // in der Kundenstunden-Karte. 0, wenn der Zeitraum keine Migrationsdaten hat.
+      customerHoursFromMigration: Math.round(kundenstundenAusMigration * 10) / 10,
       billingRate: k.verrechnungsgrad,
       vacationDays: fs.bezogen,
       holidays: currentDailyRate > 0 ? Math.round((holidayHours / currentDailyRate) * 10) / 10 : 0,

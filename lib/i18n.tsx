@@ -113,6 +113,10 @@ const translations: Record<string, string> = {
   "calendar.exportCustomer": "Exportieren",
   "calendar.exportError": "Export fehlgeschlagen.",
   "calendar.unbilledHours": "{hours}h nicht verrechnet",
+  // Nur sichtbar, wenn ein Kunde Migrationsdaten (CustomerMonth) für diesen
+  // Monat hat — diese Karte rechnet nur aus Tageseinträgen, Analytics/Export
+  // zählen die Migrationsstunden additiv dazu (combineCustomerHours()).
+  "calendar.migrationHoursTitle": "Zusätzlich aus der Migration erfasst (in Analytics/Export mitgezählt, hier nicht enthalten)",
   // Kundenstunden im Kalender (CustomerMonth, Betrieb.md-Nachtrag) — Block
   // existierte vor dem Vision-Ausbau schon einmal (damals auf dem
   // inzwischen ersetzten CustomerHour-Modell), Keys hier neu vergeben statt
@@ -170,6 +174,10 @@ const translations: Record<string, string> = {
   "analytics.difference": "Differenz",
   "analytics.billingRate": "Verrechnungsgrad",
   "analytics.customerHours": "Kundenstunden",
+  // Aufschlüsselung, wenn ein Teil von customerHours aus der CustomerMonth-
+  // Migration stammt (additiv zu den Tageseinträgen, lib/customer-months.ts
+  // combineCustomerHours()) — nicht zusätzlich, sondern bereits enthalten.
+  "analytics.customerHoursFromMigration": "{hours}h davon aus Migration",
   "analytics.workHours": "Arbeitsstunden",
   "analytics.vacationDays": "Ferientage",
   "analytics.holidays": "Feiertage",
@@ -281,7 +289,7 @@ const translations: Record<string, string> = {
   "profile.projectError": "Fehler beim Speichern des Projekts",
   // Kundenstunden monatlich (statt am Tageseintrag)
   "profile.customerMonth": "Kundenstunden",
-  "profile.customerMonthDesc": "Kundenstunden werden einmal pro Monat erfasst, nicht am einzelnen Tageseintrag. Bei Kunden mit mindestens einem Projekt kannst du die Stunden über \"Auf Projekte aufteilen\" aufsplitten.",
+  "profile.customerMonthDesc": "Diese Monatserfassung ist für migrierte Altmonate gedacht. Läuft der Monat schon im Kalender pro Tag mit, gilt dort die Kundenzuordnung — hier eingetragene Stunden für denselben Monat werden dann nicht mitgezählt. Bei Kunden mit mindestens einem Projekt kannst du die Stunden über \"Auf Projekte aufteilen\" aufsplitten.",
   "profile.customerMonthSplit": "Auf Projekte aufteilen",
   "profile.customerMonthCollapse": "Zuklappen",
   "profile.customerMonthSave": "Monat speichern",

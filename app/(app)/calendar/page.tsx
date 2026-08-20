@@ -69,6 +69,10 @@ export default function CalendarPage() {
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
   const [entries, setEntries] = useState<DayTimeEntry[]>([]);
+  // CustomerMonth-Zeilen des angezeigten Monats — nur für die Transparenz-
+  // Anzeige in ProjectMonthSummary (migrationHours unten), NICHT Teil der
+  // eigentlichen Arbeitszeit-/Kundenstunden-Berechnung dieser Seite.
+  const [customerMonthRows, setCustomerMonthRows] = useState<{ customerId: string; projectId: string | null; hours: number }[]>([]);
   const [customers, setCustomers] = useState<DayCustomer[]>([]);
   const [projects, setProjects] = useState<DayProject[]>([]);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
@@ -104,6 +108,16 @@ export default function CalendarPage() {
       if (res?.ok) {
         const data = await res?.json?.().catch(() => ({}));
         setEntries(data?.entries ?? []);
+      }
+    } catch (err: any) { console.error(err); }
+  }, [currentDate?.year, currentDate?.month]);
+
+  const fetchCustomerMonthRows = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/customer-months?year=${currentDate?.year}&month=${currentDate?.month}`);
+      if (res?.ok) {
+        const data = await res?.json?.().catch(() => ({}));
+        setCustomerMonthRows(data?.rows ?? []);
       }
     } catch (err: any) { console.error(err); }
   }, [currentDate?.year, currentDate?.month]);
@@ -183,6 +197,7 @@ export default function CalendarPage() {
   }, [currentDate?.year]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
+  useEffect(() => { fetchCustomerMonthRows(); }, [fetchCustomerMonthRows]);
   useEffect(() => { fetchMonthLocks(); }, [fetchMonthLocks]);
   useEffect(() => { fetchProfile(); fetchPensumChanges(); fetchHolidays(); fetchCustomers(); fetchProjects(); }, [fetchProfile, fetchPensumChanges, fetchHolidays, fetchCustomers, fetchProjects]);
 
@@ -333,7 +348,26 @@ export default function CalendarPage() {
     }
     const rows = Array.from(byProject.values()).sort((a, b) => b.hours - a.hours);
     const assigned = rows.reduce((sum, r) => sum + r.hours, 0);
-    return { rows, unbilledHours: Math.max(0, total - assigned), totalHours: total };
+
+    // Kundenstunden aus der Migration (CustomerMonth) für diesen Monat — diese
+    // Karte berechnet ihre Summen ausschliesslich aus Tageseinträgen (rows/
+    // total oben) und lässt CustomerMonth bewusst aussen vor. Analytics/
+    // Teamsicht/Export zählen sie additiv dazu (lib/customer-months.ts
+    // combineCustomerHours()) — hier nur informativ, damit klar ist, dass die
+    // Kartensumme nicht der vollständige Monat ist, sobald Migrationsdaten
+    // existieren.
+    const migrationHours = (() => {
+      const byCustomer = new Map<string, number>();
+      for (const r of customerMonthRows) {
+        byCustomer.set(r.customerId, (byCustomer.get(r.customerId) ?? 0) + r.hours);
+      }
+      return Array.from(byCustomer.entries())
+        .map(([customerId, hours]) => ({ customerId, customerName: customers.find((c) => c.id === customerId)?.name ?? "?", hours }))
+        .filter((m) => m.hours > 0)
+        .sort((a, b) => b.hours - a.hours);
+    })();
+
+    return { rows, unbilledHours: Math.max(0, total - assigned), totalHours: total, migrationHours };
   })();
 
   const exportCustomerRapport = async (customerId: string, customerName: string) => {
@@ -683,6 +717,7 @@ export default function CalendarPage() {
         rows={projectSummary.rows}
         unbilledHours={projectSummary.unbilledHours}
         totalHours={projectSummary.totalHours}
+        migrationHours={projectSummary.migrationHours}
         onExportCustomer={exportCustomerRapport}
       />
 

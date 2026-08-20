@@ -5,13 +5,16 @@
 // projectId/customerId gepflegt (siehe components/day-entry-dialog.tsx).
 //
 // sumCustomerHours()/sumCustomerHoursByUser() liefern deshalb pro Monat die
-// NEUE, aus TimeEntry berechnete Summe — fällt ein Monat dabei auf 0 UND
-// existieren für ihn noch CustomerMonth-Zeilen (Altbestand, nie auf die
-// Tagesebene nacherfasst), gilt für GENAU DIESEN Monat der alte Wert. Die
-// Entscheidung läuft je (userId, Jahr, Monat), nicht über den ganzen
-// angefragten Zeitraum — sonst würde ein einzelner bereits migrierter Monat
-// mit 0 Kundenstunden fälschlich den Altwert eines ANDEREN Monats im selben
-// Aufruf verdecken oder umgekehrt.
+// SUMME aus beiden Quellen (combineCustomerHours(), Betrieb.md-Nachtrag
+// 20.08.2026): CustomerMonth deckt bei einer unterjährigen Migration nur die
+// Tage VOR dem Umstieg ab, TimeEntry nur die Tage AB dem Umstieg — beide
+// zusammen ergeben erst den vollständigen Monat. Voraussetzung dafür ist,
+// dass sich die beiden Quellen für denselben Monat nicht überschneiden
+// (genau das ist bei einer unterjährigen Migration der Fall, siehe
+// combineCustomerHours()). Die Entscheidung läuft je (userId, Jahr, Monat),
+// nicht über den ganzen angefragten Zeitraum — sonst würde ein Monat ohne
+// CustomerMonth-Zeilen fälschlich den Altwert eines ANDEREN Monats im
+// selben Aufruf übernehmen.
 //
 // Für einen Zeitraum [from, to], der keine vollen Kalendermonate trifft
 // (z.B. "custom"-Export vom 10. bis 20. eines Monats), werden die
@@ -39,20 +42,46 @@ export function monthsInRange(from: Date, to: Date): { year: number; month: numb
   return months;
 }
 
+// Die zwei Rohquellen für einen (userId, Jahr, Monat)-Schlüssel, VOR der
+// Kombinationsentscheidung — siehe combineCustomerHours() für die Regel.
+export interface MonthlyCustomerHours {
+  fromEntries: number;
+  fromCustomerMonth: number;
+}
+
+// Kombinationsregel zwischen neuer (TimeEntry) und alter (CustomerMonth)
+// Quelle für EINEN Monat — an dieser einzigen Stelle gekapselt, damit sie
+// sich später ändern lässt, ohne jeden Aufrufer einzeln anzufassen.
+// ADDITIV (Betrieb.md-Nachtrag 20.08.2026, geklärt mit Nico): bei einer
+// unterjährigen Migration deckt die CustomerMonth-Zeile eines Monats nur die
+// Tage VOR dem Umstieg ab (z.B. 1.–17. August), die TimeEntry-Summe
+// desselben Monats nur die Tage AB dem Umstieg (18.–31. August) — beide
+// zusammen ergeben den vollständigen Monat, keine Zeile zählt doppelt.
+// Setzt voraus, dass niemand für bereits migrierte Tage zusätzlich rückwirkend
+// TimeEntry-Zeilen mit Kundenzuordnung anlegt; das würde diese Tage doppelt
+// zählen, ist aber kein Fall, den das Datenmodell unterscheiden kann (Monats-
+// statt Tagesgranularität in CustomerMonth).
+export function combineCustomerHours(v: MonthlyCustomerHours): number {
+  return v.fromEntries + v.fromCustomerMonth;
+}
+
 // Kundenstunden je (userId, Jahr, Monat) — die eigentliche, für alle
 // Aufrufer (Teamsicht, Export, Analytics) gemeinsame Berechnung. Jede
 // "arbeit"-Stunde mit Kunden-/Projektzuordnung zählt als "Kundenstunde" im
 // Sinne von kennzahlen().verrechnungsgrad (Betrieb.md-Nachtrag, 19.08.2026 —
 // vorher gab es zusätzlich einen "billable"-Haken pro Kunde/Eintrag, der
 // entfiel, weil die Zuordnung selbst schon die einzig relevante Aussage ist).
+// Liefert beide Rohquellen unkombiniert zurück (siehe MonthlyCustomerHours)
+// — Aufrufer, die nur die Summe brauchen, nutzen combineCustomerHours() oder
+// direkt sumCustomerHours()/sumCustomerHoursByUser() unten.
 export async function billableHoursByUserAndMonth(params: {
   orgId: string;
   userIds: string[];
   from: Date;
   to: Date;
-}): Promise<Map<string, Map<string, number>>> {
+}): Promise<Map<string, Map<string, MonthlyCustomerHours>>> {
   const { orgId, userIds, from, to } = params;
-  const result = new Map<string, Map<string, number>>();
+  const result = new Map<string, Map<string, MonthlyCustomerHours>>();
   if (userIds.length === 0) return result;
   const months = monthsInRange(from, to);
   if (months.length === 0) return result;
@@ -79,8 +108,8 @@ export async function billableHoursByUserAndMonth(params: {
     neuByUserMonth.set(e.userId, perMonth);
   }
 
-  // Alte Quelle: CustomerMonth, ausschliesslich als Fallback für Monate ohne
-  // eigene TimeEntry-Summe (siehe Modulkommentar).
+  // Alte Quelle: CustomerMonth, wird additiv zur TimeEntry-Summe desselben
+  // Monats gezählt (siehe Modulkommentar und combineCustomerHours()).
   const oldRows = await prisma.customerMonth.findMany({
     where: { orgId, userId: { in: userIds }, OR: months.map((mo) => ({ year: mo.year, month: mo.month })) },
   });
@@ -93,11 +122,13 @@ export async function billableHoursByUserAndMonth(params: {
   }
 
   for (const userId of userIds) {
-    const perMonth = new Map<string, number>();
+    const perMonth = new Map<string, MonthlyCustomerHours>();
     for (const mo of months) {
       const key = `${mo.year}-${mo.month}`;
-      const neu = neuByUserMonth.get(userId)?.get(key) ?? 0;
-      perMonth.set(key, neu > 0 ? neu : altByUserMonth.get(userId)?.get(key) ?? 0);
+      perMonth.set(key, {
+        fromEntries: neuByUserMonth.get(userId)?.get(key) ?? 0,
+        fromCustomerMonth: altByUserMonth.get(userId)?.get(key) ?? 0,
+      });
     }
     result.set(userId, perMonth);
   }
@@ -117,7 +148,7 @@ export async function sumCustomerHoursByUser(params: { orgId: string; userIds: s
   const perMonth = await billableHoursByUserAndMonth(params);
   const result = new Map<string, number>();
   for (const [userId, monthly] of perMonth) {
-    result.set(userId, [...monthly.values()].reduce((s, h) => s + h, 0));
+    result.set(userId, [...monthly.values()].reduce((s, v) => s + combineCustomerHours(v), 0));
   }
   return result;
 }

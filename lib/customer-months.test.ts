@@ -1,13 +1,14 @@
 // Tests für lib/customer-months.ts — die Umstellung von monatlicher
 // CustomerMonth-Erfassung auf tägliche TimeEntry-Projektzuordnung
-// (Nachtrag "Projektstunden pro Tag"). Kernregel: pro (userId, Jahr, Monat)
-// gilt die NEUE, aus TimeEntry berechnete Summe; nur wenn die für einen
-// Monat 0 ergibt UND für ihn noch CustomerMonth-Zeilen existieren, gilt der
-// Altwert für GENAU DIESEN Monat.
+// (Nachtrag "Projektstunden pro Tag"). Kernregel (Betrieb.md-Nachtrag
+// 20.08.2026, geklärt mit Nico): pro (userId, Jahr, Monat) wird die
+// TimeEntry-Summe ADDITIV mit dem CustomerMonth-Altwert kombiniert — bei
+// einer unterjährigen Migration deckt CustomerMonth nur die Tage vor dem
+// Umstieg ab, TimeEntry nur die Tage danach.
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
-import { sumCustomerHours, sumCustomerHoursByUser, billableHoursByUserAndMonth } from "@/lib/customer-months";
+import { sumCustomerHours, sumCustomerHoursByUser, billableHoursByUserAndMonth, combineCustomerHours } from "@/lib/customer-months";
 
 const ORG = "test_customer_months_org";
 let userAId: string;
@@ -62,28 +63,36 @@ describe("billableHoursByUserAndMonth / sumCustomerHours", () => {
     expect(total).toBe(0);
   });
 
-  it("Fallback: ein Monat ohne TimeEntry-Summe, aber mit CustomerMonth-Zeilen, liefert den Altwert", async () => {
+  it("Nur CustomerMonth für einen Monat ohne TimeEntry-Summe liefert den Altwert", async () => {
     await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2026, month: 3, customerId, hours: 12.5 } });
     const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-03-01"), to: new Date("2026-03-31") });
     expect(total).toBe(12.5);
   });
 
-  it("Kein Fallback, sobald der Monat eine eigene TimeEntry-Summe > 0 hat — auch wenn zusätzlich CustomerMonth-Zeilen existieren", async () => {
-    await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2026, month: 9, customerId, hours: 999 } });
+  it("CustomerMonth und TimeEntry desselben Monats werden addiert, nicht ersetzt (unterjährige Migration)", async () => {
+    await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2026, month: 9, customerId, hours: 63 } });
     await prisma.timeEntry.create({
-      data: { orgId: ORG, userId: userAId, date: new Date("2026-09-02"), type: "arbeit", hours: 2, customerId, projectId },
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-09-18"), type: "arbeit", hours: 2, customerId, projectId },
     });
     const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-09-01"), to: new Date("2026-09-30") });
-    expect(total).toBe(2); // NICHT 999 — die neue Zahl gewinnt, sobald sie > 0 ist
+    expect(total).toBe(65); // 63 (Migration, Tage vor dem Umstieg) + 2 (Tageseintrag danach)
   });
 
-  it("Fallback und neue Zahl werden pro Monat einzeln entschieden, nicht über den ganzen Zeitraum", async () => {
+  it("Kombination läuft pro Monat einzeln, nicht über den ganzen Zeitraum", async () => {
     // Monat 3 (März) hat nur den CustomerMonth-Altwert (12.5, aus obigem Test).
-    // Monat 9 hat nur die neue TimeEntry-Summe (2, aus obigem Test).
+    // Monat 9 hat beide Quellen (63 + 2 = 65, aus obigem Test).
     const perMonth = await billableHoursByUserAndMonth({ orgId: ORG, userIds: [userAId], from: new Date("2026-03-01"), to: new Date("2026-09-30") });
     const map = perMonth.get(userAId)!;
-    expect(map.get("2026-3")).toBe(12.5);
-    expect(map.get("2026-9")).toBe(2);
+    expect(combineCustomerHours(map.get("2026-3")!)).toBe(12.5);
+    expect(combineCustomerHours(map.get("2026-9")!)).toBe(65);
+  });
+
+  it("billableHoursByUserAndMonth liefert beide Rohquellen unkombiniert (für Anzeigen, die den Migrationsanteil separat zeigen wollen)", async () => {
+    // Reuse der Fixtur aus dem vorigen Test: Monat 9 hat fromEntries=2 und fromCustomerMonth=63.
+    const perMonth = await billableHoursByUserAndMonth({ orgId: ORG, userIds: [userAId], from: new Date("2026-09-01"), to: new Date("2026-09-30") });
+    const v = perMonth.get(userAId)!.get("2026-9")!;
+    expect(v.fromEntries).toBe(2);
+    expect(v.fromCustomerMonth).toBe(63);
   });
 
   it("sumCustomerHoursByUser: mehrere Personen in einem Aufruf, unabhängig voneinander", async () => {

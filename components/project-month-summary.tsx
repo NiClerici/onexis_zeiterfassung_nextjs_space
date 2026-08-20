@@ -19,16 +19,29 @@ export interface ProjectSummaryRow {
   hours: number;
 }
 
+export interface MigrationHoursRow {
+  customerId: string;
+  customerName: string;
+  hours: number;
+}
+
 interface ProjectMonthSummaryProps {
   rows: ProjectSummaryRow[];
   unbilledHours: number;
   totalHours: number;
+  // Kundenstunden aus der CustomerMonth-Migration, die für diesen Monat
+  // NICHT in rows/totalHours enthalten sind — diese Karte rechnet
+  // ausschliesslich aus Tageseinträgen. Analytics/Teamsicht/Export zählen sie
+  // additiv dazu (lib/customer-months.ts combineCustomerHours()); hier nur
+  // zur Transparenz, dass die Kartensumme allein nicht der ganze Monat ist.
+  // Leer, wenn es keine Migrationsdaten für diesen Monat gibt.
+  migrationHours?: MigrationHoursRow[];
   onExportCustomer?: (customerId: string, customerName: string) => void;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-export function ProjectMonthSummary({ rows, unbilledHours, totalHours, onExportCustomer }: ProjectMonthSummaryProps) {
+export function ProjectMonthSummary({ rows, unbilledHours, totalHours, migrationHours = [], onExportCustomer }: ProjectMonthSummaryProps) {
   const { t } = useI18n();
 
   if (rows.length === 0 && totalHours <= 0) return null;
@@ -80,6 +93,19 @@ export function ProjectMonthSummary({ rows, unbilledHours, totalHours, onExportC
         ))}
         {unbilledHours > 0 && (
           <p className="text-xs text-muted-foreground px-1">{t("calendar.unbilledHours", { hours: String(round1(unbilledHours)) })}</p>
+        )}
+        {migrationHours.length > 0 && (
+          <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-1">{t("calendar.migrationHoursTitle")}</p>
+            <ul className="space-y-0.5">
+              {migrationHours.map((m) => (
+                <li key={m.customerId} className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span className="truncate">{m.customerName}</span>
+                  <span className="font-mono shrink-0 ml-2">{round1(m.hours)}h</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     </div>

@@ -21,6 +21,7 @@ interface AnalyticsData {
   targetHours: number;
   actualHours: number;
   customerHours: number;
+  customerHoursFromMigration: number;
   billingRate: number;
   holidays: number;
   overtime: number;
@@ -186,6 +187,9 @@ export default function AnalyticsPage() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><BarChart3 className="w-4 h-4 text-sky-500" /><span className="text-xs text-muted-foreground">{t("analytics.customerHours")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.customerHours ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
+              {(data?.customerHoursFromMigration ?? 0) > 0 && (
+                <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.customerHoursFromMigration", { hours: (data?.customerHoursFromMigration ?? 0).toFixed(1) })}</p>
+              )}
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }} title={t("analytics.weeklyOvertimeHint")}>
               <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-4 h-4 text-red-500" /><span className="text-xs text-muted-foreground">{t("analytics.weeklyOvertime")}</span></div>
