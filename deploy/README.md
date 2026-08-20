@@ -80,9 +80,19 @@ Minuten. `docker compose logs -f caddy` zeigt den Fortschritt.
 ## 3. Updates ausrollen
 
 ```bash
+./deploy/deploy.sh
+```
+
+Automatisiert die vier manuellen Schritte (`git pull`, Rebuild, Migration,
+Healthcheck) in einem Skript. Bricht bei uncommitteten Änderungen, einem
+fehlgeschlagenen Build oder einem roten Healthcheck sofort ab, statt einen
+kaputten Stand laufen zu lassen. Äquivalent von Hand:
+
+```bash
 git pull
 docker compose up -d --build
 docker compose run --rm migrate
+curl -f https://<deine-domain>/api/health
 ```
 
 `prisma migrate deploy` ist ohne neue Migrationen ein No-op — gefahrlos bei

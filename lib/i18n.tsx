@@ -113,10 +113,11 @@ const translations: Record<string, string> = {
   "calendar.exportCustomer": "Exportieren",
   "calendar.exportError": "Export fehlgeschlagen.",
   "calendar.unbilledHours": "{hours}h nicht verrechnet",
-  // Nur sichtbar, wenn ein Kunde Migrationsdaten (CustomerMonth) für diesen
-  // Monat hat — diese Karte rechnet nur aus Tageseinträgen, Analytics/Export
-  // zählen die Migrationsstunden additiv dazu (combineCustomerHours()).
-  "calendar.migrationHoursTitle": "Zusätzlich aus der Migration erfasst (in Analytics/Export mitgezählt, hier nicht enthalten)",
+  // Zeilentitel für die CustomerMonth-Migrationszeile innerhalb einer
+  // Kundengruppe (app/(app)/calendar/page.tsx projectSummary) — additiv zu
+  // den Tageseinträgen desselben Kunden, gleiche Kombination wie Analytics/
+  // Teamsicht/Export (lib/customer-months.ts combineCustomerHours()).
+  "calendar.migrationHoursRow": "Aus Migration",
   // Kundenstunden im Kalender (CustomerMonth, Betrieb.md-Nachtrag) — Block
   // existierte vor dem Vision-Ausbau schon einmal (damals auf dem
   // inzwischen ersetzten CustomerHour-Modell), Keys hier neu vergeben statt

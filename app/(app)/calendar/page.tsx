@@ -69,9 +69,10 @@ export default function CalendarPage() {
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
   const [entries, setEntries] = useState<DayTimeEntry[]>([]);
-  // CustomerMonth-Zeilen des angezeigten Monats — nur für die Transparenz-
-  // Anzeige in ProjectMonthSummary (migrationHours unten), NICHT Teil der
-  // eigentlichen Arbeitszeit-/Kundenstunden-Berechnung dieser Seite.
+  // CustomerMonth-Zeilen des angezeigten Monats — fliessen in projectSummary
+  // unten additiv in die Kundensummen ein (gleiche Kombination wie Analytics/
+  // Teamsicht/Export, lib/customer-months.ts combineCustomerHours()), NICHT
+  // in totalHours (das bleibt reine Tageseintrags-Arbeitszeit).
   const [customerMonthRows, setCustomerMonthRows] = useState<{ customerId: string; projectId: string | null; hours: number }[]>([]);
   const [customers, setCustomers] = useState<DayCustomer[]>([]);
   const [projects, setProjects] = useState<DayProject[]>([]);
@@ -314,7 +315,10 @@ export default function CalendarPage() {
   // Projektzeile in byProject (sie SIND einem Kunden zugeordnet), aber nicht
   // nochmal zur Arbeitszeit, sonst würde dieselbe Arbeit doppelt gezählt.
   // unbilledHours = totalHours abzüglich der einem Projekt/Kunden
-  // zugeordneten Stunden.
+  // zugeordneten Stunden UND der CustomerMonth-Migrationsstunden (siehe
+  // unten) — sonst würden bereits migrierte, additiv gezählte Kundenstunden
+  // (lib/customer-months.ts combineCustomerHours()) hier fälschlich nochmal
+  // als "nicht verrechnet" auftauchen.
   const projectSummary = (() => {
     const byProject = new Map<string, ProjectSummaryRow>();
     let total = 0;
@@ -346,28 +350,33 @@ export default function CalendarPage() {
         });
       }
     }
+
+    // Kundenstunden aus der CustomerMonth-Migration dieses Monats als eigene
+    // Zeile je Kunde einhängen — dieselbe additive Kombination wie Analytics/
+    // Teamsicht/Export (lib/customer-months.ts combineCustomerHours()), damit
+    // die Kundensumme hier und dort übereinstimmt. Nicht in "total" (der
+    // reinen Tageseintrags-Arbeitszeit) enthalten, wohl aber in "assigned"
+    // unten — sonst würden diese Stunden fälschlich als unverrechnet zählen.
+    const migrationByCustomer = new Map<string, number>();
+    for (const r of customerMonthRows) {
+      migrationByCustomer.set(r.customerId, (migrationByCustomer.get(r.customerId) ?? 0) + r.hours);
+    }
+    for (const [customerId, hours] of migrationByCustomer) {
+      if (hours <= 0) continue;
+      const customer = customers.find((c) => c.id === customerId);
+      byProject.set(`migration-${customerId}`, {
+        projectId: `migration-${customerId}`,
+        projectName: t("calendar.migrationHoursRow"),
+        customerId,
+        customerName: customer?.name ?? "?",
+        hours,
+      });
+    }
+
     const rows = Array.from(byProject.values()).sort((a, b) => b.hours - a.hours);
     const assigned = rows.reduce((sum, r) => sum + r.hours, 0);
 
-    // Kundenstunden aus der Migration (CustomerMonth) für diesen Monat — diese
-    // Karte berechnet ihre Summen ausschliesslich aus Tageseinträgen (rows/
-    // total oben) und lässt CustomerMonth bewusst aussen vor. Analytics/
-    // Teamsicht/Export zählen sie additiv dazu (lib/customer-months.ts
-    // combineCustomerHours()) — hier nur informativ, damit klar ist, dass die
-    // Kartensumme nicht der vollständige Monat ist, sobald Migrationsdaten
-    // existieren.
-    const migrationHours = (() => {
-      const byCustomer = new Map<string, number>();
-      for (const r of customerMonthRows) {
-        byCustomer.set(r.customerId, (byCustomer.get(r.customerId) ?? 0) + r.hours);
-      }
-      return Array.from(byCustomer.entries())
-        .map(([customerId, hours]) => ({ customerId, customerName: customers.find((c) => c.id === customerId)?.name ?? "?", hours }))
-        .filter((m) => m.hours > 0)
-        .sort((a, b) => b.hours - a.hours);
-    })();
-
-    return { rows, unbilledHours: Math.max(0, total - assigned), totalHours: total, migrationHours };
+    return { rows, unbilledHours: Math.max(0, total - assigned), totalHours: total };
   })();
 
   const exportCustomerRapport = async (customerId: string, customerName: string) => {
@@ -717,7 +726,6 @@ export default function CalendarPage() {
         rows={projectSummary.rows}
         unbilledHours={projectSummary.unbilledHours}
         totalHours={projectSummary.totalHours}
-        migrationHours={projectSummary.migrationHours}
         onExportCustomer={exportCustomerRapport}
       />
 
