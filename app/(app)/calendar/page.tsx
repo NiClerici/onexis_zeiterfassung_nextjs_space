@@ -347,6 +347,18 @@ export default function CalendarPage() {
     return now.getFullYear() === currentDate?.year && now.getMonth() + 1 === currentDate?.month && now.getDate() === day;
   };
 
+  // Heutiges Datum als "YYYY-MM-DD" — einmal pro Render, nicht pro Zelle. Der
+  // lexikografische Vergleich mit buildDateStr(day) ist für dieses Format
+  // äquivalent zum Datumsvergleich und kommt ohne Date-Objekt je Tag aus.
+  const todayStr = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  })();
+  // Nur vergangene Tage können "fehlend" sein. Heute selbst zählt bewusst noch
+  // nicht dazu (der Tag läuft ja noch) — die Zelle ist ohnehin durch den
+  // isToday-Ring hervorgehoben.
+  const isPastDay = (day: number) => buildDateStr(day) < todayStr;
+
   const openDayModal = (day: number) => {
     setSelectedDay(day);
     setDayModalOpen(true);
@@ -611,7 +623,7 @@ export default function CalendarPage() {
               const distinctTypes = Array.from(new Set(dayEntries.map((e) => e.type)));
               const weekday = new Date(currentDate.year, currentDate.month - 1, day).getDay();
               const isWorkday = weekday !== 0 && weekday !== 6;
-              const isMissing = dayEntries.length === 0 && isWorkday && tagesSoll > 0;
+              const isMissing = dayEntries.length === 0 && isWorkday && tagesSoll > 0 && isPastDay(day);
               const holiday = getHolidayForDay(day);
               const violations = dayEntries.length > 0 ? getComplianceViolations(day) : [];
               // Distinkte Projektnamen des Tages — Zelle ist zu schmal für

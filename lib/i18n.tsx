@@ -161,6 +161,11 @@ const translations: Record<string, string> = {
   "analytics.year": "Jahr",
   "analytics.custom": "Frei wählen",
   "analytics.targetHours": "Sollarbeitszeit",
+  // Sollarbeitszeit ist bewusst der Wert BIS HEUTE (kennzahlen() rechnet
+  // bisHeute = min(to, heute), lib/calc.ts) — bei laufender Periode zeigt die
+  // Karte darunter zusätzlich das Soll des ganzen Zeitraums (sollGesamt).
+  "analytics.targetToDate": "bis heute",
+  "analytics.ofFullTarget": "{hours}h im ganzen Zeitraum",
   "analytics.actualHours": "Geleistete Stunden",
   "analytics.difference": "Differenz",
   "analytics.billingRate": "Verrechnungsgrad",
@@ -186,12 +191,12 @@ const translations: Record<string, string> = {
   "analytics.stillToPlan": "Noch zu planen",
   "analytics.plannedVacation": "Geplant",
   "analytics.totalEntitlement": "Gesamtanspruch",
-  "analytics.forecast": "Prognose (inkl. geplante Zukunft)",
+  "analytics.forecast": "Prognose bis Periodenende",
   "analytics.plannedFuture": "Geplante Stunden (Zukunft)",
   "analytics.fullTargetHours": "Sollstunden (gesamt)",
   "analytics.totalIstPlusPlan": "Total (Ist + Geplant)",
   "analytics.forecastBalance": "Prognose Saldo",
-  "analytics.forecastHint": "Rein informativ — berücksichtigt vorerfasste zukünftige Einträge im gewählten Zeitraum.",
+  "analytics.forecastHint": "Rein informativ — Soll für den ganzen Zeitraum, gegengerechnet mit dem Ist bis heute plus allfälligen vorerfassten Einträgen in der Zukunft.",
   // Overtime payouts
   "profile.overtimePayouts": "Überstunden-Auszahlungen",
   "profile.overtimePayoutsDesc": "Hier kannst du ausbezahlte Überstunden erfassen. Diese werden vom Überstundensaldo abgezogen.",

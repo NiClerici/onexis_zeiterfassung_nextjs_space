@@ -102,6 +102,11 @@ export default function AnalyticsPage() {
   }, [fetchAnalytics, periodType, customFrom, customTo, customDefaultsLoaded]);
 
   const diff = (data?.actualHours ?? 0) - (data?.targetHours ?? 0);
+  // targetHours ist das Soll BIS HEUTE, fullTargetHours das der ganzen Periode
+  // (k.soll vs. k.sollGesamt, siehe app/api/analytics/route.ts). Sind sie
+  // gleich, ist die Periode abgeschlossen — dann bleiben Soll-Subline und
+  // Prognose-Box weg, weil sie nichts Zusätzliches aussagen.
+  const periodOngoing = (data?.fullTargetHours ?? 0) > (data?.targetHours ?? 0);
   const diffColor = diff >= 0 ? "text-green-600" : "text-red-500";
   const overtimeVal = data?.overtime ?? 0;
   const overtimeColor = overtimeVal >= 0 ? "text-green-600" : "text-red-500";
@@ -155,6 +160,9 @@ export default function AnalyticsPage() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><Target className="w-4 h-4 text-primary" /><span className="text-xs text-muted-foreground">{t("analytics.targetHours")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.targetHours ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
+              {periodOngoing && (
+                <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.targetToDate")} · {t("analytics.ofFullTarget", { hours: (data?.fullTargetHours ?? 0).toFixed(1) })}</p>
+              )}
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><TrendingUp className="w-4 h-4 text-green-500" /><span className="text-xs text-muted-foreground">{t("analytics.actualHours")}</span></div>
@@ -186,8 +194,8 @@ export default function AnalyticsPage() {
 
           </div>
 
-          {/* Prognose-Info-Box (only if future entries exist) */}
-          {(data?.futureHours ?? 0) > 0 && (
+          {/* Prognose-Info-Box (laufende Periode oder vorerfasste Zukunftseinträge) */}
+          {((data?.futureHours ?? 0) > 0 || periodOngoing) && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200/60 rounded-2xl p-4 mb-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2">
                 <CalendarClock className="w-4 h-4 text-sky-600" /> {t("analytics.forecast")}
