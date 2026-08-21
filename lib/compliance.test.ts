@@ -215,3 +215,25 @@ describe("pruefeCompliance — Randfälle", () => {
     expect(violations.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("pruefeCompliance — ComplianceOptions (Org-Toggles)", () => {
+  it("warnPauseZuKurz: false unterdrückt die Pausenwarnung, andere Regeln bleiben aktiv", () => {
+    // Sonntag (2026-08-16) mit 8h Arbeit und nur 5 Min. Pause.
+    const violations = pruefeCompliance([arbeit("2026-08-16", "08:00", "16:05", 5)], [], { warnPauseZuKurz: false });
+    expect(violations.some((v) => v.type === "pause_zu_kurz")).toBe(false);
+    expect(violations.some((v) => v.type === "sonntagsarbeit")).toBe(true);
+  });
+
+  it("warnSonntagsarbeit: false unterdrückt die Sonntagswarnung, lässt Nachtarbeit aber stehen", () => {
+    // 2026-08-16 ist ein Sonntag, Schicht überschneidet zusätzlich 23:00–06:00.
+    const violations = pruefeCompliance([arbeit("2026-08-16", "22:00", "23:30", 0)], [], { warnSonntagsarbeit: false });
+    expect(violations.some((v) => v.type === "sonntagsarbeit")).toBe(false);
+    expect(violations.some((v) => v.type === "nachtarbeit")).toBe(true);
+  });
+
+  it("ohne dritten Parameter bleiben beide Regeln aktiv (Schutz für den ArG-Kontrollexport)", () => {
+    const violations = pruefeCompliance([arbeit("2026-08-16", "08:00", "16:05", 5)], []);
+    expect(violations.some((v) => v.type === "pause_zu_kurz")).toBe(true);
+    expect(violations.some((v) => v.type === "sonntagsarbeit")).toBe(true);
+  });
+});

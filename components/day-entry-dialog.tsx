@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Trash2, Plus } from "lucide-react";
+import { X, Trash2, Plus, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { EINTRAG_TYPEN, stundenAusEintrag, type EintragTyp } from "@/lib/calc";
@@ -109,9 +109,14 @@ interface DayEntryDialogProps {
   // eingeschränkt geprüft, siehe calendar/page.tsx). Rein UI-seitig — die
   // eigentliche Durchsetzung liegt in app/api/time-entries/route.ts.
   locked?: boolean;
+  // Nicht-blockierende ArG-Compliance-Warnungen dieses Tages (lib/compliance.ts,
+  // vom Aufrufer via getComplianceViolations() berechnet). Das Kalender-Grid
+  // zeigt dafür nur ein Warndreieck mit title-Tooltip, der auf Touch-Geräten
+  // nicht erreichbar ist — hier stehen dieselben Texte lesbar im Dialog.
+  violations?: { type: string; message: string }[];
 }
 
-export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged, locked = false }: DayEntryDialogProps) {
+export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged, locked = false, violations = [] }: DayEntryDialogProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<DraftRow[]>([]);
 
@@ -259,6 +264,20 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
             {locked && (
               <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 border border-amber-200">
                 <p className="text-xs text-amber-800">{t("calendar.monthLocked")}</p>
+              </div>
+            )}
+
+            {violations.length > 0 && (
+              <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 border border-amber-200">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-medium text-amber-800 mb-0.5">{t("calendar.complianceTitle")}</p>
+                  <ul className="text-xs text-amber-800 space-y-0.5">
+                    {violations.map((v, i) => (
+                      <li key={i}>{v.message}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             )}
 

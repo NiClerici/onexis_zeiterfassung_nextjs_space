@@ -15,10 +15,51 @@ export async function GET() {
     const org = await prisma.organization.findUnique({ where: { id: orgId } });
     if (!org) return NextResponse.json({ error: "Organisation nicht gefunden" }, { status: 404 });
 
-    return NextResponse.json({ id: org.id, name: org.name, slug: org.slug, plan: org.plan, trialEndsAt: org.trialEndsAt });
+    return NextResponse.json({
+      id: org.id,
+      name: org.name,
+      slug: org.slug,
+      plan: org.plan,
+      trialEndsAt: org.trialEndsAt,
+      warnPauseZuKurz: org.warnPauseZuKurz,
+      warnSonntagsarbeit: org.warnSonntagsarbeit,
+    });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET organization error:", error);
+    return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
+  }
+}
+
+// Org-weite Ein-/Ausschalter für die nicht-blockierenden ArG-Warnungen im
+// Kalender (lib/compliance.ts ComplianceOptions) — analog zu PUT
+// /api/admin/team, nur owner/admin dürfen das ändern.
+export async function PUT(req: Request) {
+  try {
+    const { orgId, role } = await requireOrg();
+    requireRole(role, ["owner", "admin"]);
+
+    const body = await req?.json?.().catch(() => ({}));
+    const { warnPauseZuKurz, warnSonntagsarbeit } = body ?? {};
+
+    const updateData: any = {};
+    if (warnPauseZuKurz !== undefined) {
+      if (typeof warnPauseZuKurz !== "boolean") return NextResponse.json({ error: "Ungültiger Wert für warnPauseZuKurz" }, { status: 400 });
+      updateData.warnPauseZuKurz = warnPauseZuKurz;
+    }
+    if (warnSonntagsarbeit !== undefined) {
+      if (typeof warnSonntagsarbeit !== "boolean") return NextResponse.json({ error: "Ungültiger Wert für warnSonntagsarbeit" }, { status: 400 });
+      updateData.warnSonntagsarbeit = warnSonntagsarbeit;
+    }
+
+    if (Object.keys(updateData).length === 0) return NextResponse.json({ error: "Keine Änderung übergeben" }, { status: 400 });
+
+    await prisma.organization.update({ where: { id: orgId }, data: updateData });
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
+    console.error("PUT organization error:", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

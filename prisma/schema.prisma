@@ -59,6 +59,14 @@ model Organization {
   maxWeeklyHours Float     @default(45) // 45 oder 50 (Art. 12/13 ArG, Punkt 6a)
   createdAt      DateTime  @default(now())
 
+  // Nicht-blockierende ArG-Warnungen im Kalender pro Organisation
+  // abschaltbar. Sonntagsarbeit ist per Default AUS: sie ist zwar
+  // bewilligungspflichtig (Art. 18 ArG), Betriebe mit Bewilligung oder in
+  // ausgenommenen Branchen sehen sonst bei jedem Sonntagseintrag eine
+  // Meldung, die für sie keine ist.
+  warnPauseZuKurz    Boolean @default(true)
+  warnSonntagsarbeit Boolean @default(false)
+
   memberships     Membership[]
   timeEntries     TimeEntry[]
   customers       Customer[]

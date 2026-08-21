@@ -25,6 +25,10 @@ interface UserProfile {
   startDate: string | null;
   exitDate: string | null;
   maxWeeklyHours: number;
+  // Org-weite Ein-/Ausschalter für die nicht-blockierenden ArG-Warnungen
+  // (lib/compliance.ts ComplianceOptions) — vgl. /admin/legal.
+  warnPauseZuKurz: boolean;
+  warnSonntagsarbeit: boolean;
   standardWeek?: { mon: number; tue: number; wed: number; thu: number; fri: number; sat: number; sun: number };
 }
 
@@ -158,6 +162,8 @@ export default function CalendarPage() {
           startDate: data?.startDate ?? null,
           exitDate: data?.exitDate ?? null,
           maxWeeklyHours: data?.maxWeeklyHours ?? 45,
+          warnPauseZuKurz: data?.warnPauseZuKurz ?? true,
+          warnSonntagsarbeit: data?.warnSonntagsarbeit ?? false,
           standardWeek: data?.standardWeek ?? { mon: 0, tue: 0, wed: 0, thu: 0, fri: 0, sat: 0, sun: 0 },
         });
       }
@@ -284,7 +290,10 @@ export default function CalendarPage() {
     const dateStr = buildDateStr(day);
     const heute = toEintragMitDatum(dateStr, getEntriesForDay(day));
     const vortag = day > 1 ? toEintragMitDatum(buildDateStr(day - 1), getEntriesForDay(day - 1)) : [];
-    return pruefeCompliance(heute, vortag);
+    return pruefeCompliance(heute, vortag, {
+      warnPauseZuKurz: profile?.warnPauseZuKurz ?? true,
+      warnSonntagsarbeit: profile?.warnSonntagsarbeit ?? false,
+    });
   };
 
   const getTagesSoll = (day: number): number => {
@@ -699,7 +708,11 @@ export default function CalendarPage() {
                   className={`relative flex flex-col items-center justify-center py-2 rounded-xl transition text-sm hover:bg-accent cursor-pointer ${isToday(day) ? 'ring-2 ring-primary/30' : ''} ${holiday ? 'bg-purple-50 dark:bg-purple-950/30' : ''}`}
                 >
                   {violations.length > 0 && (
-                    <span className="absolute top-0.5 right-0.5" title={violations.map((v) => v.message).join(" · ")}>
+                    <span
+                      className="absolute top-0.5 right-0.5"
+                      title={violations.map((v) => v.message).join(" · ")}
+                      aria-label={violations.map((v) => v.message).join(" · ")}
+                    >
                       <AlertTriangle className="w-3 h-3 text-amber-500" />
                     </span>
                   )}
@@ -760,6 +773,7 @@ export default function CalendarPage() {
         tagesSoll={selectedDayTagesSoll}
         onChanged={fetchEntries}
         locked={isMember && isCurrentMonthLocked}
+        violations={selectedDay !== null ? getComplianceViolations(selectedDay) : []}
       />
 
       {/* Apply Standardwoche Modal */}

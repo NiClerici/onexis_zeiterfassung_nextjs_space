@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
-import { FileText, Download, AlertTriangle, ShieldAlert } from "lucide-react";
+import { FileText, Download, AlertTriangle, ShieldAlert, BellOff } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
 
 const LEGAL_DOCS = [
   { href: "/legal/avv-vorlage.md", labelKey: "legal.docAvv" },
@@ -26,6 +27,9 @@ export default function LegalPage() {
   const [confirmName, setConfirmName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState<"json" | "excel" | null>(null);
+  const [warnPauseZuKurz, setWarnPauseZuKurz] = useState(true);
+  const [warnSonntagsarbeit, setWarnSonntagsarbeit] = useState(false);
+  const [savingWarnings, setSavingWarnings] = useState<"warnPauseZuKurz" | "warnSonntagsarbeit" | null>(null);
 
   useEffect(() => {
     if (sessionStatus === "authenticated" && role && !isOrgAdmin) {
@@ -37,9 +41,40 @@ export default function LegalPage() {
     if (!isOrgAdmin) return;
     fetch("/api/admin/organization")
       .then((r) => (r?.ok ? r.json() : null))
-      .then((d) => { if (d?.name) setOrgName(d.name); })
+      .then((d) => {
+        if (d?.name) setOrgName(d.name);
+        if (d) {
+          setWarnPauseZuKurz(d.warnPauseZuKurz ?? true);
+          setWarnSonntagsarbeit(d.warnSonntagsarbeit ?? false);
+        }
+      })
       .catch((err) => console.error(err));
   }, [isOrgAdmin]);
+
+  const handleToggleWarning = async (key: "warnPauseZuKurz" | "warnSonntagsarbeit", value: boolean) => {
+    const setter = key === "warnPauseZuKurz" ? setWarnPauseZuKurz : setWarnSonntagsarbeit;
+    const previous = key === "warnPauseZuKurz" ? warnPauseZuKurz : warnSonntagsarbeit;
+    setter(value);
+    setSavingWarnings(key);
+    try {
+      const res = await fetch("/api/admin/organization", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (!res?.ok) {
+        setter(previous);
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error ?? t("profile.error"));
+      }
+    } catch (err: any) {
+      console.error(err);
+      setter(previous);
+      toast.error(t("profile.error"));
+    } finally {
+      setSavingWarnings(null);
+    }
+  };
 
   const handleExport = async (format: "json" | "excel") => {
     setExporting(format);
@@ -116,6 +151,36 @@ export default function LegalPage() {
           <button onClick={() => handleExport("excel")} disabled={exporting !== null} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50">
             <Download className="w-4 h-4" /> {exporting === "excel" ? t("common.loading") : t("legal.exportExcel")}
           </button>
+        </div>
+      </motion.div>
+
+      {/* ArG-Warnungen */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><BellOff className="w-4 h-4 text-primary" /> {t("legal.warningsTitle")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("legal.warningsHint")}</p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm">{t("legal.warnPauseZuKurzLabel")}</p>
+              <p className="text-xs text-muted-foreground">{t("legal.warnPauseZuKurzHint")}</p>
+            </div>
+            <Switch
+              checked={warnPauseZuKurz}
+              disabled={savingWarnings !== null}
+              onCheckedChange={(checked) => handleToggleWarning("warnPauseZuKurz", checked)}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm">{t("legal.warnSonntagsarbeitLabel")}</p>
+              <p className="text-xs text-muted-foreground">{t("legal.warnSonntagsarbeitHint")}</p>
+            </div>
+            <Switch
+              checked={warnSonntagsarbeit}
+              disabled={savingWarnings !== null}
+              onCheckedChange={(checked) => handleToggleWarning("warnSonntagsarbeit", checked)}
+            />
+          </div>
         </div>
       </motion.div>
 

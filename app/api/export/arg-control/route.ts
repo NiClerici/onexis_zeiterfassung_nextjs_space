@@ -93,6 +93,12 @@ function addKontrollSheet(
     const montagKey = dateKey(montagDerWoche(current));
     const woche = wochenMap.get(montagKey);
 
+    // Bewusst OHNE ComplianceOptions aufgerufen: dies ist ein
+    // arbeitsrechtliches Kontrolldokument, kein UI-Hinweis. Die
+    // Organisation kann die Kalender-Anzeige der Pausen-/Sonntagswarnung
+    // abschalten (Organization.warnPauseZuKurz/warnSonntagsarbeit,
+    // /admin/legal) — dieser Export muss trotzdem immer den vollen
+    // ArG-Befund zeigen.
     const violations = pruefeCompliance(dayEntries, vortagEntries);
     const nachtarbeit = violations.some((v) => v.type === "nachtarbeit");
     const sonntagsarbeit = violations.some((v) => v.type === "sonntagsarbeit");

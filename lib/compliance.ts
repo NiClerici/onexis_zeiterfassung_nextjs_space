@@ -4,6 +4,7 @@
 // Punkt 6d) — nichts hier verhindert das Speichern eines Eintrags.
 
 import type { EintragMitDatum } from "./calc";
+import { mindestPauseMin } from "./arbeitszeit";
 
 export type ComplianceViolationType =
   | "pause_zu_kurz"
@@ -15,6 +16,17 @@ export type ComplianceViolationType =
 export interface ComplianceViolation {
   type: ComplianceViolationType;
   message: string;
+}
+
+// Pro Organisation abschaltbare Warnungen (Punkt "ArG-Toggles"). Der
+// Funktions-Default bleibt bewusst "alles an" — der abweichende
+// Organisations-Default (Sonntag standardmässig aus) lebt ausschliesslich
+// in der DB-Spalte Organization.warnSonntagsarbeit, nicht hier. So bleibt
+// insbesondere der ArG-Kontrollexport (app/api/export/arg-control/route.ts),
+// der pruefeCompliance ohne Optionen aufruft, unverändert vollständig.
+export interface ComplianceOptions {
+  warnPauseZuKurz?: boolean;
+  warnSonntagsarbeit?: boolean;
 }
 
 // Praxis-Richtwert (SECO-Wegleitung zu Art. 9/12 ArG): die tägliche
@@ -128,7 +140,8 @@ function ueberschneidetNachtzeit(vonMin: number, bisMin: number): boolean {
 // eintraegeVortag wird nur für die Ruhezeitprüfung zum Vortag gebraucht.
 export function pruefeCompliance(
   eintraegeEinesTages: EintragMitDatum[],
-  eintraegeVortag: EintragMitDatum[]
+  eintraegeVortag: EintragMitDatum[],
+  options: ComplianceOptions = {}
 ): ComplianceViolation[] {
   const violations: ComplianceViolation[] = [];
   if (eintraegeEinesTages.length === 0) return violations;
@@ -141,13 +154,12 @@ export function pruefeCompliance(
   const pauseMin = erfasstePauseMin + lueckenMin;
 
   // Pausenregel Art. 15 ArG: der höchste erreichte Schwellenwert bestimmt die
-  // Mindestpause, nicht eine Summe aus allen Stufen.
-  let erforderlichePauseMin = 0;
-  if (arbeitsstunden > 9) erforderlichePauseMin = 60;
-  else if (arbeitsstunden > 7) erforderlichePauseMin = 30;
-  else if (arbeitsstunden > 5.5) erforderlichePauseMin = 15;
+  // Mindestpause, nicht eine Summe aus allen Stufen. Dieselbe Staffel wie
+  // buildArbeitszeit() in lib/arbeitszeit.ts — eine Stelle, damit neu
+  // erfasste Einträge nicht ihre eigene Warnung auslösen.
+  const erforderlichePauseMin = mindestPauseMin(arbeitsstunden);
 
-  if (erforderlichePauseMin > 0 && pauseMin < erforderlichePauseMin) {
+  if (options.warnPauseZuKurz !== false && erforderlichePauseMin > 0 && pauseMin < erforderlichePauseMin) {
     // Lücken nur erwähnen, wenn es welche gibt — sonst bleibt die Meldung
     // wie bisher.
     const erfasstText =
@@ -187,7 +199,7 @@ export function pruefeCompliance(
   const tagesDatum = toUTCDate(eintraegeEinesTages[0].date);
   const istSonntag = tagesDatum.getUTCDay() === 0;
   const hatArbeit = eintraegeEinesTages.some((e) => e.typ === "arbeit" && e.von && e.bis);
-  if (istSonntag && hatArbeit) {
+  if (options.warnSonntagsarbeit !== false && istSonntag && hatArbeit) {
     violations.push({
       type: "sonntagsarbeit",
       message: "Sonntagsarbeit erfasst — bewilligungspflichtig, sofern nicht ausdrücklich freigegeben.",

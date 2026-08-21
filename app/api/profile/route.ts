@@ -31,6 +31,10 @@ export async function GET() {
       // Gesetzliche Höchstarbeitszeit der Organisation (Art. 12/13 ArG,
       // MIGRATION.md Punkt 6a) — für die Kalender-Kennzahlenberechnung.
       maxWeeklyHours: (membership as any)?.org?.maxWeeklyHours ?? 45,
+      // Org-weite Ein-/Ausschalter für die nicht-blockierenden
+      // ArG-Warnungen im Kalender (lib/compliance.ts ComplianceOptions).
+      warnPauseZuKurz: (membership as any)?.org?.warnPauseZuKurz ?? true,
+      warnSonntagsarbeit: (membership as any)?.org?.warnSonntagsarbeit ?? false,
       startDate: membership?.startDate?.toISOString?.() ?? null,
       // Nur lesend — Austrittsdatum wird ausschliesslich über /admin/team
       // gesetzt (MIGRATION.md Punkt 4c), nicht von der Person selbst.
