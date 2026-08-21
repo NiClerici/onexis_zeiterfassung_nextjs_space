@@ -175,6 +175,10 @@ const translations: Record<string, string> = {
   "analytics.actualHours": "Geleistete Stunden",
   "analytics.difference": "Differenz",
   "analytics.billingRate": "Verrechnungsgrad",
+  // Basis unter der Verrechnungsgrad-Kachel: Nenner ist die reine Arbeitszeit,
+  // nicht Ferien/Feiertage/Krank/Militär/Unbezahlt (Betrieb.md-Nachtrag,
+  // 21.08.2026).
+  "analytics.billingRateBasis": "{customer}h von {work}h Arbeitszeit",
   "analytics.customerHours": "Kundenstunden",
   // Aufschlüsselung, wenn ein Teil von customerHours aus der CustomerMonth-
   // Migration stammt (additiv zu den Tageseinträgen, lib/customer-months.ts

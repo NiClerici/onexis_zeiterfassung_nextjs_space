@@ -23,6 +23,9 @@ interface AnalyticsData {
   customerHours: number;
   customerHoursFromMigration: number;
   billingRate: number;
+  // Nenner von billingRate (reine Arbeitszeit ohne Absenzen) — für die
+  // Aufschlüsselung unter der Verrechnungsgrad-Kachel.
+  workHours: number;
   holidays: number;
   overtime: number;
   paidOutHours: number;
@@ -183,6 +186,7 @@ export default function AnalyticsPage() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><Percent className="w-4 h-4 text-purple-500" /><span className="text-xs text-muted-foreground">{t("analytics.billingRate")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.billingRate ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">%</span></p>
+              <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.billingRateBasis", { customer: (data?.customerHours ?? 0).toFixed(1), work: (data?.workHours ?? 0).toFixed(1) })}</p>
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><BarChart3 className="w-4 h-4 text-sky-500" /><span className="text-xs text-muted-foreground">{t("analytics.customerHours")}</span></div>

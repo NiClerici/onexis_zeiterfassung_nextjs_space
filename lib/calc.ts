@@ -98,7 +98,20 @@ export interface KennzahlenResult {
   // einer Woche vor Periodenbeginn) fliessen wie bei soll/ist grundsätzlich
   // nicht ein — dieselbe Einschränkung gilt dort bereits.
   ueberzeit: number;
+  // Tatsächlich geleistete Arbeitszeit: nur typ="arbeit", ohne
+  // countsAsWorktime=false, innerhalb [from, bisHeute] — dieselbe Definition,
+  // die ueberzeit oben schon verwendet, und dieselbe, die der Kalender im
+  // Kopf "Arbeitsstunden" anzeigt (projectSummary.totalHours in
+  // app/(app)/calendar/page.tsx). Teilmenge von `ist`: `ist` enthält
+  // zusätzlich alle Absenzen (Ferien/Feiertag/Krank/Militär/Unbezahlt), weil
+  // bezahlte Abwesenheit das Soll erfüllt.
+  arbeitsstunden: number;
   kundenstunden: number;
+  // Anteil der Kundenstunden an der ARBEITSZEIT, nicht an `ist`. Der Nenner
+  // war bis 21.08.2026 `ist` — dadurch drückten Ferien- und Feiertagsstunden
+  // den Wert (Nicos April 2026: 98.3h/155.3h = 63.3% statt 98.3h/110.5h =
+  // 88.9%). Absenzen sind keine verrechenbare Basis; die Kennzahl beantwortet
+  // "welcher Anteil meiner geleisteten Arbeit ging an Kunden".
   verrechnungsgrad: number;
   geplantZukunft: number;
   sollGesamt: number;
@@ -260,6 +273,10 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
 
   let ist = 0;
   let geplantZukunft = 0;
+  // Nur tatsächlich geleistete Arbeitszeit (typ="arbeit"), als Nenner für
+  // verrechnungsgrad unten (siehe KennzahlenResult.arbeitsstunden) — separat
+  // von `ist`, das zusätzlich Absenzen enthält.
+  let arbeitsstunden = 0;
   // Nur tatsächlich geleistete Arbeitszeit (typ="arbeit") zählt für die
   // ArG-Höchstarbeitszeit — Absenzen sind keine Arbeitszeit im Sinne des
   // Gesetzes. Gruppiert nach Montag der jeweiligen Kalenderwoche.
@@ -285,6 +302,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     if (d.getTime() <= bisHeute.getTime()) {
       ist += stunden;
       if (eintrag.typ === "arbeit") {
+        arbeitsstunden += stunden;
         const wochenSchluessel = montagDerWoche(d).getTime();
         arbeitsstundenProWoche.set(wochenSchluessel, (arbeitsstundenProWoche.get(wochenSchluessel) ?? 0) + stunden);
       }
@@ -311,7 +329,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     }
   }
 
-  const verrechnungsgrad = ist > 0 ? (kundenstunden / ist) * 100 : 0;
+  const verrechnungsgrad = arbeitsstunden > 0 ? (kundenstunden / arbeitsstunden) * 100 : 0;
   const totalPrognose = ist + geplantZukunft;
   const prognoseSaldo = totalPrognose - sollGesamt;
 
@@ -320,6 +338,7 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     ist: round1(ist),
     ueberstunden: round1(ueberstunden),
     ueberzeit: round1(ueberzeit),
+    arbeitsstunden: round1(arbeitsstunden),
     kundenstunden: round1(kundenstunden),
     verrechnungsgrad: round1(verrechnungsgrad),
     geplantZukunft: round1(geplantZukunft),
@@ -404,6 +423,7 @@ export interface TeamMemberResult {
   ist: number;
   ueberstunden: number;
   ueberzeit: number;
+  arbeitsstunden: number;
   kundenstunden: number;
   verrechnungsgrad: number;
 }
@@ -424,6 +444,7 @@ export interface TeamKennzahlenResult {
     soll: number;
     ist: number;
     ueberstunden: number;
+    arbeitsstunden: number;
     kundenstunden: number;
     verrechnungsgrad: number;
   };
@@ -454,6 +475,7 @@ export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult
       ist: k.ist,
       ueberstunden: k.ueberstunden,
       ueberzeit: k.ueberzeit,
+      arbeitsstunden: k.arbeitsstunden,
       kundenstunden: k.kundenstunden,
       verrechnungsgrad: k.verrechnungsgrad,
     };
@@ -462,10 +484,11 @@ export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult
   const soll = round1(members.reduce((s, m) => s + m.soll, 0));
   const ist = round1(members.reduce((s, m) => s + m.ist, 0));
   const ueberstunden = round1(members.reduce((s, m) => s + m.ueberstunden, 0));
+  const arbeitsstunden = round1(members.reduce((s, m) => s + m.arbeitsstunden, 0));
   const kundenstunden = round1(members.reduce((s, m) => s + m.kundenstunden, 0));
-  const verrechnungsgrad = ist > 0 ? round1((kundenstunden / ist) * 100) : 0;
+  const verrechnungsgrad = arbeitsstunden > 0 ? round1((kundenstunden / arbeitsstunden) * 100) : 0;
 
-  return { members, totals: { soll, ist, ueberstunden, kundenstunden, verrechnungsgrad } };
+  return { members, totals: { soll, ist, ueberstunden, arbeitsstunden, kundenstunden, verrechnungsgrad } };
 }
 
 export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {

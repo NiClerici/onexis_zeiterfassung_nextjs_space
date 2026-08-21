@@ -144,7 +144,7 @@ also entkoppelt starten und pollen, nicht blockierend warten:
 nohup docker compose up -d --build > /tmp/build.log 2>&1 &
 # pollen bis fertig:
 tail -20 /tmp/build.log ; docker compose ps
-docker compose run --rm migrate
+docker compose run --rm --build migrate
 ```
 `migrate` ist ein Einmal-Container gegen die `builder`-Stage (siehe
 `docker-compose.yml`). **Nicht** `docker compose exec app npx prisma

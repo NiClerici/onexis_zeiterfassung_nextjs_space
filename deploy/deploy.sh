@@ -47,7 +47,14 @@ echo "Baue und starte Container neu..."
 docker compose up -d --build
 
 echo "Wende Migrationen an..."
-docker compose run --rm migrate
+# --build ist hier Pflicht, nicht Kosmetik: "migrate" hat profiles: ["tools"]
+# und wird von "docker compose up -d --build" oben NICHT mitgebaut. Ohne
+# --build würde dieser Schritt mit einem beliebig alten, gecachten Image
+# laufen — das meldet dann fälschlich "no pending migrations", obwohl das
+# aktuelle Schema neue Spalten/Tabellen erwartet, die die echte DB noch gar
+# nicht hat (beobachtet: P2022 auf frisch deployten Feldern trotz "erfolgreichem"
+# Deploy, weil dieser Schritt lange ohne --build lief).
+docker compose run --rm --build migrate
 
 echo "Healthcheck..."
 for i in $(seq 1 10); do

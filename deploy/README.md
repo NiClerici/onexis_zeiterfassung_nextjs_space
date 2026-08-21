@@ -65,8 +65,11 @@ docker compose up -d --build
 # Datenbankschema anlegen (einmalig, danach nach jedem Deploy mit neuen
 # Migrationen wiederholen). Läuft im "migrate"-Container, nicht im "app"-
 # Container: das schlanke Laufzeit-Image enthält weder das prisma-CLI noch
-# prisma/migrations/ (siehe docker-compose.yml, Service "migrate").
-docker compose run --rm migrate
+# prisma/migrations/ (siehe docker-compose.yml, Service "migrate"). --build
+# nicht weglassen (profiles: ["tools"], wird von "up -d --build" oben nicht
+# mitgebaut — sonst kann ein späterer Lauf mit veraltetem Image "no pending
+# migrations" melden, obwohl neue Migrationen existieren).
+docker compose run --rm --build migrate
 
 # Healthcheck prüfen
 curl -f https://<deine-domain>/api/health
@@ -91,12 +94,17 @@ kaputten Stand laufen zu lassen. Äquivalent von Hand:
 ```bash
 git pull
 docker compose up -d --build
-docker compose run --rm migrate
+docker compose run --rm --build migrate
 curl -f https://<deine-domain>/api/health
 ```
 
 `prisma migrate deploy` ist ohne neue Migrationen ein No-op — gefahrlos bei
 jedem Deploy mitlaufen lassen, statt zu prüfen, ob es diesmal nötig ist.
+**`--build` beim migrate-Schritt nicht weglassen:** der Service hat
+`profiles: ["tools"]` und wird von `docker compose up -d --build` oben
+NICHT mitgebaut. Ohne `--build` läuft er mit einem beliebig alten
+gecachten Image und meldet fälschlich "no pending migrations", obwohl die
+aktuelle DB die neuen Spalten/Tabellen noch gar nicht hat.
 
 ## 4. Tägliches Backup
 

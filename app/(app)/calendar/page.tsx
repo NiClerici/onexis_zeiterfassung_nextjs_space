@@ -225,6 +225,15 @@ export default function CalendarPage() {
   const nextMonth = () => {
     setCurrentDate((d: any) => d?.month === 12 ? { year: (d?.year ?? 2026) + 1, month: 1 } : { year: d?.year, month: (d?.month ?? 1) + 1 });
   };
+  const goToToday = () => {
+    const now = new Date();
+    setCurrentDate({ year: now.getFullYear(), month: now.getMonth() + 1 });
+    setMonthPickerOpen(false);
+  };
+  const isCurrentMonthShown = (() => {
+    const now = new Date();
+    return currentDate?.year === now.getFullYear() && currentDate?.month === now.getMonth() + 1;
+  })();
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
   const getFirstDayOfMonth = (year: number, month: number) => {
@@ -586,7 +595,8 @@ export default function CalendarPage() {
       {/* Month navigation */}
       <div className="flex items-center justify-between mb-4">
         <button onClick={prevMonth} className="p-2 rounded-xl hover:bg-accent transition"><ChevronLeft className="w-5 h-5" /></button>
-        <div className="relative" ref={monthPickerRef}>
+        <div className="flex items-center gap-1">
+          <div className="relative" ref={monthPickerRef}>
           <button
             onClick={() => { setPickerYear(currentDate.year); setMonthPickerOpen(!monthPickerOpen); }}
             className="text-lg font-display font-semibold hover:text-primary transition cursor-pointer px-3 py-1 rounded-xl hover:bg-accent"
@@ -629,6 +639,14 @@ export default function CalendarPage() {
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+        <button
+          onClick={goToToday}
+          disabled={isCurrentMonthShown}
+          className="px-2.5 py-1 rounded-xl bg-secondary text-xs font-medium hover:bg-accent transition disabled:opacity-40 disabled:cursor-default"
+        >
+          {t("calendar.today")}
+        </button>
         </div>
         <button onClick={nextMonth} className="p-2 rounded-xl hover:bg-accent transition"><ChevronRight className="w-5 h-5" /></button>
       </div>

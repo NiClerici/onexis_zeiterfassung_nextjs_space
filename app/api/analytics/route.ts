@@ -138,7 +138,6 @@ export async function GET(req: Request) {
 
     // Monatliche Aufschlüsselung fürs Chart
     const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
-    const arbeitEintraege = eintraege.filter((e) => e.typ === "arbeit");
     const monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }> = [];
     const currentMonth = new Date(startDate);
     while (currentMonth <= endDate) {
@@ -159,10 +158,10 @@ export async function GET(req: Request) {
         kundenstunden: combineCustomerHours(customerHoursByMonth.get(`${mYear}-${mMonth}`) ?? { fromEntries: 0, fromMigration: 0 }),
       });
       // Arbeitsstunden (ohne Absenzen) für den Vergleich mit Kundenstunden im
-      // Verlaufs-Chart — kundenstunden hier irrelevant, mkWork.kundenstunden
-      // wird nirgends gelesen (nur .ist für "work").
-      const mkWork = kennzahlen({ from: mStart, to: mEnd, heute, eintraege: arbeitEintraege, profil, changes, payouts: [], holidays, kundenstunden: 0 });
-      monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, work: mkWork.ist, customer: mk.kundenstunden });
+      // Verlaufs-Chart — kennzahlen() liefert das bereits als eigenes Feld
+      // (mk.arbeitsstunden), ein zweiter Aufruf mit vorgefilterten Einträgen
+      // war redundant.
+      monthlyData.push({ month: monthNames[mMonth - 1] ?? "", target: mk.soll, actual: mk.ist, work: mk.arbeitsstunden, customer: mk.kundenstunden });
       currentMonth.setUTCMonth(currentMonth.getUTCMonth() + 1);
     }
 
@@ -175,6 +174,9 @@ export async function GET(req: Request) {
       // in der Kundenstunden-Karte. 0, wenn der Zeitraum keine Migrationsdaten hat.
       customerHoursFromMigration: Math.round(kundenstundenAusMigration * 10) / 10,
       billingRate: k.verrechnungsgrad,
+      // Nenner von billingRate, für die Aufschlüsselung unter der Kachel
+      // (Betrieb.md-Nachtrag, 21.08.2026): reine Arbeitszeit, ohne Absenzen.
+      workHours: k.arbeitsstunden,
       vacationDays: fs.bezogen,
       holidays: currentDailyRate > 0 ? Math.round((holidayHours / currentDailyRate) * 10) / 10 : 0,
       overtime: overtimeGross,

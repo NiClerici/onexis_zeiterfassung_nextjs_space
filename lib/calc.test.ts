@@ -438,6 +438,56 @@ describe("verrechnungsgrad", () => {
     expect(result.kundenstunden).toBe(8);
     expect(result.verrechnungsgrad).toBe(50);
   });
+
+  // Regression: verrechnungsgrad teilte bis 21.08.2026 durch `ist` (Arbeit +
+  // Absenzen), nicht durch die reine Arbeitszeit. Nachgebaut mit Nicos
+  // April-2026-Fall: 2 Arbeitstage à 8h (=16h Arbeit) plus 2 Ferientage à 8h
+  // (=16h Absenz), macht `ist`=32h. Alter (falscher) Nenner: 8/32=25%. Neuer
+  // Nenner (nur Arbeitszeit): 8/16=50%.
+  it("Ferien/Feiertage drücken den Verrechnungsgrad nicht mehr — Nenner ist nur Arbeitszeit", () => {
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+    const result = kennzahlen({
+      from: "2026-04-01",
+      to: "2026-04-04",
+      heute: "2026-04-30",
+      eintraege: [
+        { date: "2026-04-01", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 }, // 8h Arbeit
+        { date: "2026-04-02", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 }, // 8h Arbeit
+        { date: "2026-04-03", typ: "ferien", hours: 8 }, // 8h Absenz
+        { date: "2026-04-04", typ: "ferien", hours: 8 }, // 8h Absenz
+      ],
+      profil,
+      changes: [],
+      holidays: [],
+      payouts: [],
+      kundenstunden: 8,
+    });
+    expect(result.ist).toBe(32); // 16h Arbeit + 16h Ferien
+    expect(result.arbeitsstunden).toBe(16);
+    expect(result.kundenstunden).toBe(8);
+    expect(result.verrechnungsgrad).toBe(50); // 8/16*100, NICHT 8/32*100=25
+  });
+
+  it("Monat ganz ohne Arbeit (nur Ferien): verrechnungsgrad ist 0, kein NaN/Infinity", () => {
+    const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+    const result = kennzahlen({
+      from: "2026-04-01",
+      to: "2026-04-02",
+      heute: "2026-04-30",
+      eintraege: [
+        { date: "2026-04-01", typ: "ferien", hours: 8 },
+        { date: "2026-04-02", typ: "ferien", hours: 8 },
+      ],
+      profil,
+      changes: [],
+      holidays: [],
+      payouts: [],
+      kundenstunden: 3,
+    });
+    expect(result.arbeitsstunden).toBe(0);
+    expect(result.verrechnungsgrad).toBe(0);
+    expect(Number.isFinite(result.verrechnungsgrad)).toBe(true);
+  });
 });
 
 // Analytics-Chart "Monatlicher Verlauf" zeigte eine Laufsumme statt
@@ -1023,7 +1073,7 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
   it("liefert eine leere Mitgliederliste und Null-Totals ohne Mitglieder", () => {
     const result = teamKennzahlen({ from: "2026-08-03", to: "2026-08-03", heute: "2026-08-03", holidays: [], members: [] });
     expect(result.members).toEqual([]);
-    expect(result.totals).toEqual({ soll: 0, ist: 0, ueberstunden: 0, kundenstunden: 0, verrechnungsgrad: 0 });
+    expect(result.totals).toEqual({ soll: 0, ist: 0, ueberstunden: 0, arbeitsstunden: 0, kundenstunden: 0, verrechnungsgrad: 0 });
   });
 });
 
