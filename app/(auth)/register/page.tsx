@@ -9,6 +9,7 @@ import { Mail, Lock, Briefcase, Calendar, Info, Building2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { motion } from "framer-motion";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
+import { PensumPreview } from "@/components/pensum-preview";
 
 export default function RegisterPage() {
   const { t } = useI18n();
@@ -118,6 +119,7 @@ export default function RegisterPage() {
                     if (isNaN(n)) return;
                     setWeeklyHours(n < 0 ? "0" : n > 100 ? "100" : v);
                   }} placeholder="42" className="w-full pl-10 pr-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
+                  <p className="text-xs text-muted-foreground mt-1">{t("profile.weeklyHoursHint")}</p>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("register.pensum")}</label>
@@ -128,6 +130,9 @@ export default function RegisterPage() {
                     if (isNaN(n)) return;
                     setPensum(n < 0 ? "0" : n > 200 ? "200" : v);
                   }} placeholder="100" className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                </div>
+                <div className="col-span-2">
+                  <PensumPreview weeklyHours={weeklyHours} pensum={pensum} />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1 block">{t("register.vacationDays")}</label>

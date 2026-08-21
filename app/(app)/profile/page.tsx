@@ -8,6 +8,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { downloadBlob } from "@/lib/download-blob";
+import { PensumPreview } from "@/components/pensum-preview";
 
 interface ProfileData {
   firstName: string;
@@ -697,6 +698,7 @@ export default function ProfilePage() {
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label><input type="date" value={startDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStartDate(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.kuerzel")}</label><input type="text" maxLength={10} value={kuerzel} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKuerzel(e?.target?.value ?? "")} placeholder={t("profile.kuerzelPlaceholder")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
         </div>
+        <PensumPreview weeklyHours={weeklyHours} pensum={pensum} />
         <button onClick={saveProfile} disabled={saving} className="mt-3 w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50 flex items-center justify-center gap-1.5">
           {saving ? t("common.loading") : <><CheckCircle className="w-4 h-4" /> {t("profile.save")}</>}
         </button>
@@ -720,6 +722,7 @@ export default function ProfilePage() {
             <input type="number" step="0.5" min="0" max="100" value={newWeeklyHours} onChange={(e) => setNewWeeklyHours(clampNumInput(e.target.value, 0, 100))} placeholder="42" className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
           </div>
         </div>
+        <PensumPreview weeklyHours={newWeeklyHours} pensum={newPensum} />
         {showRetroWarning && (
           <div className="flex items-start gap-2 p-3 mb-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
             <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
@@ -739,7 +742,7 @@ export default function ProfilePage() {
                 <div className="flex items-center justify-between bg-secondary/60 rounded-xl px-3 py-2 text-sm">
                   <div>
                     <span className="font-medium">{`bis ${new Date(pensumChanges[0].effectiveFrom).toLocaleDateString('de-CH')}`}</span>
-                    <span className="text-muted-foreground ml-2">{basePensum}% · {baseWeeklyHours}h/Woche</span>
+                    <span className="text-muted-foreground ml-2">{basePensum}% · {baseWeeklyHours}h (100%){basePensum !== 100 ? ` → ${((baseWeeklyHours ?? 0) * (basePensum ?? 100) / 100).toFixed(1)}h/Woche` : ""}</span>
                   </div>
                 </div>
               )}
@@ -747,7 +750,7 @@ export default function ProfilePage() {
                 <div key={pc.id} className="flex items-center justify-between bg-secondary rounded-xl px-3 py-2 text-sm">
                   <div>
                     <span className="font-medium">{new Date(pc.effectiveFrom).toLocaleDateString('de-CH')}</span>
-                    <span className="text-muted-foreground ml-2">{pc.pensum}% · {pc.weeklyHours}h/Woche</span>
+                    <span className="text-muted-foreground ml-2">{pc.pensum}% · {pc.weeklyHours}h (100%){pc.pensum !== 100 ? ` → ${(pc.weeklyHours * pc.pensum / 100).toFixed(1)}h/Woche` : ""}</span>
                   </div>
                   <button onClick={() => deletePensumChange(pc.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>

@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { PensumPreview } from "@/components/pensum-preview";
 
 interface Member {
   membershipId: string;
@@ -428,21 +429,22 @@ export default function TeamPage() {
                           </div>
                           <div>
                             <label htmlFor={`new-pensum-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("profile.newPensum")}</label>
-                            <input id={`new-pensum-${m.userId}`} type="number" value={newPensum} onChange={(e) => setNewPensum(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                            <input id={`new-pensum-${m.userId}`} type="number" step="5" min="0" max="200" value={newPensum} onChange={(e) => setNewPensum(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                           </div>
                           <div>
                             <label htmlFor={`new-weekly-hours-${m.userId}`} className="text-xs text-muted-foreground mb-1 block">{t("profile.newWeeklyHours")}</label>
-                            <input id={`new-weekly-hours-${m.userId}`} type="number" value={newWeeklyHours} onChange={(e) => setNewWeeklyHours(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
+                            <input id={`new-weekly-hours-${m.userId}`} type="number" step="0.5" min="0" max="100" value={newWeeklyHours} onChange={(e) => setNewWeeklyHours(e.target.value)} className="w-full px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                           </div>
                         </div>
-                        <button onClick={() => addPensumChange(m.userId)} disabled={savingPensum} className="w-full py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition disabled:opacity-50 mb-2">
+                        <PensumPreview weeklyHours={newWeeklyHours} pensum={newPensum} />
+                        <button onClick={() => addPensumChange(m.userId)} disabled={savingPensum} className="w-full py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition disabled:opacity-50 mb-2 mt-2">
                           {savingPensum ? t("common.loading") : t("profile.addPensumChange")}
                         </button>
                         {(pensumByUser[m.userId]?.length ?? 0) > 0 ? (
                           <div className="space-y-1">
                             {pensumByUser[m.userId].map((pc) => (
                               <div key={pc.id} className="flex items-center justify-between bg-card rounded-lg px-2 py-1.5 text-xs">
-                                <span>{fmtDate(pc.effectiveFrom)}: {pc.pensum}% / {pc.weeklyHours}h</span>
+                                <span>{fmtDate(pc.effectiveFrom)}: {pc.pensum}% · {pc.weeklyHours}h (100%){pc.pensum !== 100 ? ` → ${(pc.weeklyHours * pc.pensum / 100).toFixed(1)}h/Woche` : ""}</span>
                                 <button onClick={() => deletePensumChange(m.userId, pc.id)} className="text-muted-foreground hover:text-destructive transition"><Trash2 className="w-3 h-3" /></button>
                               </div>
                             ))}

@@ -168,6 +168,16 @@ export function pensumAt(
   return result;
 }
 
+// Tagessoll-Basis eines normalen Arbeitstags (ohne Feiertags-/Start-/Austritts-
+// Korrektur). wochenstunden ist die VOLLZEIT-Basis (100%), pensum reduziert davon —
+// diese Aufteilung ist die Quelle eines wiederkehrenden Nutzer-Missverständnisses
+// ("Pensum reduziert UND Stunden schon reduziert eingetragen" = doppelt gekürzt),
+// deshalb ist sie hier benannt statt inline gerechnet: die Eingabemasken zeigen
+// über components/pensum-preview.tsx dieselbe Funktion live an.
+export function tagessollBasis(wochenstunden: number, pensum: number): number {
+  return (wochenstunden * pensum) / 100 / 5;
+}
+
 export function sollStundenTag(
   datum: Date | string,
   profil: Profil,
@@ -184,7 +194,7 @@ export function sollStundenTag(
   const day = d.getUTCDay();
   if (day === 0 || day === 6) return 0;
   const { pensum, wochenstunden } = pensumAt(d, profil, changes);
-  const basis = (wochenstunden * pensum) / 100 / 5;
+  const basis = tagessollBasis(wochenstunden, pensum);
   // Feiertag (MIGRATION.md Punkt 6c): ganzer Tag → 0, Halbtag → halbes Soll.
   const feiertag = holidays.find((h) => toUTCDate(h.date).getTime() === d.getTime());
   if (feiertag) return feiertag.halfDay ? basis / 2 : 0;

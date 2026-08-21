@@ -5,6 +5,7 @@ import {
   pensumAt,
   sollStundenTag,
   stundenAusEintrag,
+  tagessollBasis,
   wochenUebersicht,
   teamKennzahlen,
   montagDerWoche,
@@ -21,6 +22,33 @@ const testProfil: Profil = {
   exitDate: null,
   maxWeeklyHours: 45,
 };
+
+// tagessollBasis ist die Formel hinter sollStundenTag (lib/calc.ts) als
+// eigene Funktion, damit die Eingabemasken (components/pensum-preview.tsx)
+// dieselbe Rechnung live anzeigen können wie das tatsächliche Tagessoll.
+// wochenstunden ist dabei IMMER die Vollzeit-Basis (100%), nicht die schon
+// reduzierten Stunden — Fehlbedienung des Nutzer-Feedbacks vom 21.08.2026
+// ("Pensum reduzieren, aber Wochenstunden noch auf 100% lassen").
+describe("tagessollBasis", () => {
+  it("Referenzwert des Projekts: 40h @ 60% = 4.8h/Tag", () => {
+    expect(tagessollBasis(40, 60)).toBeCloseTo(4.8, 5);
+  });
+
+  it("Screenshot-Fall aus dem Feedback: 42.5h @ 60% = 5.1h/Tag", () => {
+    expect(tagessollBasis(42.5, 60)).toBeCloseTo(5.1, 5);
+  });
+
+  it("Vollzeit: 42h @ 100% = 8.4h/Tag", () => {
+    expect(tagessollBasis(42, 100)).toBeCloseTo(8.4, 5);
+  });
+
+  it("Regressionsanker für den Bedienfehler: bereits reduzierte 25.5h @ 60% ergeben (falsch) 3.06h/Tag", () => {
+    // Wer die schon reduzierten Wochenstunden einträgt statt der
+    // Vollzeit-Basis, kürzt das Pensum ein zweites Mal — genau der Fehler,
+    // den das Wording/die Live-Vorschau verhindern sollen.
+    expect(tagessollBasis(25.5, 60)).toBeCloseTo(3.06, 5);
+  });
+});
 
 describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, Stichtag 12.08.2026)", () => {
   it("Sollstunden pro Tag = 4.8h", () => {

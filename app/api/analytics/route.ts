@@ -6,6 +6,7 @@ import { requireOrg, AccessError } from "@/lib/access";
 import {
   kennzahlen,
   feriensaldo,
+  tagessollBasis,
   type Profil,
   type PensumChangeInput,
   type EintragMitDatum,
@@ -116,7 +117,7 @@ export async function GET(req: Request) {
     todayEnd.setHours(23, 59, 59, 999);
     // Bewusst der AKTUELLE Tarif, nicht die Basis aus profil — diese Karte zeigt
     // Feiertagsstunden zum heute gültigen Pensum.
-    const currentDailyRate = ((membership?.weeklyHours ?? 42) * (membership?.pensum ?? 100)) / 100 / 5;
+    const currentDailyRate = tagessollBasis(membership?.weeklyHours ?? 42, membership?.pensum ?? 100);
     const holidayHours = entriesRaw
       .filter((e) => e.type === "feiertag" && new Date(e.date) <= todayEnd)
       .reduce((s, e) => s + (e.hours ?? currentDailyRate), 0);
