@@ -111,7 +111,7 @@ const translations: Record<string, string> = {
   "calendar.deleteConfirm": "Wirklich löschen?",
   "calendar.selectMonth": "Monat wählen",
   "calendar.workSummary": "Arbeitsstunden",
-  "calendar.exportCustomer": "Exportieren",
+  "calendar.exportCustomer": "Kundenrapport",
   "calendar.exportError": "Export fehlgeschlagen.",
   "calendar.unbilledHours": "{hours}h nicht verrechnet",
   // Zeilentitel für die CustomerMonth-Migrationszeile innerhalb einer
@@ -235,7 +235,7 @@ const translations: Record<string, string> = {
   "profile.changePassword": "Passwort ändern",
   "profile.currentPassword": "Aktuelles Passwort",
   "profile.newPassword": "Neues Passwort",
-  "profile.export": "Excel-Export",
+  "profile.export": "Meine Stunden (Excel)",
   "profile.exportMonth": "Monat",
   "profile.exportYear": "Jahr",
   "profile.exportCustom": "Zeitraum",
