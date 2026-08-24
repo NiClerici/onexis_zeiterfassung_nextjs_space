@@ -33,6 +33,9 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-ONEXIS Zeiterfassung <no-reply@example.ch>}
+      # Allowlist für die Developer-Übersicht (/dev, lib/dev-access.ts).
+      # Leer/ungesetzt heisst fail-closed: niemand hat Zugriff.
+      DEVELOPER_EMAILS: ${DEVELOPER_EMAILS:-}
     depends_on:
       db:
         condition: service_healthy
