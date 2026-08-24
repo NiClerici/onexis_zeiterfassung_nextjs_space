@@ -10,8 +10,11 @@
 
 import { prisma } from "@/lib/db";
 
-const WINDOW_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 10;
+// Exportiert, damit lib/dev-metrics.ts dieselben Schwellwerte anzeigen kann
+// wie die echte Sperre hier durchsetzt ("aktuell gesperrt" darf nie von den
+// tatsächlich wirksamen Werten abweichen).
+export const WINDOW_MS = 15 * 60 * 1000;
+export const MAX_ATTEMPTS = 10;
 
 export type RateLimitAction = "login" | "forgot-password" | "reset-password" | "invitation-accept";
 

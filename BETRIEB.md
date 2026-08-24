@@ -232,6 +232,50 @@ Route.
 
 Vor Beginn mit Nico klären, ob der Punkt überhaupt gewollt ist.
 
+### - [x] 6. Developer-Übersicht (/dev)
+
+Bislang gab es keine plattformweite Sicht — `/admin/team`,
+`/admin/holidays`, `/admin/legal` sind alle über `requireOrg()` auf
+*eine* Organisation gescopet. Wer die App nutzt, welche Trials bald
+ablaufen oder ob eine Org eingeschlafen ist, war nur per SSH + `psql`
+sichtbar.
+
+Umfang: neue, read-only Route `/dev` (`app/(dev)/dev/page.tsx`) mit
+Business-Kennzahlen (Orgs je Plan, Trials, Signups je Woche),
+Kunden-Tabelle (Sitze, Aktivität, Ampel aktiv/schläfrig/inaktiv) mit
+Drilldown je Org (`/dev/orgs/[slug]`), Auth-/Integritätskennzahlen
+(fehlgeschlagene Logins, aktuell gesperrte Rate-Limit-Buckets, offene
+Einladungen) sowie einer schmalen Statusleiste (DB, Migrationen, SMTP).
+Datenschicht in `lib/dev-metrics.ts`, jede Funktion fängt ihre eigenen
+Fehler statt die Seite abstürzen zu lassen.
+
+**Bewusst nicht möglich:** eine echte Fehler-Kachel (kein
+Sentry/strukturiertes Logging vorhanden, nur `docker compose logs`
+ausserhalb des Containers) und ein Backup-Status (`deploy/backup.sh`
+loggt auf die VM, nicht in die App). Beides bräuchte eigene
+Infrastruktur — siehe „Später" im Plan, nicht Teil dieser Iteration.
+
+**Zugang:** `lib/dev-access.ts`, Allowlist per `DEVELOPER_EMAILS` (ENV,
+kommagetrennt). Fail-closed: leer/ungesetzt heisst niemand kommt rein.
+Bewusst kein Rollen-Flag in `Membership` — der Zugriff ist
+org-übergreifend, ein Org-Owner soll sich das nicht selbst über
+`/admin/team` zuschieben können. Nicht-gelistete Nutzer sehen 404, nicht
+403 (Existenz der Route nicht bestätigen). Die Allowlist wird bewusst
+NICHT in `middleware.ts` geprüft — die Edge-Runtime bekommt
+`process.env` beim Build eingefroren, nicht zur Laufzeit von
+docker-compose; die Middleware regelt hier nur den Login-Redirect,
+`requireDeveloper()` prüft serverseitig (Node-Runtime) gegen die echte
+Laufzeit-ENV.
+
+Berührt direkt Punkt 5 oben: `usersMustSetPassword` auf `/dev` macht die
+dort beschriebene Lücke (kein Passwort-Reset ohne SMTP) sichtbar, statt
+sie nur zu vermuten.
+
+Verify: ohne Login → Redirect `/login`; eingeloggt ohne Allowlist-Treffer
+→ 404; eingeloggt mit Allowlist-Treffer → Seite lädt mit echten Orgs.
+Getestet gegen die lokale Dev-DB (beide vorhandenen Orgs erscheinen
+korrekt). Tests: `lib/dev-access.test.ts`, `lib/dev-metrics.test.ts`.
+
 ---
 
 ## Notizen des Loops

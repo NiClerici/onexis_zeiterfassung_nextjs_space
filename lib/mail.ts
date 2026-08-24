@@ -19,7 +19,10 @@ export interface MailMessage {
 
 let cachedTransport: ReturnType<typeof nodemailer.createTransport> | null = null;
 
-function isSmtpConfigured(): boolean {
+// Exportiert, damit lib/dev-metrics.ts (Developer-Übersicht /dev) denselben
+// Konfigurationsstatus anzeigen kann, den lib/mail.ts tatsächlich verwendet
+// — keine zweite, potenziell abweichende ENV-Prüfung an anderer Stelle.
+export function isSmtpConfigured(): boolean {
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD);
 }
 

@@ -8,7 +8,13 @@ import { isTrialExpired } from "@/lib/billing-rules";
 // Trial-Ablauf-Prüfung unten übernehmen kann (Next.js erlaubt nur eine
 // middleware.ts). Verhalten unverändert: ohne gültiges Token auf /login
 // umleiten, mit callbackUrl zurück zur ursprünglich angefragten Seite.
-const PROTECTED_PAGE_PREFIXES = ["/calendar", "/analytics", "/profile", "/set-password"];
+// /dev (Developer-Übersicht, lib/dev-access.ts) steht hier nur für den
+// Login-Redirect — die eigentliche E-Mail-Allowlist (DEVELOPER_EMAILS) wird
+// bewusst NICHT hier geprüft: die Edge-Runtime bekommt process.env beim
+// BUILD eingefroren, nicht zur Laufzeit von docker-compose. requireDeveloper()
+// in app/(dev)/dev/page.tsx prüft sie stattdessen serverseitig (Node-Runtime,
+// echte Laufzeit-ENV) und liefert 404 für jede nicht gelistete E-Mail.
+const PROTECTED_PAGE_PREFIXES = ["/calendar", "/analytics", "/profile", "/set-password", "/dev"];
 
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // Diese API-Pfade bleiben immer nutzbar, auch für eine read-only
@@ -51,5 +57,5 @@ export default async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/calendar/:path*", "/analytics/:path*", "/profile/:path*", "/set-password/:path*", "/api/:path*"],
+  matcher: ["/calendar/:path*", "/analytics/:path*", "/profile/:path*", "/set-password/:path*", "/dev/:path*", "/api/:path*"],
 };
