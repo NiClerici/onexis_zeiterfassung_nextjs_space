@@ -82,14 +82,15 @@ function buildExcelWorkbook(data: Awaited<ReturnType<typeof gatherOrgExport>>): 
   const wsProjects = workbook.addWorksheet("Projekte");
   wsProjects.columns = [
     { header: "Name", key: "name", width: 28 },
+    { header: "SAP-/Auftrags-Nr.", key: "externalRef", width: 24 },
     { header: "Stundensatz", key: "rate", width: 14 },
     { header: "Budget (h)", key: "budget", width: 14 },
     { header: "Aktiv", key: "active", width: 10 },
   ];
-  styleHeaderRow(wsProjects.getRow(1), 4);
+  styleHeaderRow(wsProjects.getRow(1), 5);
   for (const p of data.projects) {
-    const row = wsProjects.addRow({ name: p.name, rate: p.hourlyRate ?? "", budget: p.budgetHours ?? "", active: p.active ? "Ja" : "Nein" });
-    styleDataRow(row, 4);
+    const row = wsProjects.addRow({ name: p.name, externalRef: p.externalRef ?? "", rate: p.hourlyRate ?? "", budget: p.budgetHours ?? "", active: p.active ? "Ja" : "Nein" });
+    styleDataRow(row, 5);
   }
 
   const wsCustomerMonths = workbook.addWorksheet("Kundenstunden");

@@ -410,8 +410,11 @@ export default function CalendarPage() {
 
   const exportCustomerRapport = async (customerId: string, customerName: string) => {
     const url = `/api/export/stundenrapport?year=${currentDate.year}&month=${currentDate.month}&customerId=${customerId}`;
-    const fileName = `Stundenrapport_${customerName}_${currentDate.month}-${currentDate.year}.xlsx`;
-    await downloadBlob(url, fileName, (msg) => toast.error(msg), t("calendar.exportError"));
+    // Fallback-Name, falls der Content-Disposition-Header aus irgendeinem
+    // Grund fehlt — der Server liefert den eigentlichen Dateinamen im
+    // Vorlagenstil (siehe app/api/export/stundenrapport/route.ts).
+    const fallbackFileName = `Stundenrapport_${customerName}_${currentDate.month}-${currentDate.year}.xlsx`;
+    await downloadBlob(url, fallbackFileName, (msg) => toast.error(msg), t("calendar.exportError"), true);
   };
 
   const isToday = (day: number) => {

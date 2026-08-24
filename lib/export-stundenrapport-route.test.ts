@@ -1,7 +1,8 @@
 // Test für GET /api/export/stundenrapport — baut TimeEntry-Zeilen direkt in
 // der Test-DB auf (Muster wie lib/export-routes.test.ts), liest den
-// zurückgegebenen Buffer wieder mit ExcelJS ein und prüft Kopf, Projekt-
-// Summenblock und Detailzeilen.
+// zurückgegebenen Buffer wieder mit ExcelJS ein und prüft Kopf,
+// Projektkatalog (inkl. SAP-Nummer/Betragsformel) und Detailzeilen —
+// zellgenau nach ONEXIS_Stundenabbrechnung_April-26_NClerici.xlsx.
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import ExcelJS from "exceljs";
@@ -41,12 +42,19 @@ beforeAll(async () => {
   userId = user.id;
   await prisma.membership.create({ data: { orgId: ORG, userId, role: "member", entryDate: new Date("2026-01-01"), kuerzel: "CLN" } });
 
-  const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Swissgrid" } });
+  // Kunde mit Fallback-Stundensatz (200) — greift für Projekte ohne eigenen Satz.
+  const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Swissgrid", hourlyRate: 200 } });
   customerId = customer.id;
-  const projectA = await prisma.project.create({ data: { orgId: ORG, customerId, name: "Salesforce <> IAM" } });
+  // Eigener Stundensatz + SAP-Nummer.
+  const projectA = await prisma.project.create({
+    data: { orgId: ORG, customerId, name: "Salesforce <> IAM", hourlyRate: 230, externalRef: "00000000000000120657TTO" },
+  });
   projectAId = projectA.id;
+  // Kein eigener Satz, keine SAP-Nummer — fällt auf den Kundensatz zurück.
   const projectB = await prisma.project.create({ data: { orgId: ORG, customerId, name: "Phy. Schutz UW" } });
   projectBId = projectB.id;
+  // Aktives Projekt OHNE Buchung in diesem Monat — muss trotzdem mit 0h im Katalog stehen.
+  await prisma.project.create({ data: { orgId: ORG, customerId, name: "Zukunftsprojekt", active: true } });
 
   await prisma.timeEntry.create({
     data: { orgId: ORG, userId, date: new Date("2026-07-01"), type: "arbeit", hours: 6, notiz: "SPI und SF anbindung", customerId, projectId: projectAId },
@@ -55,7 +63,7 @@ beforeAll(async () => {
     data: { orgId: ORG, userId, date: new Date("2026-07-08"), type: "arbeit", hours: 3, notiz: "Export Fehler", customerId, projectId: projectBId },
   });
   // Entry ohne Projekt (nur Kunde) — soll trotzdem exportiert werden, mit
-  // Platzhalter-Projektnamen.
+  // Platzhalter-Projektnamen, und im Katalog eine eigene Zeile bekommen.
   await prisma.timeEntry.create({
     data: { orgId: ORG, userId, date: new Date("2026-07-09"), type: "arbeit", hours: 2, notiz: null, customerId, projectId: null },
   });
@@ -75,15 +83,17 @@ afterAll(async () => {
 });
 
 describe("GET /api/export/stundenrapport", () => {
-  it("liefert Kopf, Projekt-Summenblock und Detailzeilen für den gewählten Monat", async () => {
+  it("liefert Kopf, Projektkatalog und Detailzeilen im ONEXIS-Vorlagenlayout", async () => {
     setSession(userId, ORG, "member");
     const res = await exportGet(req(`/api/export/stundenrapport?year=2026&month=7&customerId=${customerId}`));
     expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Disposition")).toContain("Stundenrapport_Swissgrid_07-2026.xlsx");
+    // Vorlagenstil + Kundenname, damit zwei Kunden im selben Monat nicht
+    // denselben Dateinamen ergeben.
+    expect(res.headers.get("Content-Disposition")).toContain("ONEXIS_Stundenabbrechnung_Juli-26_Swissgrid_NClerici.xlsx");
 
     const wb = await readWorkbook(res);
     const ws = wb.worksheets[0];
-    expect(ws.name).toBe("Swissgrid");
+    expect(ws.name).toBe("Swissgrid Juli");
 
     expect(ws.getCell("A1").value).toBe("Stundenrapport:");
     expect(ws.getCell("C1").value).toBe("Nico Clerici, ONEXIS GmbH");
@@ -92,41 +102,92 @@ describe("GET /api/export/stundenrapport", () => {
     expect(ws.getCell("A3").value).toBe("Kunde:");
     expect(ws.getCell("C3").value).toBe("Swissgrid");
 
-    // Summenblock: 3 Projektzeilen (inkl. "(ohne Projekt)") + Total-Zeile,
-    // ab Zeile 5.
+    // Katalogblock ab Zeile 5: Kopfzeile mit Betragsspalte...
     expect(ws.getCell("A5").value).toBe("STD");
     expect(ws.getCell("B5").value).toBe("Projekt");
+    expect(ws.getCell("D5").value).toBe("Betrag ohne MwSt");
 
-    const projectRowValues: Record<string, number> = {};
-    for (let r = 6; r <= 8; r++) {
-      const name = ws.getCell(`B${r}`).value as string;
-      projectRowValues[name] = ws.getCell(`A${r}`).value as number;
+    // ...dann alphabetisch je eine Zeile pro aktivem Projekt des Kunden
+    // (auch mit 0h), plus "(ohne Projekt)" am Ende — Zeilen 6-9.
+    expect(ws.getCell("B6").value).toBe("Phy. Schutz UW"); // kein externalRef → nur Name
+    expect(ws.getCell("A6").value).toBe(3);
+    expect((ws.getCell("D6").value as any).formula).toBe("A6*200"); // Fallback auf Kundensatz
+
+    expect(ws.getCell("B7").value).toBe("00000000000000120657TTO | Salesforce <> IAM");
+    expect(ws.getCell("A7").value).toBe(6);
+    expect((ws.getCell("D7").value as any).formula).toBe("A7*230"); // eigener Projektsatz
+
+    expect(ws.getCell("B8").value).toBe("Zukunftsprojekt");
+    expect(ws.getCell("A8").value).toBe(0); // aktiv, aber keine Buchung diesen Monat
+
+    expect(ws.getCell("B9").value).toBe("(ohne Projekt)");
+    expect(ws.getCell("A9").value).toBe(2);
+
+    // Kopf-Total über den ganzen Katalogblock.
+    expect(ws.getCell("A10").value).toBe("Total (o. MwSt)");
+    expect((ws.getCell("C10").value as any).formula).toBe("SUM(D6:D9)");
+
+    // Katalogstunden-Summe muss der Detailsumme entsprechen (3+6+0+2 = 11).
+    const catalogHoursSum = [6, 7, 8, 9].reduce((s, r) => s + (ws.getCell(`A${r}`).value as number), 0);
+    expect(catalogHoursSum).toBe(11);
+
+    // Detail-Header ab Zeile 13 (zwei Leerzeilen nach dem Kopf-Total).
+    expect(ws.getCell("A13").value).toBe("Datum");
+    expect(ws.getCell("B13").value).toBe("Kürzel");
+    expect(ws.getCell("C13").value).toBe("Projekt");
+    expect(ws.getCell("D13").value).toBe("Tasks");
+    expect(ws.getCell("E13").value).toBe("Std");
+
+    // 3 Detailzeilen (August-Eintrag fehlt), sortiert nach Datum, echte
+    // Datumszellen (kein String) — Kalendertag muss serverzeitzonen-
+    // unabhängig stimmen (@db.Date liefert UTC-Mitternacht).
+    const d14 = ws.getCell("A14").value as Date;
+    expect(d14 instanceof Date).toBe(true);
+    expect(d14.getUTCFullYear()).toBe(2026);
+    expect(d14.getUTCMonth()).toBe(6); // Juli, 0-indiziert
+    expect(d14.getUTCDate()).toBe(1);
+    expect(ws.getCell("A14").numFmt).toBe("dd.mm.yyyy;@");
+    expect(ws.getCell("B14").value).toBe("CLN");
+    expect(ws.getCell("E14").value).toBe(6);
+
+    const d16 = ws.getCell("A16").value as Date;
+    expect(d16.getUTCDate()).toBe(9);
+    expect(ws.getCell("C16").value).toBe("(ohne Projekt)");
+
+    // TOTAL-Zeile: Formel schliesst die Leerzeile danach mit ein (wie im
+    // Original SUM(E13:E30) die Leerzeile 30 einschliesst).
+    expect(ws.getCell("A18").value).toBe("TOTAL");
+    const totalCell = ws.getCell("E18").value as any;
+    expect(totalCell?.formula).toBe("SUM(E14:E17)");
+  });
+
+  it("lässt die Betragszelle leer, wenn weder Projekt noch Kunde einen Stundensatz haben", async () => {
+    const org2 = "test_export_sr_no_rate_org";
+    await prisma.organization.create({ data: { id: org2, name: "Rateless GmbH", slug: "export-sr-no-rate-org" } });
+    const user2 = await prisma.user.create({ data: { email: "export-sr-no-rate@example.test", password: "irrelevant", firstName: "A", lastName: "B" } });
+    await prisma.membership.create({ data: { orgId: org2, userId: user2.id, role: "member", entryDate: new Date("2026-01-01"), kuerzel: "AB" } });
+    const customer2 = await prisma.customer.create({ data: { orgId: org2, name: "Kein Satz AG" } }); // kein hourlyRate
+    const project2 = await prisma.project.create({ data: { orgId: org2, customerId: customer2.id, name: "Projekt ohne Satz" } });
+    await prisma.timeEntry.create({
+      data: { orgId: org2, userId: user2.id, date: new Date("2026-07-02"), type: "arbeit", hours: 4, customerId: customer2.id, projectId: project2.id },
+    });
+
+    try {
+      setSession(user2.id, org2, "member");
+      const res = await exportGet(req(`/api/export/stundenrapport?year=2026&month=7&customerId=${customer2.id}`));
+      expect(res.status).toBe(200);
+      const wb = await readWorkbook(res);
+      const ws = wb.worksheets[0];
+      expect(ws.getCell("A6").value).toBe(4);
+      expect(ws.getCell("D6").value).toBeNull();
+    } finally {
+      await prisma.timeEntry.deleteMany({ where: { orgId: org2 } });
+      await prisma.project.deleteMany({ where: { orgId: org2 } });
+      await prisma.customer.deleteMany({ where: { orgId: org2 } });
+      await prisma.membership.deleteMany({ where: { orgId: org2 } });
+      await prisma.user.deleteMany({ where: { id: user2.id } });
+      await prisma.organization.deleteMany({ where: { id: org2 } });
     }
-    expect(projectRowValues["Salesforce <> IAM"]).toBe(6);
-    expect(projectRowValues["Phy. Schutz UW"]).toBe(3);
-    expect(projectRowValues["(ohne Projekt)"]).toBe(2);
-
-    expect(ws.getCell("B9").value).toBe("Total (Stunden)");
-    expect(ws.getCell("A9").value).toBe(11);
-
-    // Detail-Header ab Zeile 11 (Zeile 10 ist die Leerzeile).
-    expect(ws.getCell("A11").value).toBe("Datum");
-    expect(ws.getCell("B11").value).toBe("Kürzel");
-    expect(ws.getCell("C11").value).toBe("Projekt");
-    expect(ws.getCell("D11").value).toBe("Tasks");
-    expect(ws.getCell("E11").value).toBe("Std");
-
-    // 3 Detailzeilen (August-Eintrag fehlt), sortiert nach Datum.
-    expect(ws.getCell("A12").value).toBe("01.07.2026");
-    expect(ws.getCell("B12").value).toBe("CLN");
-    expect(ws.getCell("E12").value).toBe(6);
-    expect(ws.getCell("A14").value).toBe("09.07.2026");
-    expect(ws.getCell("C14").value).toBe("(ohne Projekt)");
-
-    // TOTAL-Zeile: Formel über die drei Detailzeilen.
-    expect(ws.getCell("A15").value).toBe("TOTAL");
-    const totalCell = ws.getCell("E15").value as any;
-    expect(totalCell?.formula).toBe("SUM(E12:E14)");
   });
 
   it("liefert 404 für einen Kunden aus einer anderen Organisation", async () => {

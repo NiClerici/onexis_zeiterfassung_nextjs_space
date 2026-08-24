@@ -289,6 +289,7 @@ const translations: Record<string, string> = {
   "profile.selectCustomer": "Kunde wählen",
   "profile.projectNamePlaceholder": "Projektname",
   "profile.budgetHours": "Budget (h)",
+  "profile.projectExternalRef": "SAP-/Auftrags-Nr.",
   "profile.addProject": "Projekt hinzufügen",
   "profile.active": "Aktiv",
   "profile.noProjects": "Keine Projekte erfasst",

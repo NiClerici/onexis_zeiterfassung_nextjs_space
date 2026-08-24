@@ -48,6 +48,7 @@ interface ProjectData {
   name: string;
   hourlyRate: number | null;
   budgetHours: number | null;
+  externalRef: string | null;
   active: boolean;
 }
 const clampNumInput = (value: string, min: number, max: number): string => {
@@ -120,11 +121,13 @@ export default function ProfilePage() {
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectRate, setNewProjectRate] = useState("");
   const [newProjectBudget, setNewProjectBudget] = useState("");
+  const [newProjectExternalRef, setNewProjectExternalRef] = useState("");
   const [savingProject, setSavingProject] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editProjectName, setEditProjectName] = useState("");
   const [editProjectRate, setEditProjectRate] = useState("");
   const [editProjectBudget, setEditProjectBudget] = useState("");
+  const [editProjectExternalRef, setEditProjectExternalRef] = useState("");
 
   // Kundenstunden monatlich (Migration/Übersicht, unabhängig von der
   // Tageserfassung). cmDirectHours: Stunden direkt beim Kunden (CustomerMonth
@@ -496,12 +499,13 @@ export default function ProfilePage() {
           name: newProjectName.trim(),
           hourlyRate: newProjectRate || undefined,
           budgetHours: newProjectBudget || undefined,
+          externalRef: newProjectExternalRef || undefined,
         }),
       });
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
         toast.success(t("profile.projectSaved"));
-        setNewProjectName(""); setNewProjectRate(""); setNewProjectBudget("");
+        setNewProjectName(""); setNewProjectRate(""); setNewProjectBudget(""); setNewProjectExternalRef("");
         await fetchProjects();
       } else { toast.error(data?.error ?? t("profile.projectError")); }
     } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
@@ -512,6 +516,7 @@ export default function ProfilePage() {
     setEditProjectName(project.name);
     setEditProjectRate(project.hourlyRate != null ? String(project.hourlyRate) : "");
     setEditProjectBudget(project.budgetHours != null ? String(project.budgetHours) : "");
+    setEditProjectExternalRef(project.externalRef ?? "");
   };
 
   const saveEditProject = async () => {
@@ -526,6 +531,7 @@ export default function ProfilePage() {
           name: editProjectName.trim(),
           hourlyRate: editProjectRate || null,
           budgetHours: editProjectBudget || null,
+          externalRef: editProjectExternalRef || null,
         }),
       });
       const data = await res?.json?.().catch(() => ({}));
@@ -968,6 +974,13 @@ export default function ProfilePage() {
             placeholder={t("profile.budgetHours")}
             className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
           />
+          <input
+            type="text"
+            value={newProjectExternalRef}
+            onChange={(e) => setNewProjectExternalRef(e.target.value)}
+            placeholder={t("profile.projectExternalRef")}
+            className="px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition col-span-2"
+          />
         </div>
         <button
           onClick={addProject}
@@ -1012,6 +1025,13 @@ export default function ProfilePage() {
                         className="px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                       />
                     </div>
+                    <input
+                      type="text"
+                      value={editProjectExternalRef}
+                      onChange={(e) => setEditProjectExternalRef(e.target.value)}
+                      placeholder={t("profile.projectExternalRef")}
+                      className="w-full px-2 py-1 rounded-lg bg-card text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                    />
                     <div className="flex items-center gap-2 justify-end">
                       <button onClick={saveEditProject} disabled={savingProject} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition"><CheckCircle className="w-3.5 h-3.5" /></button>
                       <button onClick={() => setEditingProjectId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"><X className="w-3.5 h-3.5" /></button>
@@ -1027,6 +1047,7 @@ export default function ProfilePage() {
                       {customerName}
                       {p.hourlyRate != null && ` · ${p.hourlyRate.toFixed(0)} CHF/h`}
                       {p.budgetHours != null && ` · Budget ${p.budgetHours.toFixed(0)}h`}
+                      {p.externalRef && ` · ${p.externalRef}`}
                     </div>
                   </div>
                   <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none shrink-0">

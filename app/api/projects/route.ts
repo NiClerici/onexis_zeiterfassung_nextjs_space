@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { customerId, name, hourlyRate, budgetHours } = body ?? {};
+    const { customerId, name, hourlyRate, budgetHours, externalRef } = body ?? {};
 
     const trimmedName = name?.trim?.();
     if (!trimmedName) return NextResponse.json({ error: "Name fehlt" }, { status: 400 });
@@ -78,6 +78,7 @@ export async function POST(req: Request) {
 
     const parsedRate = hourlyRate !== undefined && hourlyRate !== null && hourlyRate !== "" ? Number(hourlyRate) : null;
     const parsedBudget = budgetHours !== undefined && budgetHours !== null && budgetHours !== "" ? Number(budgetHours) : null;
+    const trimmedExternalRef = externalRef?.trim?.() || null;
     if (parsedRate !== null && (isNaN(parsedRate) || parsedRate < 0)) {
       return NextResponse.json({ error: "Ungültiger Stundensatz" }, { status: 400 });
     }
@@ -86,7 +87,7 @@ export async function POST(req: Request) {
     }
 
     const project = await prisma.project.create({
-      data: { orgId, customerId, name: trimmedName, hourlyRate: parsedRate, budgetHours: parsedBudget, createdBy: userId },
+      data: { orgId, customerId, name: trimmedName, hourlyRate: parsedRate, budgetHours: parsedBudget, externalRef: trimmedExternalRef, createdBy: userId },
     });
 
     return NextResponse.json({ project });
@@ -102,7 +103,7 @@ export async function PUT(req: Request) {
     const { orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
-    const { id, name, hourlyRate, budgetHours, active } = body ?? {};
+    const { id, name, hourlyRate, budgetHours, externalRef, active } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
@@ -129,6 +130,9 @@ export async function PUT(req: Request) {
         return NextResponse.json({ error: "Ungültiges Budget" }, { status: 400 });
       }
       updateData.budgetHours = parsedBudget;
+    }
+    if (externalRef !== undefined) {
+      updateData.externalRef = externalRef === null || externalRef === "" ? null : String(externalRef).trim();
     }
     if (active !== undefined) updateData.active = Boolean(active);
 

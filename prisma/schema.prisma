@@ -352,6 +352,10 @@ model Project {
   name        String
   hourlyRate  Float?
   budgetHours Float?
+  // SAP-/Auftragsnummer des Kunden. Erscheint im Projektkatalog des
+  // Stundenrapport-Exports als "<externalRef> | <name>" (Vorlage:
+  // "00000000000000068440TTO | Phys. Schutz UW (0015524)"). NULL = nur der Name.
+  externalRef String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   createdBy   String?  // userId der erstellenden Person — bewusst keine Relation

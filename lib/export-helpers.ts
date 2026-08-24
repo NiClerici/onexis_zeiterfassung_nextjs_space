@@ -142,3 +142,29 @@ export function styleDataRow(row: ExcelJS.Row, colCount: number) {
     cell.alignment = { vertical: "middle" };
   }
 }
+
+// Stil-Konstanten für den Stundenrapport-Export (app/api/export/stundenrapport),
+// der zellgenau das Layout der alten ONEXIS-Vorlage nachbildet — bewusst
+// eigene Konstanten statt HEADER_FILL/BORDER_THIN oben, die zu den drei
+// anderen (organisationsweiten) Exporten gehören und andere Farben/Fonts
+// tragen. Rahmenfarbe in der Vorlage ist überall "automatisch"
+// (indexed: 64) — in ExcelJS entspricht das schlicht keinem color-Feld.
+export const FONT_INFO_HEADER: Partial<ExcelJS.Font> = { size: 14, name: "Aptos Narrow" };
+export const FONT_CATALOG_LABEL: Partial<ExcelJS.Font> = { bold: true, size: 11, name: "Calibri" };
+export const FONT_CATALOG_DATA: Partial<ExcelJS.Font> = { size: 11, name: "Calibri" };
+// Projektspalte im Katalogblock ist in der Vorlage dezent gräulich statt schwarz.
+export const FONT_CATALOG_DATA_MUTED: Partial<ExcelJS.Font> = { size: 11, name: "Calibri", color: { argb: "FF474747" } };
+export const FONT_DETAIL_HEADER: Partial<ExcelJS.Font> = { bold: true, size: 12, name: "Aptos Narrow" };
+export const FONT_DETAIL_DATA: Partial<ExcelJS.Font> = { size: 12, name: "Aptos Narrow" };
+export const BORDER_MEDIUM_AUTO: Partial<ExcelJS.Borders> = {
+  top: { style: "medium" },
+  bottom: { style: "medium" },
+  left: { style: "medium" },
+  right: { style: "medium" },
+};
+export const BORDER_THIN_AUTO: Partial<ExcelJS.Borders> = {
+  top: { style: "thin" },
+  bottom: { style: "thin" },
+  left: { style: "thin" },
+  right: { style: "thin" },
+};
