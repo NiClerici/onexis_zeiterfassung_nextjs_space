@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { gatherOrgExport } from "@/lib/org-export";
 import { styleHeaderRow, styleDataRow } from "@/lib/export-helpers";
+import { logError } from "@/lib/error-log";
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return "";
@@ -172,6 +173,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET organization export error:", error);
+    await logError("GET /api/admin/organization/export", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

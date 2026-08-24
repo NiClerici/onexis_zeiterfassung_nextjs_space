@@ -18,6 +18,7 @@ import {
   styleDataRow,
 } from "@/lib/export-helpers";
 import { monthsInRange, sumCustomerHours, sumCustomerHoursByUser } from "@/lib/customer-months";
+import { logError } from "@/lib/error-log";
 
 const MONTH_NAMES = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
@@ -384,6 +385,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Export error:", error);
+    await logError("GET /api/export", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

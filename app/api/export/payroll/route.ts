@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { kennzahlen, sollStundenTag, stundenAusEintrag, pensumAt, type HolidayInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseYearMonthFromUrl } from "@/lib/export-helpers";
+import { logError } from "@/lib/error-log";
 
 // Neutrales CSV für die Übernahme in ein Swissdec-zertifiziertes
 // Lohnprogramm (MIGRATION.md Punkt 7, dritter Bullet). Bewusst KEINE
@@ -134,6 +135,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Lohnexport error:", error);
+    await logError("GET /api/export/payroll", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

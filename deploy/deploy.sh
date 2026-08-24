@@ -43,7 +43,13 @@ if [ "${BEFORE}" = "${AFTER}" ]; then
 fi
 echo "Neuer Stand: ${AFTER}"
 
-echo "Baue und starte Container neu..."
+# Für die Statusleiste auf /dev sichtbar (app/(dev)/dev/page.tsx,
+# Dockerfile ARG GIT_SHA) — ohne das ist aus der laufenden App heraus nicht
+# beantwortbar, welcher Commit gerade live ist. Kurzform von AFTER statt
+# eines zweiten "git rev-parse"-Aufrufs.
+export GIT_SHA="${AFTER:0:7}"
+
+echo "Baue und starte Container neu (GIT_SHA=${GIT_SHA})..."
 docker compose up -d --build
 
 echo "Wende Migrationen an..."

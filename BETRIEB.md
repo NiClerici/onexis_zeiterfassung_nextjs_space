@@ -219,18 +219,13 @@ commit schreibt und ueberspringt beim zweiten Lauf Duplikate, gesperrter
 Monat blockiert member aber nicht admin, Zeilenfehler stoppen nicht die
 uebrigen gueltigen Zeilen). Volle Suite: 316/316 Tests, 21 Dateien.
 
-### - [ ] 5. OPTIONAL: Passwort zurücksetzen ohne Mail
+### - [x] 5. Passwort zurücksetzen ohne Mail
 
 Ohne SMTP kommt niemand mehr in sein Konto, der sein Passwort vergisst.
-`/api/admin/team` kann heute nur `GET` und `PUT`. Das Feld
-`mustSetPassword` im `User`-Modell ist der vorgesehene Baustein.
-
-Vorschlag: Admin-Aktion erzeugt einen Reset-Link für ein Mitglied und
-zeigt ihn im selben Kopier-Dialog wie Punkt 3 — authentifiziert, auf
-`owner`/`admin` beschränkt, damit ohne die Schwäche der öffentlichen
-Route.
-
-Vor Beginn mit Nico klären, ob der Punkt überhaupt gewollt ist.
+Gelöst über `/dev` statt `/api/admin/team`: eine Reset-Link-Aktion pro
+Mitglied auf `/dev/orgs/[slug]`, beschränkt auf die
+`DEVELOPER_EMAILS`-Allowlist (enger als `owner`/`admin`, siehe Punkt 6) —
+Details dort unter „Admin-Aktionen statt SSH".
 
 ### - [x] 6. Developer-Übersicht (/dev)
 
@@ -249,11 +244,41 @@ Einladungen) sowie einer schmalen Statusleiste (DB, Migrationen, SMTP).
 Datenschicht in `lib/dev-metrics.ts`, jede Funktion fängt ihre eigenen
 Fehler statt die Seite abstürzen zu lassen.
 
-**Bewusst nicht möglich:** eine echte Fehler-Kachel (kein
-Sentry/strukturiertes Logging vorhanden, nur `docker compose logs`
-ausserhalb des Containers) und ein Backup-Status (`deploy/backup.sh`
-loggt auf die VM, nicht in die App). Beides bräuchte eigene
-Infrastruktur — siehe „Später" im Plan, nicht Teil dieser Iteration.
+**Nachtrag (2. Iteration) — die beiden Lücken oben sind geschlossen:**
+- **Fehler sichtbar:** `ErrorLog`-Tabelle + `lib/error-log.ts`
+  (`logError()`), zusätzlich zu (nicht statt) `console.error` in allen
+  API-Routen, die einen 500er zurückgeben. `AccessError` (401/403/404)
+  wird bewusst nicht geloggt — erwartete Ablehnung, keine Störung. Keine
+  Request-Bodies in Stacktraces (DSG), 90 Tage Aufbewahrung.
+- **Backup-Status:** `deploy/backup.sh` schreibt am Ende jedes Laufs
+  (Erfolg **und** Fehlschlag, über einen `EXIT`-Trap) eine Zeile in
+  `OpsEvent`, per `docker compose exec -T db psql` — kein neues Werkzeug,
+  das Skript nutzt denselben Weg schon für `pg_dump`. Räumt im selben
+  Lauf auch `ErrorLog` (> 90 Tage) auf. `/dev` zeigt Alter + Status, rot ab
+  `BACKUP_STALE_HOURS` (26h) oder `status = failed`.
+- **Uptime-Alarm:** bewusst **kein** App-Code — eine tote App kann sich
+  nicht selbst melden, und SMTP ist nicht konfiguriert. Stattdessen extern:
+  UptimeRobot oder Better Stack (Gratis-Tarif) gegen
+  `https://zeit-onexis.duckdns.org/api/health` ansetzen, Intervall 5 min,
+  Benachrichtigung an die private Adresse. Einmalige manuelle Einrichtung,
+  kein Deploy nötig — **noch offen, siehe „Notizen des Loops" unten.**
+- **Version sichtbar:** `Dockerfile` (`ARG GIT_SHA` → `ENV APP_VERSION`),
+  `docker-compose.yml` (`app.build.args`), `deploy/deploy.sh` (`export
+  GIT_SHA="${AFTER:0:7}"` vor dem Build) — vorher las `getEnvStatus()`
+  `npm_package_version`, im Standalone-Container (`node server.js`, kein
+  `npm`) nie gesetzt und nirgends gerendert. Jetzt zeigt `/dev` den
+  laufenden Commit.
+- **Admin-Aktionen statt SSH** (`lib/dev-actions.ts`,
+  `app/api/dev/**/route.ts`, UI in `components/dev/org-plan-actions.tsx`
+  und `reset-link-button.tsx`): Plan wechseln und Trial verlängern
+  ersetzen `scripts/set-plan.ts`; Passwort-Reset-Link löst Punkt 5 oben.
+  Jede Aktion schreibt eine `DevAction`-Zeile (wer/was/wann) — ohne
+  Ausnahme, das ist keine optionale Protokollierung. `/api/dev` steht in
+  `middleware.ts` `READONLY_EXEMPT_PREFIXES`: sonst könnte ein
+  abgelaufener Trial der **eigenen** Org des Betreibers ausgerechnet die
+  Aktion blockieren, mit der ein **fremder** Trial verlängert werden soll.
+  Bewusst nicht dabei: Org löschen/deaktivieren (zerstörerisch, kein
+  `active`-Flag im Schema — eigene Entscheidung, kein Nebenprodukt).
 
 **Zugang:** `lib/dev-access.ts`, Allowlist per `DEVELOPER_EMAILS` (ENV,
 kommagetrennt). Fail-closed: leer/ungesetzt heisst niemand kommt rein.
@@ -274,7 +299,19 @@ sie nur zu vermuten.
 Verify: ohne Login → Redirect `/login`; eingeloggt ohne Allowlist-Treffer
 → 404; eingeloggt mit Allowlist-Treffer → Seite lädt mit echten Orgs.
 Getestet gegen die lokale Dev-DB (beide vorhandenen Orgs erscheinen
-korrekt). Tests: `lib/dev-access.test.ts`, `lib/dev-metrics.test.ts`.
+korrekt). Tests: `lib/dev-access.test.ts`, `lib/dev-metrics.test.ts`,
+`lib/dev-actions.test.ts`, `lib/error-log.test.ts`.
+
+2. Iteration zusätzlich verifiziert: `changeOrgPlan`/`extendOrgTrial`
+gegen echte Test-Org (Grenzfälle: ungültiger Plan, unbekannter Slug,
+Trial bereits abgelaufen, Trial-zu-Trial behält Datum); Reset-Link-Format
+und `DevAction`-Zeile je Aktion geprüft; `deploy/backup.sh`-SQL (Insert +
+Prune) direkt gegen die Dev-DB getestet, `docker compose`-Teil auf der VPS
+noch zu verifizieren (siehe Notizen).
+
+**Offen:** Uptime-Monitor ist noch nicht eingerichtet — bewusst kein
+App-Code (siehe oben), aber ein manueller Schritt bei Infomaniak/dem
+gewählten Dienst, den nur Nico machen kann.
 
 ---
 

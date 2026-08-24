@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, assertMonthEditable, AccessError } from "@/lib/access";
 import { stundenAusEintrag } from "@/lib/calc";
+import { logError } from "@/lib/error-log";
 
 // Gleiches Muster wie app/api/pensum-changes/route.ts:17-25 — owner/admin
 // dürfen den Monat einer anderen Person lesen/schreiben, member nur den
@@ -55,6 +56,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET customer-months error:", error);
+    await logError("GET /api/customer-months", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -131,6 +133,7 @@ export async function PUT(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("PUT customer-months error:", error);
+    await logError("PUT /api/customer-months", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

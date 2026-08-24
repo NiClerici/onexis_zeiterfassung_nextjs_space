@@ -4,7 +4,7 @@
 // Aggregate hier sind reine groupBy/count-Kombinationen, deren Verhalten sich
 // mit einem Mock kaum vertrauenswürdig nachbilden liesse.
 
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, afterEach } from "vitest";
 import { prisma } from "@/lib/db";
 import {
   activityStatus,
@@ -14,6 +14,8 @@ import {
   getOrgDetail,
   getAuthHealth,
   getEnvStatus,
+  getBackupStatus,
+  BACKUP_STALE_HOURS,
   ACTIVITY_ACTIVE_DAYS,
   ACTIVITY_SLEEPY_DAYS,
 } from "@/lib/dev-metrics";
@@ -156,5 +158,43 @@ describe("getEnvStatus", () => {
     const status = getEnvStatus();
     expect(typeof status.smtpConfigured).toBe("boolean");
     expect(typeof status.nodeEnv).toBe("string");
+  });
+});
+
+describe("getBackupStatus", () => {
+  afterEach(async () => {
+    await prisma.opsEvent.deleteMany({ where: { kind: { in: ["backup", "errorlog-prune"] } } });
+  });
+
+  it("meldet 'missing' ohne jeden protokollierten Lauf", async () => {
+    const status = await getBackupStatus();
+    expect(status.status).toBe("missing");
+    expect(status.lastRunAt).toBeNull();
+  });
+
+  it("übernimmt den Status der jüngsten Zeile, nicht den ältesten", async () => {
+    await prisma.opsEvent.create({ data: { kind: "backup", status: "failed", detail: "alt", createdAt: new Date(Date.now() - 60 * 60 * 1000) } });
+    await prisma.opsEvent.create({ data: { kind: "backup", status: "ok", detail: "neu (12M)" } });
+
+    const status = await getBackupStatus();
+    expect(status.status).toBe("ok");
+    expect(status.detail).toBe("neu (12M)");
+  });
+
+  it("berechnet ageHours korrekt und markiert nichts als überfällig innerhalb der Toleranz", async () => {
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2h alt
+    await prisma.opsEvent.create({ data: { kind: "backup", status: "ok", detail: "frisch", createdAt } });
+
+    const status = await getBackupStatus();
+    expect(status.ageHours).not.toBeNull();
+    expect(status.ageHours!).toBeGreaterThan(1.9);
+    expect(status.ageHours!).toBeLessThan(2.1);
+    expect(status.ageHours!).toBeLessThan(BACKUP_STALE_HOURS);
+  });
+
+  it("ignoriert Zeilen anderer kind-Werte (z.B. errorlog-prune)", async () => {
+    await prisma.opsEvent.create({ data: { kind: "errorlog-prune", status: "ok", detail: "0 Zeilen" } });
+    const status = await getBackupStatus();
+    expect(status.status).toBe("missing");
   });
 });

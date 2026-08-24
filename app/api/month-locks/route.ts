@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, canSeeUser, AccessError } from "@/lib/access";
+import { logError } from "@/lib/error-log";
 
 function parseYearMonth(body: any): { userId: string; year: number; month: number } | null {
   const userId = body?.userId;
@@ -49,6 +50,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET month-locks error:", error);
+    await logError("GET /api/month-locks", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -83,6 +85,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("POST month-locks error:", error);
+    await logError("POST /api/month-locks", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -114,6 +117,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("DELETE month-locks error:", error);
+    await logError("DELETE /api/month-locks", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

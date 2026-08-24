@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { hashToken } from "@/lib/token";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 import { getClientIp, isRateLimited, recordAttempt } from "@/lib/rate-limit";
+import { logError } from "@/lib/error-log";
 
 async function loadValidInvitation(token: string) {
   const tokenHash = hashToken(token);
@@ -37,6 +38,7 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("GET invitations/accept error:", error);
+    await logError("GET /api/invitations/accept", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -118,6 +120,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, accountExists: false });
   } catch (error: any) {
     console.error("POST invitations/accept error:", error);
+    await logError("POST /api/invitations/accept", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

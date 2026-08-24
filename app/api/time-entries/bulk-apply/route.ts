@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 import { diffTimeEntryFields } from "@/lib/audit";
 import { buildArbeitszeit } from "@/lib/arbeitszeit";
+import { logError } from "@/lib/error-log";
 
 // Wochentag-Index (0=So, 1=Mo, ... 6=Sa) → Template-Key
 function getTemplateHoursForDay(date: Date, tpl: {
@@ -206,6 +207,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("bulk-apply error:", error);
+    await logError("POST /api/time-entries/bulk-apply", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

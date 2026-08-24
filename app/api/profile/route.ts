@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 import { requireOrg, AccessError } from "@/lib/access";
+import { logError } from "@/lib/error-log";
 
 export async function GET() {
   try {
@@ -53,6 +54,7 @@ export async function GET() {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("GET /api/profile", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -103,6 +105,7 @@ export async function PUT(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("PUT /api/profile", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -141,6 +144,7 @@ export async function PATCH(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("PATCH /api/profile", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

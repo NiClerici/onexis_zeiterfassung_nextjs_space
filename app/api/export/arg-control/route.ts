@@ -15,6 +15,7 @@ import {
 } from "@/lib/calc";
 import { pruefeCompliance } from "@/lib/compliance";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange, styleHeaderRow, styleDataRow } from "@/lib/export-helpers";
+import { logError } from "@/lib/error-log";
 
 const WEEKDAY_NAMES = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
 
@@ -221,6 +222,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("ArG-Kontrollexport error:", error);
+    await logError("GET /api/export/arg-control", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

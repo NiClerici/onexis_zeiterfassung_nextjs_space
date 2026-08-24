@@ -62,6 +62,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
+# Git-SHA des Deploys, von deploy/deploy.sh als Build-Arg übergeben
+# (docker-compose.yml, app.build.args). Ohne das ist aus der laufenden App
+# heraus nicht beantwortbar, welcher Commit gerade live ist — /dev
+# (app/(dev)/dev/page.tsx) zeigt den Wert in der Statusleiste. "unknown"
+# als Default, damit ein lokaler "docker compose up --build" ohne
+# gesetztes GIT_SHA nicht bricht.
+ARG GIT_SHA=unknown
+ENV APP_VERSION=${GIT_SHA}
+
 # curl für den Docker-HEALTHCHECK gegen /api/health (siehe unten).
 RUN apk add --no-cache curl
 

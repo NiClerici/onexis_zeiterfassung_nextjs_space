@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { generateHolidaysForYear } from "@/lib/holidays";
+import { logError } from "@/lib/error-log";
 
 function parseDateYMD(s: unknown): Date | null {
   if (!s || typeof s !== "string") return null;
@@ -41,6 +42,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET holidays error:", error);
+    await logError("GET /api/holidays", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -97,6 +99,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Dieser Feiertag existiert bereits" }, { status: 409 });
     }
     console.error("POST holidays error:", error);
+    await logError("POST /api/holidays", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -118,6 +121,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("DELETE holidays error:", error);
+    await logError("DELETE /api/holidays", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

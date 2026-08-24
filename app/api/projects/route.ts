@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
+import { logError } from "@/lib/error-log";
 
 // Projekte gehören wie Kunden der Organisation (MIGRATION.md Punkt 5) — kein
 // Rollen-Gate für Anlegen/Pflegen, das darf jedes Mitglied. Beim Lesen
@@ -55,6 +56,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("GET /api/projects", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -94,6 +96,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("POST /api/projects", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -142,6 +145,7 @@ export async function PUT(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("PUT /api/projects", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -165,6 +169,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("DELETE /api/projects", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

@@ -6,6 +6,7 @@ import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/
 import { teamKennzahlen, feriensaldo, pensumAt, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
 import { monthsInRange, sumCustomerHoursByUser } from "@/lib/customer-months";
+import { logError } from "@/lib/error-log";
 
 export async function GET(req: Request) {
   try {
@@ -179,6 +180,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET team error:", error);
+    await logError("GET /api/team", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

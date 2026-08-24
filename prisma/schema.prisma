@@ -1,48 +1,48 @@
 generator client {
-    provider = "prisma-client-js"
-    binaryTargets = ["native"]
+  provider      = "prisma-client-js"
+  binaryTargets = ["native"]
 }
 
 datasource db {
-    provider = "postgresql"
-    url      = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  password      String
-  firstName     String
-  lastName      String
+  id              String   @id @default(cuid())
+  email           String   @unique
+  password        String
+  firstName       String
+  lastName        String
   // Erzwingt beim nächsten Login das Setzen eines neuen Passworts, das die
   // aktuelle Passwortrichtlinie erfüllt. Wird von der Migration für alle
   // Bestandsnutzer auf true gesetzt (deren password-Hash aus der alten
   // Code-Ära stammt); frische Registrierungen starten mit false.
-  mustSetPassword Boolean @default(false)
-  language      String    @default("de")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  mustSetPassword Boolean  @default(false)
+  language        String   @default("de")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  timeEntries      TimeEntry[]
-  pensumChanges    PensumChange[]
-  overtimePayouts  OvertimePayout[]
+  timeEntries         TimeEntry[]
+  pensumChanges       PensumChange[]
+  overtimePayouts     OvertimePayout[]
   passwordResetTokens PasswordResetToken[]
-  memberships      Membership[]
-  monthLocks       MonthLock[]
-  customerMonths   CustomerMonth[]
-  absenceRequests  AbsenceRequest[]
+  memberships         Membership[]
+  monthLocks          MonthLock[]
+  customerMonths      CustomerMonth[]
+  absenceRequests     AbsenceRequest[]
 }
 
 model PensumChange {
-  id          String   @id @default(cuid())
-  userId      String
-  orgId       String
-  pensum      Float
-  weeklyHours Float
-  effectiveFrom DateTime @db.Date
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  id            String       @id @default(cuid())
+  userId        String
+  orgId         String
+  pensum        Float
+  weeklyHours   Float
+  effectiveFrom DateTime     @db.Date
+  createdAt     DateTime     @default(now())
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([userId, effectiveFrom])
   @@index([orgId])
@@ -91,9 +91,9 @@ model MonthLock {
   orgId    String
   userId   String
   year     Int
-  month    Int      // 1-12
+  month    Int // 1-12
   lockedAt DateTime @default(now())
-  lockedBy String   // userId der sperrenden Person — bewusst keine Relation (gleiches Muster wie TimeEntryAudit.changedBy)
+  lockedBy String // userId der sperrenden Person — bewusst keine Relation (gleiches Muster wie TimeEntryAudit.changedBy)
 
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -115,7 +115,7 @@ model MonthLockAudit {
   userId      String
   year        Int
   month       Int
-  action      String   // "locked" | "unlocked"
+  action      String // "locked" | "unlocked"
   performedBy String
   performedAt DateTime @default(now())
 
@@ -174,15 +174,15 @@ model Holiday {
 // mit onDelete: Cascade auf User, damit eine Einladung nachvollziehbar
 // bleibt, auch wenn der einladende Account später gelöscht wird.
 model Invitation {
-  id             String    @id @default(cuid())
-  orgId          String
-  email          String
-  role           String    @default("member") // admin | manager | member — owner wird nie eingeladen
-  tokenHash      String    @unique
+  id              String    @id @default(cuid())
+  orgId           String
+  email           String
+  role            String    @default("member") // admin | manager | member — owner wird nie eingeladen
+  tokenHash       String    @unique
   invitedByUserId String
-  expiresAt      DateTime
-  usedAt         DateTime?
-  createdAt      DateTime  @default(now())
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime  @default(now())
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
@@ -196,13 +196,13 @@ model Invitation {
 // Pensen haben). managerId ist eine Selbstreferenz auf eine andere
 // Membership derselben Organisation (der Vorgesetzte).
 model Membership {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   orgId     String
   userId    String
-  role      String   @default("member") // owner | admin | manager | member
+  role      String    @default("member") // owner | admin | manager | member
   managerId String?
-  status    String   @default("aktiv")  // aktiv | inaktiv
-  entryDate DateTime @db.Date
+  status    String    @default("aktiv") // aktiv | inaktiv
+  entryDate DateTime  @db.Date
   exitDate  DateTime? @db.Date
 
   // Arbeitseinstellungen — von User hierher verschoben (MIGRATION.md Punkt 3a).
@@ -227,10 +227,10 @@ model Membership {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  org      Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  manager  Membership?   @relation("MembershipManager", fields: [managerId], references: [id], onDelete: SetNull)
-  reports  Membership[]  @relation("MembershipManager")
+  org     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manager Membership?  @relation("MembershipManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports Membership[] @relation("MembershipManager")
 
   @@unique([orgId, userId])
   @@index([orgId])
@@ -269,18 +269,18 @@ model LoginAttempt {
 }
 
 model TimeEntry {
-  id         String   @id @default(cuid())
-  userId     String
-  orgId      String
-  date       DateTime @db.Date
-  hours      Float?
-  type       String   @default("arbeit")
-  von        String?
-  bis        String?
-  pauseMin   Int      @default(0)
-  notiz      String?
-  customerId String?
-  projectId  String?
+  id               String       @id @default(cuid())
+  userId           String
+  orgId            String
+  date             DateTime     @db.Date
+  hours            Float?
+  type             String       @default("arbeit")
+  von              String?
+  bis              String?
+  pauseMin         Int          @default(0)
+  notiz            String?
+  customerId       String?
+  projectId        String?
   // true = zählt zu Soll/Ist/Überzeit (kennzahlen() in lib/calc.ts) — der
   // bisherige, einzige Zustand. false = reine Projekt-/Kundenzuordnung ohne
   // Wirkung auf die Arbeitszeit-Kennzahlen, aber weiterhin wirksam für alles
@@ -290,15 +290,15 @@ model TimeEntry {
   // schon erfasste, echte Arbeitszeit desselben Tages nicht verdoppeln.
   // Sobald jemand die Zeile aktiv im Tagesdialog speichert, setzt
   // PUT /api/time-entries dieses Feld wieder auf true ("Graduierung").
-  countsAsWorktime Boolean @default(true)
+  countsAsWorktime Boolean      @default(true)
   // Soft-Delete statt Hard-Delete (MIGRATION.md Punkt 6b) — die gesetzliche
   // Aufbewahrungspflicht von 5 Jahren verlangt, dass gelöschte Einträge
   // rekonstruierbar bleiben. Alle lesenden Queries filtern auf deletedAt: null.
-  deletedAt  DateTime?
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  project    Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  deletedAt        DateTime?
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org              Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customer         Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  project          Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([userId, date])
   @@index([orgId, date])
@@ -329,15 +329,15 @@ model TimeEntryAudit {
 // Kunden gehören der Organisation, nicht dem einzelnen Mitarbeitenden
 // (MIGRATION.md Punkt 3) — deshalb kein userId mehr, nur noch orgId.
 model Customer {
-  id        String      @id @default(cuid())
-  orgId     String
-  name      String
+  id             String          @id @default(cuid())
+  orgId          String
+  name           String
   // Fallback-Stundensatz, falls ein Projekt dieses Kunden keinen eigenen
   // hourlyRate trägt (MIGRATION.md Punkt 5).
-  hourlyRate Float?
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  timeEntries TimeEntry[]
-  projects  Project[]
+  hourlyRate     Float?
+  org            Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  timeEntries    TimeEntry[]
+  projects       Project[]
   customerMonths CustomerMonth[]
 
   @@unique([orgId, name])
@@ -358,16 +358,16 @@ model Project {
   externalRef String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
-  createdBy   String?  // userId der erstellenden Person — bewusst keine Relation
-                        // (gleiches Muster wie TimeEntryAudit.changedBy), NULL bei
-                        // Bestandsprojekten vor dieser Migration. Macht ein von
-                        // einem "member" frisch angelegtes Projekt für diesen
-                        // sichtbar, bevor er selbst Stunden darauf gebucht hat
-                        // (siehe GET /api/projects).
+  createdBy   String? // userId der erstellenden Person — bewusst keine Relation
+  // (gleiches Muster wie TimeEntryAudit.changedBy), NULL bei
+  // Bestandsprojekten vor dieser Migration. Macht ein von
+  // einem "member" frisch angelegtes Projekt für diesen
+  // sichtbar, bevor er selbst Stunden darauf gebucht hat
+  // (siehe GET /api/projects).
 
-  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  customer    Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  timeEntries TimeEntry[]
+  org            Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customer       Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  timeEntries    TimeEntry[]
   customerMonths CustomerMonth[]
 
   @@unique([orgId, customerId, name])
@@ -394,7 +394,7 @@ model CustomerMonth {
   orgId      String
   userId     String
   year       Int
-  month      Int      // 1-12
+  month      Int // 1-12
   customerId String
   projectId  String?
   hours      Float
@@ -411,16 +411,80 @@ model CustomerMonth {
 }
 
 model OvertimePayout {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   userId    String
   orgId     String
-  date      DateTime @db.Date
+  date      DateTime     @db.Date
   hours     Float
   note      String?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([userId, date])
   @@index([orgId, date])
+}
+
+// --- Betriebssicherheit / Developer-Übersicht (/dev) ------------------------
+// Die drei folgenden Modelle tragen bewusst KEINE Relationen auf User oder
+// Organization (gleiches Muster wie TimeEntryAudit.changedBy und
+// Invitation.invitedByUserId): ein Betriebsprotokoll muss lesbar bleiben,
+// auch wenn der betroffene Account oder die Organisation später gelöscht
+// wird — ein onDelete: Cascade würde genau die Spur löschen, wegen der das
+// Protokoll existiert.
+
+// Applikationsfehler, die bisher nur als console.error in "docker compose
+// logs" landeten — für den App-Container selbst unlesbar, also auf /dev
+// unsichtbar. Geschrieben von lib/error-log.ts, ZUSÄTZLICH zum bisherigen
+// console.error (die Container-Logs bleiben die Quelle der Wahrheit, diese
+// Tabelle ist die durchsuchbare Kopie).
+//
+// Datenschutz (DSG): Stacktraces können Personendaten enthalten. Deshalb
+// werden bewusst KEINE Request-Bodies gespeichert, nur Meldung, Stacktrace
+// und IDs. Aufbewahrung 90 Tage, Löschung im täglichen Cron
+// (deploy/backup.sh).
+model ErrorLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  level     String   @default("error") // error | warn
+  source    String // z.B. "POST /api/time-entries"
+  message   String
+  stack     String?
+  orgId     String?
+  userId    String?
+
+  @@index([createdAt])
+  @@index([source, createdAt])
+}
+
+// Ergebnisse wiederkehrender Betriebsaufgaben, die ausserhalb der App auf der
+// VM laufen (deploy/backup.sh per Cron um 03:00). Ohne diese Tabelle ist ein
+// stiller Fehlschlag des Backups aus der App heraus nicht erkennbar — bei der
+// 5-jährigen Aufbewahrungspflicht (ArG) das teuerste denkbare Versäumnis.
+model OpsEvent {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  kind      String // "backup" | "errorlog-prune"
+  status    String // "ok" | "failed"
+  detail    String? // Dateiname + Grösse, oder Fehlermeldung
+
+  @@index([kind, createdAt])
+}
+
+// Protokoll aller Aktionen aus der Developer-Übersicht (/dev). Jede Aktion
+// dort verändert fremde Mandantendaten ohne deren Zutun — ohne lückenlose
+// Spur wäre das nicht vertretbar. performedBy trägt die E-Mail aus
+// requireDeveloper() (lib/dev-access.ts), nicht die userId: die Allowlist ist
+// e-mail-basiert und der handelnde Account gehört nicht zwingend zur
+// betroffenen Organisation.
+model DevAction {
+  id          String   @id @default(cuid())
+  performedBy String
+  action      String // "plan.change" | "trial.extend" | "password-reset-link"
+  targetType  String // "organization" | "user"
+  targetId    String
+  detail      String? // z.B. "pro -> starter"
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/access";
 import { parseExportRange } from "@/lib/export-helpers";
 import { groupAbsenceRanges, type AbsenceEntry } from "@/lib/absence-ranges";
+import { logError } from "@/lib/error-log";
 
 // Ab welchem Anteil GLEICHZEITIG abwesender, sichtbarer Mitglieder ein Tag
 // als Warnung markiert wird (MIGRATION.md Punkt 9: "Warnung bei zu vielen
@@ -129,6 +130,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET absences/calendar error:", error);
+    await logError("GET /api/absences/calendar", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

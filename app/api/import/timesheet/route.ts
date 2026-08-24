@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 import { parseTimesheetWorkbook, parseCustomerMonthsWorkbook, type ImportedRow, type ImportedCustomerMonthRow } from "@/lib/import-timesheet";
+import { logError } from "@/lib/error-log";
 
 // Import der Alt-Exporte (Betrieb.md Punkt 4) — jede Person importiert nur
 // für sich selbst, nie für Dritte (deshalb keine targetUserId im Body, im
@@ -163,6 +164,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("POST import/timesheet error:", error);
+    await logError("POST /api/import/timesheet", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

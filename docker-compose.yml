@@ -22,6 +22,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # GIT_SHA kommt von deploy/deploy.sh (export vor "docker compose up
+      # --build"). Landet im Image als APP_VERSION (Dockerfile) — bewusst
+      # NICHT zusätzlich unter "environment:" unten gesetzt, sonst würde ein
+      # leerer/undefinierter Wert von hier die im Image gebackene ENV beim
+      # Container-Start überschreiben.
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     restart: unless-stopped
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-zeiterfassung}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-zeiterfassung}"

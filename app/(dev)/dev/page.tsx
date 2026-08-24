@@ -14,6 +14,8 @@ import {
   getSystemHealth,
   getAuthHealth,
   getEnvStatus,
+  getBackupStatus,
+  BACKUP_STALE_HOURS,
   type OrgOverviewRow,
 } from "@/lib/dev-metrics";
 import { PLAN_LIMITS } from "@/lib/billing-rules";
@@ -55,6 +57,13 @@ function daysUntil(d: Date | null): number | null {
   return Math.ceil((d.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
 }
 
+function formatAge(hours: number | null): string {
+  if (hours === null) return "—";
+  if (hours < 1) return "< 1 h";
+  if (hours < 48) return `vor ${Math.round(hours)} h`;
+  return `vor ${Math.round(hours / 24)} Tagen`;
+}
+
 function activityBadge(status: OrgOverviewRow["activityStatus"]) {
   const variant = status === "aktiv" ? "default" : status === "schläfrig" ? "outline" : "secondary";
   return <Badge variant={variant as any}>{status}</Badge>;
@@ -63,20 +72,23 @@ function activityBadge(status: OrgOverviewRow["activityStatus"]) {
 export default async function DevPage() {
   await requireAccess();
 
-  const [platform, orgOverview, systemHealth, authHealth, env] = await Promise.all([
+  const [platform, orgOverview, systemHealth, authHealth, env, backup] = await Promise.all([
     getPlatformSummary(),
     getOrgOverview(),
     getSystemHealth(),
     getAuthHealth(),
     Promise.resolve(getEnvStatus()),
+    getBackupStatus(),
   ]);
+  const backupStale = backup.status === "ok" && backup.ageHours !== null && backup.ageHours > BACKUP_STALE_HOURS;
+  const backupTone = backup.status === "failed" ? "danger" : backup.status === "missing" || backupStale ? "warning" : "success";
 
   return (
     <div className="space-y-10">
       <PageHeader title="Developer-Übersicht" description="Read-only Plattformsicht über alle Organisationen — keine Aktion hier ändert Kundendaten." />
 
       {/* Statusleiste */}
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <section className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         <div className="rounded-lg border bg-card p-3 flex items-center gap-2">
           <StatusDot tone={systemHealth.databaseOk ? "success" : "danger"} />
           <div className="text-xs">
@@ -107,11 +119,21 @@ export default async function DevPage() {
           </div>
         </div>
         <div className="rounded-lg border bg-card p-3 flex items-center gap-2">
-          <StatusDot tone="default" />
+          <StatusDot tone={backupTone} />
           <div className="text-xs">
             <div className="font-medium">Backup</div>
-            <div className="text-muted-foreground">nicht aus der App überwachbar</div>
+            <div className="text-muted-foreground">
+              {backup.status === "missing"
+                ? "noch kein Lauf protokolliert"
+                : backup.status === "failed"
+                ? `fehlgeschlagen · ${formatAge(backup.ageHours)}`
+                : `${formatAge(backup.ageHours)}${backupStale ? " · überfällig" : ""}`}
+            </div>
           </div>
+        </div>
+        <div className="rounded-lg border bg-card p-3">
+          <div className="text-xs font-medium">Version</div>
+          <div className="text-xs text-muted-foreground font-mono">{env.appVersion ?? "unbekannt"}</div>
         </div>
       </section>
 

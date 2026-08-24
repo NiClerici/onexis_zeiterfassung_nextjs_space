@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 import { createAbsenceEntries } from "@/lib/absence-entries";
+import { logError } from "@/lib/error-log";
 
 function parseDateYMD(s: string): Date | null {
   if (!s || typeof s !== "string") return null;
@@ -80,6 +81,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("bulk-vacation error:", error);
+    await logError("POST /api/time-entries/bulk-vacation", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

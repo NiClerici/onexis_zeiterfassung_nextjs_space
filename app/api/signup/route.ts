@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { checkPasswordPolicy } from "@/lib/password-policy";
+import { logError } from "@/lib/error-log";
 
 const TRIAL_DAYS = 14;
 
@@ -73,6 +74,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ id: user.id, email: user.email });
   } catch (error: any) {
     console.error("Signup error:", error);
+    await logError("POST /api/signup", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

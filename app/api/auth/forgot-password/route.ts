@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { sendMail } from "@/lib/mail";
 import { getClientIp, isRateLimited, recordAttempt } from "@/lib/rate-limit";
 import { hashToken, generateToken } from "@/lib/token";
+import { logError } from "@/lib/error-log";
 
 const TOKEN_TTL_MS = 60 * 60 * 1000; // 60 Minuten
 
@@ -64,6 +65,7 @@ export async function POST(req: Request) {
     return genericResponse();
   } catch (error: any) {
     console.error("forgot-password error:", error);
+    await logError("POST /api/auth/forgot-password", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

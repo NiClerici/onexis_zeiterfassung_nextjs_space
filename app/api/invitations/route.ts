@@ -6,6 +6,7 @@ import { sendMail } from "@/lib/mail";
 import { hashToken, generateToken } from "@/lib/token";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { billing } from "@/lib/billing";
+import { logError } from "@/lib/error-log";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 Tage
 const INVITABLE_ROLES = ["admin", "manager", "member"]; // owner wird nie eingeladen
@@ -37,6 +38,7 @@ export async function GET() {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET invitations error:", error);
+    await logError("GET /api/invitations", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -122,6 +124,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("POST invitations error:", error);
+    await logError("POST /api/invitations", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -143,6 +146,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("DELETE invitations error:", error);
+    await logError("DELETE /api/invitations", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

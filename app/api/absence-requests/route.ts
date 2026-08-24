@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, canSeeUser, listVisibleUserIds, assertMonthEditable, AccessError } from "@/lib/access";
 import { createAbsenceEntries } from "@/lib/absence-entries";
 import type { EintragTyp } from "@/lib/calc";
+import { logError } from "@/lib/error-log";
 
 // Absenzanträge dürfen nur für tatsächliche Absenztypen gestellt werden —
 // nicht "arbeit" (keine Absenz) oder "feiertag" (organisationsweiter Fakt
@@ -70,6 +71,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET absence-requests error:", error);
+    await logError("GET /api/absence-requests", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -104,6 +106,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("POST absence-requests error:", error);
+    await logError("POST /api/absence-requests", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -166,6 +169,7 @@ export async function PATCH(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("PATCH absence-requests error:", error);
+    await logError("PATCH /api/absence-requests", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -190,6 +194,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("DELETE absence-requests error:", error);
+    await logError("DELETE /api/absence-requests", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

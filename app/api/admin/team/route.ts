@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
+import { logError } from "@/lib/error-log";
 
 const VALID_ROLES = ["owner", "admin", "manager", "member"];
 const VALID_STATUS = ["aktiv", "inaktiv"];
@@ -46,6 +47,7 @@ export async function GET() {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET admin/team error:", error);
+    await logError("GET /api/admin/team", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -126,6 +128,7 @@ export async function PUT(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("PUT admin/team error:", error);
+    await logError("PUT /api/admin/team", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

@@ -519,6 +519,57 @@ export function getEnvStatus(): EnvStatus {
   return {
     smtpConfigured: isSmtpConfigured(),
     nodeEnv: process.env.NODE_ENV ?? "unknown",
-    appVersion: process.env.npm_package_version ?? null,
+    // npm_package_version war hier vorher ein totes Feld: der Standalone-
+    // Container startet mit "node server.js", nie über npm, die Variable
+    // ist dort nie gesetzt. APP_VERSION wird stattdessen als Git-SHA beim
+    // Build eingebacken (Dockerfile ARG GIT_SHA, docker-compose.yml
+    // app.build.args, gesetzt von deploy/deploy.sh) — beantwortet "welcher
+    // Commit läuft gerade?" aus der laufenden App heraus.
+    appVersion: process.env.APP_VERSION ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Betriebsereignisse (Backup, ErrorLog-Aufräumung) — geschrieben von
+// deploy/backup.sh über "docker compose exec -T db psql", ausserhalb jedes
+// Node-Prozesses. Ohne diese Sicht fiele ein stiller Backup-Fehlschlag nie
+// auf (5-jährige Aufbewahrungspflicht, ArG).
+// ---------------------------------------------------------------------------
+
+export type OpsEventStatus = "ok" | "failed" | "missing";
+
+export interface BackupStatus {
+  status: OpsEventStatus;
+  detail: string | null;
+  lastRunAt: Date | null;
+  ageHours: number | null;
+  error?: string;
+}
+
+// Ab wann ein an sich erfolgreiches Backup trotzdem als überfällig gilt —
+// bei täglich 03:00 Uhr lässt ein Cronjob-Ausfall die Zeile ein oder zwei
+// Tage stehen, 26h Toleranz statt exakt 24h wegen möglicher DST-Verschiebung
+// und Cron-Jitter.
+export const BACKUP_STALE_HOURS = 26;
+
+export async function getBackupStatus(now: Date = new Date()): Promise<BackupStatus> {
+  try {
+    const last = await prisma.opsEvent.findFirst({
+      where: { kind: "backup" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!last) {
+      return { status: "missing", detail: null, lastRunAt: null, ageHours: null };
+    }
+    const ageHours = (now.getTime() - last.createdAt.getTime()) / (60 * 60 * 1000);
+    return {
+      status: last.status === "ok" ? "ok" : "failed",
+      detail: last.detail,
+      lastRunAt: last.createdAt,
+      ageHours,
+    };
+  } catch (error: any) {
+    console.error("getBackupStatus failed:", error);
+    return { status: "missing", detail: null, lastRunAt: null, ageHours: null, error: "Backup-Status konnte nicht geladen werden." };
+  }
 }

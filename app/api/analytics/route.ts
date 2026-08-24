@@ -14,6 +14,7 @@ import {
   type HolidayInput,
 } from "@/lib/calc";
 import { billableHoursByUserAndMonth, combineCustomerHours, type MonthlyCustomerHours } from "@/lib/customer-months";
+import { logError } from "@/lib/error-log";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
 // für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
@@ -203,6 +204,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("Analytics error:", error);
+    await logError("GET /api/analytics", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

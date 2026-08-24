@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
+import { logError } from "@/lib/error-log";
 
 export async function GET(req: Request) {
   try {
@@ -17,6 +18,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("GET overtime-payouts error:", error);
+    await logError("GET /api/overtime-payouts", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -46,6 +48,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("POST overtime-payouts error:", error);
+    await logError("POST /api/overtime-payouts", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -68,6 +71,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("DELETE overtime-payouts error:", error);
+    await logError("DELETE /api/overtime-payouts", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

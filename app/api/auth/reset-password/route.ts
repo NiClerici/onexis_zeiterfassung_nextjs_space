@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 import { getClientIp, isRateLimited, recordAttempt } from "@/lib/rate-limit";
 import { hashToken } from "@/lib/token";
+import { logError } from "@/lib/error-log";
 
 export async function POST(req: Request) {
   try {
@@ -56,6 +57,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("reset-password error:", error);
+    await logError("POST /api/auth/reset-password", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { recomputeAbsenceHours } from "@/lib/absence-entries";
 import type { PensumChangeInput } from "@/lib/calc";
+import { logError } from "@/lib/error-log";
 
 function toPensumChangeInput(rows: { effectiveFrom: Date; pensum: number; weeklyHours: number }[]): PensumChangeInput[] {
   return rows.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
@@ -39,6 +40,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("GET /api/pensum-changes", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -133,6 +135,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("POST /api/pensum-changes", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -205,6 +208,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("DELETE /api/pensum-changes", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

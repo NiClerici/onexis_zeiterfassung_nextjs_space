@@ -11,6 +11,8 @@ import { requireDeveloper } from "@/lib/dev-access";
 import { getOrgDetail } from "@/lib/dev-metrics";
 import { PageHeader } from "@/components/layouts/page-header";
 import { StatTile } from "@/components/dev/stat-tile";
+import { OrgPlanActions } from "@/components/dev/org-plan-actions";
+import { ResetLinkButton } from "@/components/dev/reset-link-button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
@@ -44,7 +46,7 @@ export default async function DevOrgDetailPage({ params }: { params: { slug: str
       <PageHeader
         title={org.name}
         description={`${org.slug} · erstellt am ${formatDate(org.createdAt)}`}
-        actions={<Badge variant="outline">{org.plan}</Badge>}
+        actions={<OrgPlanActions slug={org.slug} currentPlan={org.plan} isTrial={org.plan === "trial"} />}
       />
 
       <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -78,6 +80,7 @@ export default async function DevOrgDetailPage({ params }: { params: { slug: str
                 <TableHead>Austritt</TableHead>
                 <TableHead>Pensum</TableHead>
                 <TableHead>Passwort setzen</TableHead>
+                <TableHead>Aktionen</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -91,6 +94,9 @@ export default async function DevOrgDetailPage({ params }: { params: { slug: str
                   <TableCell className="text-xs">{formatDate(m.exitDate)}</TableCell>
                   <TableCell className="font-mono">{m.pensum}%</TableCell>
                   <TableCell>{m.mustSetPassword ? <Badge variant="destructive">ja</Badge> : "—"}</TableCell>
+                  <TableCell>
+                    <ResetLinkButton userId={m.userId} email={m.email} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
 import { requireOrg, assertMonthEditable, AccessError } from "@/lib/access";
 import { diffTimeEntryFields } from "@/lib/audit";
+import { logError } from "@/lib/error-log";
 
 function isValidType(type: unknown): type is EintragTyp {
   return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
@@ -85,6 +86,7 @@ export async function GET(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("GET /api/time-entries", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -132,6 +134,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("POST /api/time-entries", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -223,6 +226,7 @@ export async function PUT(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("PUT /api/time-entries", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }
@@ -254,6 +258,7 @@ export async function DELETE(req: Request) {
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
+    await logError("DELETE /api/time-entries", error);
     return NextResponse.json({ error: "Interner Serverfehler" }, { status: 500 });
   }
 }

@@ -20,8 +20,13 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // Diese API-Pfade bleiben immer nutzbar, auch für eine read-only
 // Organisation (abgelaufener Trial, MIGRATION.md Punkt 12): Auth/Signup
 // laufen ausserhalb einer bestehenden Mitgliedschaft, Health ist ein
-// reiner Infrastruktur-Check ohne Org-Bezug.
-const READONLY_EXEMPT_PREFIXES = ["/api/auth", "/api/signup", "/api/health"];
+// reiner Infrastruktur-Check ohne Org-Bezug. /api/dev betrifft NICHT die
+// eigene Organisation des Aufrufenden, sondern verändert eine FREMDE
+// (lib/dev-actions.ts, z.B. Trial dieser fremden Org verlängern) — ohne
+// diese Ausnahme könnte ein abgelaufener Trial der EIGENEN Organisation des
+// Betreibers genau die Aktion blockieren, mit der ein anderer Trial
+// verlängert werden soll.
+const READONLY_EXEMPT_PREFIXES = ["/api/auth", "/api/signup", "/api/health", "/api/dev"];
 
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
