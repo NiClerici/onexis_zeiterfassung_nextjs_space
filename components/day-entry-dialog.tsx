@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Trash2, Plus, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { EINTRAG_TYPEN, stundenAusEintrag, type EintragTyp } from "@/lib/calc";
 import { buildArbeitszeit } from "@/lib/arbeitszeit";
+import { pruefeEintragKonflikte, type VergleichbarerEintrag, type EintragKonflikt } from "@/lib/entry-overlap";
 
 export interface DayTimeEntry {
   id: string;
@@ -51,14 +52,39 @@ interface DraftRow {
   hours: string;
   // Nur für type==="arbeit" relevant: Eingabe über Von/Bis/Pause (false,
   // Standard) oder direkt über eine Stundenzahl (true) — im zweiten Fall
-  // leitet saveRow() von/bis/pauseMin beim Speichern über buildArbeitszeit
-  // ab, die Datenstruktur beim Server bleibt identisch.
+  // leitet resolvedZeit() von/bis/pauseMin beim Speichern über
+  // buildArbeitszeit ab, die Datenstruktur beim Server bleibt identisch.
   hoursMode: boolean;
   saving: boolean;
   countsAsWorktime: boolean;
 }
 
-function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
+// entry.hours != null nur bei Absenzen (server-seitig, siehe PUT/POST
+// /api/time-entries) — hoursModeDefault entscheidet, ob eine frisch aus dem
+// Server geladene "arbeit"-Zeile im Von/Bis- oder im Stunden-Modus
+// angezeigt wird. Reine hours-Zeilen aus dem Stundenrapport-Import (kein
+// von/bis, siehe TimeEntry.countsAsWorktime) starten sinnvollerweise im
+// Stunden-Modus statt mit irreführenden 08:00–17:00-Platzhaltern.
+function hoursModeDefault(entry: DayTimeEntry): boolean {
+  return entry.type === "arbeit" && !entry.von && !entry.bis && entry.hours != null;
+}
+
+function toDraft(entry: DayTimeEntry, fallbackHours: number, hoursMode: boolean = hoursModeDefault(entry)): DraftRow {
+  const isArbeit = (entry.type as EintragTyp) === "arbeit";
+  let hoursStr: string;
+  if (entry.hours != null) {
+    hoursStr = String(entry.hours);
+  } else if (isArbeit && hoursMode && entry.von && entry.bis) {
+    // "arbeit" speichert hours serverseitig immer als null — im
+    // Stunden-Modus die echte Netto-Stundenzahl aus von/bis/pauseMin
+    // zurückrechnen, statt hier auf das Tagessoll zurückzufallen (Bugfix:
+    // nach dem Speichern im Stunden-Modus zeigte das Feld plötzlich das
+    // Tagessoll statt der eingegebenen Zahl).
+    const netto = stundenAusEintrag({ typ: "arbeit", von: entry.von, bis: entry.bis, pauseMin: entry.pauseMin }, 0);
+    hoursStr = (Math.round(netto * 100) / 100).toFixed(2);
+  } else {
+    hoursStr = fallbackHours.toFixed(2);
+  }
   return {
     key: entry.id,
     id: entry.id,
@@ -69,21 +95,26 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number): DraftRow {
     notiz: entry.notiz ?? "",
     customerId: entry.customerId ?? "",
     projectId: entry.projectId ?? "",
-    hours: entry.hours != null ? String(entry.hours) : fallbackHours.toFixed(2),
-    hoursMode: false,
+    hours: hoursStr,
+    hoursMode: isArbeit ? hoursMode : false,
     saving: false,
     countsAsWorktime: entry.countsAsWorktime ?? true,
   };
 }
 
-function newDraft(fallbackHours: number): DraftRow {
+// startVon: die neue Zeile beginnt standardmässig dort, wo die letzte
+// "arbeit"-Zeile des Tages endet (siehe addRow), statt wie bisher immer
+// wieder bei 08:00–17:00 zu starten — das war der Grund, warum ein zweiter
+// Eintrag am selben Tag per Default deckungsgleich mit dem ersten war.
+function newDraft(fallbackHours: number, startVon: string = "08:00"): DraftRow {
+  const { von, bis, pauseMin } = buildArbeitszeit(fallbackHours, { startVon });
   return {
     key: `new-${Math.random().toString(36).slice(2)}`,
     id: null,
     type: "arbeit",
-    von: "08:00",
-    bis: "17:00",
-    pauseMin: "0",
+    von,
+    bis,
+    pauseMin: String(pauseMin),
     notiz: "",
     customerId: "",
     projectId: "",
@@ -91,6 +122,48 @@ function newDraft(fallbackHours: number): DraftRow {
     hoursMode: false,
     saving: false,
     countsAsWorktime: true,
+  };
+}
+
+// Leitet die tatsächlich zu speichernden Von/Bis/Pause/Hours-Werte einer
+// Zeile ab — einzige Stelle, die zwischen den beiden Eingabemodi übersetzt.
+// saveRow(), die Netto-Anzeige und die Live-Konfliktprüfung nutzen alle
+// dieselbe Funktion, damit sie nie auseinanderlaufen können (vorher leitete
+// nur saveRow() über buildArbeitszeit ab, die Anzeige der Netto-Stunden
+// fehlte komplett — Bugfix "unklar, ob die Pause abgezogen wird").
+function resolvedZeit(row: DraftRow): { von: string | null; bis: string | null; pauseMin: number; hours: number | null; geklemmt: boolean } {
+  if (row.type !== "arbeit") {
+    return {
+      von: null,
+      bis: null,
+      pauseMin: 0,
+      hours: row.hours === "" ? null : Math.max(0, Math.min(24, parseFloat(row.hours) || 0)),
+      geklemmt: false,
+    };
+  }
+  const pauseMinCurrent = Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0));
+  if (row.hoursMode) {
+    const hours = Math.max(0, Math.min(24, parseFloat(row.hours) || 0));
+    // startVon: row.von (Bugfix "Reset beim Moduswechsel") — die zuletzt
+    // bekannte Startzeit bleibt erhalten statt auf 08:00 zurückzuspringen.
+    // pauseMin: row.pauseMin (dieselbe Begründung) — eine manuell gesetzte
+    // Pause wird nicht stillschweigend durch das ArG-Minimum ersetzt.
+    const { von, bis, pauseMin, geklemmt } = buildArbeitszeit(hours, { startVon: row.von || "08:00", pauseMin: pauseMinCurrent });
+    return { von, bis, pauseMin, hours: null, geklemmt };
+  }
+  return { von: row.von, bis: row.bis, pauseMin: pauseMinCurrent, hours: null, geklemmt: false };
+}
+
+function toVergleichbarerEintrag(row: DraftRow): VergleichbarerEintrag {
+  const zeit = resolvedZeit(row);
+  return {
+    id: row.id,
+    typ: row.type,
+    von: zeit.von,
+    bis: zeit.bis,
+    pauseMin: zeit.pauseMin,
+    hours: zeit.hours,
+    countsAsWorktime: row.countsAsWorktime,
   };
 }
 
@@ -120,10 +193,26 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
   const { t } = useI18n();
   const [rows, setRows] = useState<DraftRow[]>([]);
 
+  // Merkt sich, für welches Datum `rows` zuletzt aus `entries` aufgebaut
+  // wurde. Bugfix: der Dialog baute `rows` bisher bei JEDER Änderung von
+  // `entries` neu auf (auch response-getriebene Refetches nach dem
+  // Speichern EINER Zeile, siehe onChanged→fetchEntries in
+  // calendar/page.tsx) — dabei gingen alle noch ungespeicherten Zeilen und
+  // laufenden Eingaben verloren ("kann ich am gleichen Tag weitere
+  // Einträge hinzufügen"). Jede Zeilen-Mutation (saveRow/deleteRow)
+  // aktualisiert `rows` bereits direkt und lokal; dieser Effect ist nur
+  // noch für den initialen Aufbau beim Öffnen zuständig.
+  const openedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      openedForRef.current = null;
+      return;
+    }
+    if (openedForRef.current === dateStr) return;
+    openedForRef.current = dateStr;
     setRows(entries.length > 0 ? entries.map((e) => toDraft(e, tagesSoll)) : []);
-  }, [open, dateStr, entries, tagesSoll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, dateStr]);
 
   const updateRow = (key: string, patch: Partial<DraftRow>) => {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -148,37 +237,77 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
       prev.map((r) => {
         if (r.key !== key) return r;
         if (type !== "arbeit" && r.type === "arbeit") {
-          return { ...r, type, hours: tagesSoll.toFixed(2) };
+          return { ...r, type, hours: tagesSoll.toFixed(2), hoursMode: false };
+        }
+        if (type === "arbeit" && r.type !== "arbeit") {
+          // Absenz → Arbeitszeit: Von/Bis aus der bisherigen Stundenzahl
+          // ableiten statt aus generischen 08:00–17:00-Defaults, die bei
+          // einem Teilzeitpensum ein falsches Tagessoll vorgaukeln würden
+          // (Bugfix "Typwechsel erfindet Arbeitszeit").
+          const hours = Math.max(0, Math.min(24, parseFloat(r.hours) || 0));
+          const { von, bis, pauseMin } = buildArbeitszeit(hours);
+          return { ...r, type, von, bis, pauseMin: String(pauseMin), hoursMode: false };
         }
         return { ...r, type };
       })
     );
   };
 
-  const addRow = () => setRows((prev) => [...prev, newDraft(tagesSoll)]);
+  const addRow = () => {
+    // Neue Zeile beginnt beim spätesten Ende der bestehenden
+    // Von/Bis-"arbeit"-Zeilen dieses Tages (Fallback 08:00 für die erste
+    // Zeile) — vorher startete jede neue Zeile unabhängig davon immer bei
+    // 08:00–17:00, wodurch ein zweiter Eintrag am selben Tag per Default
+    // deckungsgleich mit dem ersten war (Bugfix "Doppelbuchung möglich").
+    const bisZeiten = rows
+      .filter((r) => r.type === "arbeit" && !r.hoursMode && r.bis)
+      .map((r) => r.bis)
+      .sort();
+    const startVon = bisZeiten.length > 0 ? bisZeiten[bisZeiten.length - 1] : "08:00";
+    setRows((prev) => [...prev, newDraft(tagesSoll, startVon)]);
+  };
 
   const removeUnsavedRow = (key: string) => setRows((prev) => prev.filter((r) => r.key !== key));
 
   const saveRow = async (row: DraftRow) => {
+    const isArbeit = row.type === "arbeit";
+    const zeit = resolvedZeit(row);
+
+    // Pause > Zeitspanne (Bugfix "negative Stunden") — vorher speicherbar,
+    // weil weder Client noch Server die Pause gegen die Spanne prüften.
+    if (isArbeit && zeit.von && zeit.bis) {
+      const netto = stundenAusEintrag({ typ: "arbeit", von: zeit.von, bis: zeit.bis, pauseMin: zeit.pauseMin }, 0);
+      if (netto < 0) {
+        toast.error(t("calendar.pauseExceedsSpan"));
+        return;
+      }
+    }
+
+    // Blockierende Konflikte (Duplikat/doppelte Absenz) client-seitig vorab
+    // prüfen — derselbe Check läuft auch serverseitig (lib/entry-overlap.ts
+    // über POST/PUT /api/time-entries) und lehnt mit 409 ab, hier sparen wir
+    // uns den Roundtrip und zeigen die Meldung sofort.
+    const andereDesTages = rows.filter((r) => r.key !== row.key).map(toVergleichbarerEintrag);
+    const konflikte = pruefeEintragKonflikte(toVergleichbarerEintrag(row), andereDesTages);
+    const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
+    if (blockierend.length > 0) {
+      toast.error(blockierend[0].message);
+      return;
+    }
+
     updateRow(row.key, { saving: true });
     try {
-      const isArbeit = row.type === "arbeit";
-      // Im Stunden-Modus (nur für arbeit) von/bis/pauseMin aus der
-      // eingegebenen Stundenzahl ableiten — gleiche Funktion, die auch
-      // Bulk-Erfassung und der Excel-Import nutzen. Die API-Datenstruktur
-      // bleibt dieselbe wie im Von/Bis-Modus, hours bleibt null.
-      const arbeitszeit = isArbeit && row.hoursMode ? buildArbeitszeit(Math.max(0, Math.min(24, parseFloat(row.hours) || 0))) : null;
       const body: Record<string, unknown> = {
         date: dateStr,
         type: row.type,
-        von: isArbeit ? (arbeitszeit?.von ?? row.von) : null,
-        bis: isArbeit ? (arbeitszeit?.bis ?? row.bis) : null,
-        pauseMin: isArbeit ? (arbeitszeit?.pauseMin ?? Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0))) : 0,
+        von: zeit.von,
+        bis: zeit.bis,
+        pauseMin: zeit.pauseMin,
         notiz: row.notiz.trim() || null,
         customerId: row.customerId || null,
         projectId: row.projectId || null,
         // hours ist nur für Absenzen relevant — bei arbeit wird aus von/bis/pauseMin berechnet
-        hours: isArbeit || row.hours === "" ? null : Math.max(0, Math.min(24, parseFloat(row.hours) || 0)),
+        hours: zeit.hours,
       };
       if (row.id) body.id = row.id;
 
@@ -190,9 +319,13 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         toast.success(t("calendar.entrySaved"));
+        const warnings: string[] = data?.warnings ?? [];
+        warnings.forEach((w) => toast.warning(w));
         const saved = data?.entry;
         if (saved) {
-          setRows((prev) => prev.map((r) => (r.key === row.key ? toDraft(saved, tagesSoll) : r)));
+          setRows((prev) => prev.map((r) => (r.key === row.key ? toDraft(saved, tagesSoll, row.hoursMode) : r)));
+        } else {
+          updateRow(row.key, { saving: false });
         }
         onChanged();
       } else {
@@ -202,8 +335,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
     } catch (err) {
       console.error(err);
       toast.error(t("calendar.entryError"));
-      updateRow(row.key, { saving: false });
-    } finally {
       updateRow(row.key, { saving: false });
     }
   };
@@ -286,6 +417,18 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
             <div className="space-y-4">
               {rows.map((row) => {
                 const isArbeit = row.type === "arbeit";
+                const zeit = resolvedZeit(row);
+                const nettoHours =
+                  isArbeit && zeit.von && zeit.bis
+                    ? stundenAusEintrag({ typ: "arbeit", von: zeit.von, bis: zeit.bis, pauseMin: zeit.pauseMin }, 0)
+                    : null;
+                const pauseInvalid = nettoHours !== null && nettoHours < 0;
+
+                const andereDesTages = rows.filter((r) => r.key !== row.key).map(toVergleichbarerEintrag);
+                const konflikte: EintragKonflikt[] = pruefeEintragKonflikte(toVergleichbarerEintrag(row), andereDesTages);
+                const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
+                const ueberlappungen = konflikte.filter((k) => k.art === "ueberlappung");
+
                 return (
                   <div key={row.key} className="rounded-xl bg-secondary/60 p-3 space-y-3">
                     <div className="flex items-center justify-between gap-2">
@@ -317,20 +460,37 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                       </p>
                     )}
 
+                    {(blockierend.length > 0 || ueberlappungen.length > 0) && (
+                      <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 space-y-1">
+                        {blockierend.map((k, i) => (
+                          <p key={`b-${i}`} className="text-amber-900 font-medium">
+                            {t("calendar.conflictBlocking")} {k.message}
+                          </p>
+                        ))}
+                        {ueberlappungen.map((k, i) => (
+                          <p key={`o-${i}`} className="text-amber-700">
+                            {t("calendar.conflictWarning")} {k.message}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
                     {isArbeit ? (
                       <>
                         <div className="flex gap-2">
                           <button
                             type="button"
                             onClick={() => {
-                              // Beim Wechsel zu Von/Bis die getippte Stundenzahl
-                              // übernehmen, statt stumm auf die alten Von/Bis-
-                              // Werte zurückzufallen (Bug: bisher blieb beim
-                              // Umschalten 08:00-17:00 stehen, egal was im
-                              // Stunden-Feld stand).
-                              const hours = Math.max(0, Math.min(24, parseFloat(row.hours) || 0));
-                              const { von, bis, pauseMin } = buildArbeitszeit(hours);
-                              updateRow(row.key, { hoursMode: false, von, bis, pauseMin: String(pauseMin) });
+                              // Nur etwas ableiten, wenn tatsächlich vom
+                              // Stunden-Modus gewechselt wird — resolvedZeit()
+                              // nutzt dafür row.hours, row.von (Startzeit) und
+                              // row.pauseMin (manuell gesetzte Pause) statt sie
+                              // auf 08:00 + ArG-Minimum zurückzusetzen (Bugfix
+                              // "Reset beim Moduswechsel"). War schon Von/Bis
+                              // aktiv, bleibt die Zeile unangetastet.
+                              if (!row.hoursMode) return;
+                              const z = resolvedZeit(row);
+                              updateRow(row.key, { hoursMode: false, von: z.von ?? row.von, bis: z.bis ?? row.bis, pauseMin: String(z.pauseMin) });
                             }}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${!row.hoursMode ? "bg-primary text-primary-foreground" : "bg-secondary text-foreground hover:bg-accent"}`}
                           >
@@ -339,10 +499,13 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                           <button
                             type="button"
                             onClick={() => {
-                              // Umgekehrt: die tatsächlich eingetragene Zeit in
-                              // Stunden umrechnen, statt weiterhin das
-                              // Tagessoll aus der Vorbelegung anzuzeigen (Bug,
-                              // siehe oben — gleicher Fehler in Gegenrichtung).
+                              // Nur beim tatsächlichen Wechsel aus Von/Bis
+                              // neu berechnen — war schon Stunden-Modus aktiv,
+                              // würde ein erneutes Ableiten aus row.von/row.bis
+                              // (die dort seit dem letzten Wechsel eingefroren
+                              // sind) die gerade getippte Stundenzahl
+                              // überschreiben.
+                              if (row.hoursMode) return;
                               const pauseMin = Math.max(0, Math.min(1440, parseInt(row.pauseMin, 10) || 0));
                               const hours = stundenAusEintrag({ typ: "arbeit", von: row.von, bis: row.bis, pauseMin }, 0);
                               updateRow(row.key, { hoursMode: true, hours: (Math.round(hours * 100) / 100).toFixed(2) });
@@ -366,6 +529,17 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                               className="w-full px-4 py-2 rounded-xl bg-secondary text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                             />
                             <p className="text-xs text-muted-foreground mt-1">{t("calendar.hoursDirectHint")}</p>
+                            {zeit.von && zeit.bis && (
+                              <p className="text-xs text-muted-foreground mt-1 font-mono">
+                                {t("calendar.netHoursMode", {
+                                  hours: (parseFloat(row.hours) || 0).toFixed(2),
+                                  pause: String(zeit.pauseMin),
+                                  von: zeit.von,
+                                  bis: zeit.bis,
+                                })}
+                              </p>
+                            )}
+                            {zeit.geklemmt && <p className="text-xs text-amber-700 mt-1">{t("calendar.timeClamped")}</p>}
                           </div>
                         ) : (
                           <div className="grid grid-cols-3 gap-2">
@@ -402,6 +576,18 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                                 className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                               />
                             </div>
+                            {nettoHours !== null && (
+                              <p className={`col-span-3 text-xs font-mono ${pauseInvalid ? "text-destructive" : "text-muted-foreground"}`}>
+                                {pauseInvalid
+                                  ? t("calendar.pauseExceedsSpan")
+                                  : t("calendar.netHoursVonBis", {
+                                      von: zeit.von ?? "",
+                                      bis: zeit.bis ?? "",
+                                      pause: String(zeit.pauseMin),
+                                      hours: nettoHours.toFixed(2),
+                                    })}
+                              </p>
+                            )}
                           </div>
                         )}
                         <div>
@@ -460,7 +646,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
                     <button
                       onClick={() => saveRow(row)}
-                      disabled={row.saving || locked}
+                      disabled={row.saving || locked || pauseInvalid || blockierend.length > 0}
                       className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
                     >
                       {row.saving ? t("common.loading") : t("calendar.save")}

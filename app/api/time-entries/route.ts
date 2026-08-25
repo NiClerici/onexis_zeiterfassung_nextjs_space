@@ -6,9 +6,44 @@ import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
 import { requireOrg, assertMonthEditable, AccessError } from "@/lib/access";
 import { diffTimeEntryFields } from "@/lib/audit";
 import { logError } from "@/lib/error-log";
+import { pruefeEintragKonflikte, type VergleichbarerEintrag } from "@/lib/entry-overlap";
 
 function isValidType(type: unknown): type is EintragTyp {
   return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
+}
+
+// "HH:MM", 00:00–23:59 — dieselbe Prüfung, die vorher fehlte und wodurch ein
+// Wert wie "8" oder "25:00" ungefiltert bis in stundenAusEintrag() (lib/
+// calc.ts) durchlief und dort split(":").map(Number) zu NaN machte, das sich
+// danach durch Monatssummen, Überzeit-Berechnung und Exporte frisst.
+function isValidTimeString(s: unknown): s is string {
+  return typeof s === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+// Eine "arbeit"-Zeile ist gültig, wenn entweder BEIDE Zeiten ein valides
+// HH:MM sind (der Normalfall — jede Zeile, die über den Tagesdialog
+// gespeichert wird) ODER beide null sind und stattdessen eine Stundenzahl
+// vorliegt (das reine hours-Format des Stundenrapport-Imports, siehe
+// TimeEntry.countsAsWorktime in prisma/schema.prisma und
+// stundenAusEintrag() in lib/calc.ts, die für diesen Fall auf `hours`
+// zurückfällt). Jede andere Kombination — fehlende, halb gesetzte oder
+// falsch formatierte Zeiten — war vorher speicherbar und ergab über
+// stundenAusEintrag() stumm 0h oder NaN; das ist jetzt ein 400.
+function arbeitszeitIstGueltig(von: string | null, bis: string | null, hours: number | null): boolean {
+  if (isValidTimeString(von) && isValidTimeString(bis)) return true;
+  if (von == null && bis == null && hours != null) return true;
+  return false;
+}
+
+// Netto-Minuten (bis − von − Pause, Mitternachts-Konvention wie
+// stundenAusEintrag() in lib/calc.ts). null nur, wenn von/bis fehlen.
+function nettoMinuten(von: string, bis: string, pauseMin: number): number {
+  const [vh, vm] = von.split(":").map(Number);
+  const [bh, bm] = bis.split(":").map(Number);
+  let bisMin = bh * 60 + bm;
+  const vonMin = vh * 60 + vm;
+  if (bisMin < vonMin) bisMin += 24 * 60;
+  return bisMin - vonMin - pauseMin;
 }
 
 // Nimmt nur "YYYY-MM-DD" (führender Teil, Rest wird ignoriert) und baut UTC-Mitternacht.
@@ -46,6 +81,31 @@ async function resolveProjectAndCustomer(
     return { projectId: null, customerId: customer.id };
   }
   return { projectId: null, customerId: null };
+}
+
+// Alle anderen (nicht gelöschten) Zeilen desselben Kalendertags, als Basis
+// für pruefeEintragKonflikte() (lib/entry-overlap.ts). excludeId schliesst
+// bei PUT die eigene Zeile aus, damit sie nicht gegen sich selbst geprüft
+// wird — bei POST (neue Zeile) ist excludeId immer undefined.
+async function loadOtherEntriesOfDay(
+  orgId: string,
+  userId: string,
+  date: Date,
+  excludeId?: string
+): Promise<VergleichbarerEintrag[]> {
+  const rows = await prisma.timeEntry.findMany({
+    where: { userId, orgId, deletedAt: null, date, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { id: true, type: true, von: true, bis: true, pauseMin: true, hours: true, countsAsWorktime: true },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    typ: r.type as EintragTyp,
+    von: r.von,
+    bis: r.bis,
+    pauseMin: r.pauseMin,
+    hours: r.hours,
+    countsAsWorktime: r.countsAsWorktime,
+  }));
 }
 
 export async function GET(req: Request) {
@@ -113,6 +173,35 @@ export async function POST(req: Request) {
     const isArbeit = type === "arbeit";
     const clampedPause = Math.max(0, Math.min(1440, Number(pauseMin) || 0));
     const clampedHours = hours != null && hours !== "" ? Math.max(0, Math.min(24, Number(hours))) : null;
+    const nextVon = isArbeit ? (von || null) : null;
+    const nextBis = isArbeit ? (bis || null) : null;
+    // Arbeitszeit ohne gültige Von/Bis und ohne Stundenzahl wurde bisher
+    // stillschweigend als 0h gespeichert (stundenAusEintrag() in lib/calc.ts
+    // fällt auf hours ?? 0 zurück) bzw. ein kaputtes Zeitformat wie "25:00"
+    // vergiftete alle darauf aufbauenden Summen mit NaN — beides jetzt ein
+    // harter 400 statt eines stillen Datenfehlers. Reine hours-Zeilen (kein
+    // von/bis, siehe arbeitszeitIstGueltig) bleiben erlaubt, das ist das
+    // Format des Stundenrapport-Imports.
+    if (isArbeit && !arbeitszeitIstGueltig(nextVon, nextBis, clampedHours)) {
+      return NextResponse.json({ error: "Von/Bis (Format HH:MM) oder eine Stundenzahl sind für Arbeitszeit erforderlich" }, { status: 400 });
+    }
+    if (isArbeit && nextVon && nextBis && nettoMinuten(nextVon, nextBis, clampedPause) < 0) {
+      return NextResponse.json({ error: "Pause ist länger als die eingetragene Zeitspanne" }, { status: 400 });
+    }
+
+    const kandidat: VergleichbarerEintrag = {
+      typ: type,
+      von: nextVon,
+      bis: nextBis,
+      pauseMin: isArbeit ? clampedPause : 0,
+      hours: clampedHours,
+    };
+    const andereDesTages = await loadOtherEntriesOfDay(orgId, userId, parsedDate, undefined);
+    const konflikte = pruefeEintragKonflikte(kandidat, andereDesTages);
+    const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
+    if (blockierend.length > 0) {
+      return NextResponse.json({ error: blockierend[0].message }, { status: 409 });
+    }
 
     const entry = await prisma.timeEntry.create({
       data: {
@@ -120,8 +209,8 @@ export async function POST(req: Request) {
         orgId,
         date: parsedDate,
         type,
-        von: isArbeit ? (von || null) : null,
-        bis: isArbeit ? (bis || null) : null,
+        von: nextVon,
+        bis: nextBis,
         pauseMin: isArbeit ? clampedPause : 0,
         notiz: notiz?.trim?.() || null,
         customerId: resolved.customerId,
@@ -130,7 +219,8 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ entry });
+    const warnings = konflikte.filter((k) => k.art === "ueberlappung").map((k) => k.message);
+    return NextResponse.json({ entry, ...(warnings.length > 0 ? { warnings } : {}) });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);
@@ -183,6 +273,27 @@ export async function PUT(req: Request) {
     const clampedHours =
       hours !== undefined ? (hours === null || hours === "" ? null : Math.max(0, Math.min(24, Number(hours)))) : undefined;
 
+    const nextVon = isArbeit ? (von !== undefined ? von || null : existing.von) : null;
+    const nextBis = isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null;
+    const nextPauseMin = isArbeit
+      ? pauseMin !== undefined
+        ? Math.max(0, Math.min(1440, Number(pauseMin) || 0))
+        : existing.pauseMin
+      : 0;
+    const nextHoursForValidation = clampedHours !== undefined ? clampedHours : existing.hours;
+    // Dieselbe Pflicht- und Formatprüfung wie POST — auch beim Bearbeiten
+    // darf eine "arbeit"-Zeile nicht ohne oder mit kaputten Von/Bis UND ohne
+    // Stundenzahl landen. Reine hours-Zeilen aus dem Stundenrapport-Import
+    // (existing.von/bis bereits null, siehe TimeEntry.countsAsWorktime)
+    // bleiben beim reinen "Graduieren" (Speichern ohne von/bis-Änderung,
+    // siehe countsAsWorktime unten) unverändert gültig.
+    if (isArbeit && !arbeitszeitIstGueltig(nextVon, nextBis, nextHoursForValidation)) {
+      return NextResponse.json({ error: "Von/Bis (Format HH:MM) oder eine Stundenzahl sind für Arbeitszeit erforderlich" }, { status: 400 });
+    }
+    if (isArbeit && nextVon && nextBis && nettoMinuten(nextVon, nextBis, nextPauseMin) < 0) {
+      return NextResponse.json({ error: "Pause ist länger als die eingetragene Zeitspanne" }, { status: 400 });
+    }
+
     // Vollständig aufgelöster Zielzustand — Basis sowohl für das Update als
     // auch für den Feld-Diff gegen "existing" (MIGRATION.md Punkt 6b). Felder,
     // die nicht mitgeschickt wurden, fallen auf den bestehenden Wert zurück,
@@ -191,13 +302,9 @@ export async function PUT(req: Request) {
     const nextState = {
       date: parsedDate ?? existing.date,
       type: nextType,
-      von: isArbeit ? (von !== undefined ? von || null : existing.von) : null,
-      bis: isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null,
-      pauseMin: isArbeit
-        ? pauseMin !== undefined
-          ? Math.max(0, Math.min(1440, Number(pauseMin) || 0))
-          : existing.pauseMin
-        : 0,
+      von: nextVon,
+      bis: nextBis,
+      pauseMin: nextPauseMin,
       notiz: notiz !== undefined ? notiz?.trim?.() || null : existing.notiz,
       customerId: nextCustomerId !== undefined ? nextCustomerId : existing.customerId,
       projectId: nextProjectId !== undefined ? nextProjectId : existing.projectId,
@@ -210,6 +317,22 @@ export async function PUT(req: Request) {
       // reale Arbeitszeit.
       countsAsWorktime: true,
     };
+
+    const kandidat: VergleichbarerEintrag = {
+      id,
+      typ: nextState.type,
+      von: nextState.von,
+      bis: nextState.bis,
+      pauseMin: nextState.pauseMin,
+      hours: nextState.hours,
+    };
+    const andereDesTages = await loadOtherEntriesOfDay(orgId, userId, nextState.date, id);
+    const konflikte = pruefeEintragKonflikte(kandidat, andereDesTages);
+    const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
+    if (blockierend.length > 0) {
+      return NextResponse.json({ error: blockierend[0].message }, { status: 409 });
+    }
+
     const changes = diffTimeEntryFields(existing, nextState);
 
     const entry = await prisma.$transaction(async (tx) => {
@@ -222,7 +345,8 @@ export async function PUT(req: Request) {
       return updated;
     });
 
-    return NextResponse.json({ entry });
+    const warnings = konflikte.filter((k) => k.art === "ueberlappung").map((k) => k.message);
+    return NextResponse.json({ entry, ...(warnings.length > 0 ? { warnings } : {}) });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error(error);

@@ -87,7 +87,7 @@ const translations: Record<string, string> = {
   "calendar.delete": "Löschen",
   "calendar.von": "Von",
   "calendar.bis": "Bis",
-  "calendar.pause": "Pause (Min.)",
+  "calendar.pause": "Pause (Min., wird abgezogen)",
   "calendar.notiz": "Notiz",
   "calendar.notizPlaceholder": "Optionale Notiz",
   "calendar.tasks": "Tasks",
@@ -102,7 +102,23 @@ const translations: Record<string, string> = {
   "calendar.entryHours": "Stunden für diesen Eintrag",
   "calendar.modeVonBis": "Von/Bis",
   "calendar.modeHours": "Stunden direkt",
-  "calendar.hoursDirectHint": "Von/Bis werden automatisch daraus abgeleitet (Start 08:00, Pause nach ArG ab 5.5h).",
+  "calendar.hoursDirectHint": "Von/Bis werden automatisch daraus abgeleitet (Start bei der bisherigen Von-Zeit, Pause nach ArG ab 5.5h, sofern nicht manuell gesetzt).",
+  // Netto-Anzeige unter beiden Erfassungsmodi (Bugfix: unklar, ob die Pause
+  // von der Zeit abgezogen wird) — {von}/{bis} und {pause}/{hours} kommen aus
+  // stundenAusEintrag() (lib/calc.ts), derselben Funktion, die auch die
+  // Monatssumme berechnet, damit die Anzeige nie von der echten Summe abweicht.
+  "calendar.netHoursVonBis": "{von}–{bis} − {pause} Min. Pause = {hours} h",
+  "calendar.netHoursMode": "{hours} h netto + {pause} Min. Pause → {von}–{bis}",
+  "calendar.pauseExceedsSpan": "Die Pause ist länger als die eingetragene Zeitspanne.",
+  "calendar.timeClamped": "Das Ende wurde auf 23:59 begrenzt.",
+  // Konflikt-Warnungen (Bugfix: zweimal dieselbe Zeit am selben Tag war
+  // speicherbar) — dieselben Meldungstexte wie lib/entry-overlap.ts, aber
+  // hier als Live-Hinweis im Dialog, bevor überhaupt gespeichert wird.
+  // Überschrift über den Konflikt-Meldungen einer Zeile — der eigentliche
+  // Text kommt aus lib/entry-overlap.ts (pruefeEintragKonflikte), das schon
+  // die konkrete Uhrzeit des kollidierenden Eintrags nennt.
+  "calendar.conflictBlocking": "Speichern gesperrt:",
+  "calendar.conflictWarning": "Hinweis:",
   "calendar.complianceTitle": "Hinweise zur Arbeitszeit",
   "calendar.entrySaved": "Eintrag gespeichert",
   "calendar.entryDeleted": "Eintrag gelöscht",
