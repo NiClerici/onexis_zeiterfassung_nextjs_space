@@ -87,7 +87,12 @@ const translations: Record<string, string> = {
   "calendar.delete": "Löschen",
   "calendar.von": "Von",
   "calendar.bis": "Bis",
-  "calendar.pause": "Pause (Min., wird abgezogen)",
+  // Kurz gehalten, damit das Label in der 3-spaltigen Von/Bis/Pause-Zeile
+  // (components/day-entry-dialog.tsx) nicht zweizeilig umbricht und dadurch
+  // gegenüber den Von/Bis-Labels nach unten verrutscht — die Netto-Zeile
+  // direkt darunter (calendar.netHoursVonBis) zeigt "X Min. Pause" ohnehin
+  // schon explizit als Abzug, das war der eigentliche Zweck des Zusatzes.
+  "calendar.pause": "Pause (Min.)",
   "calendar.notiz": "Notiz",
   "calendar.notizPlaceholder": "Optionale Notiz",
   "calendar.tasks": "Tasks",
