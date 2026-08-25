@@ -9,6 +9,7 @@ import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOf
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { isTrialExpired } from "@/lib/billing-rules";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const baseTabs = [
   { href: "/calendar", icon: Calendar, labelKey: "nav.calendar" },
@@ -72,10 +73,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-[hsl(var(--background))] flex flex-col">
       <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border/50">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="relative w-24 h-8"><Image src="/logo-onexis.png" alt="ONEXIS" fill className="object-contain object-left" /></div>
-          <nav className="hidden sm:flex items-center gap-1">
-            {tabs?.map?.((tab: any) => { const Icon = tab?.icon; const isActive = pathname?.startsWith?.(tab?.href); return (<Link key={tab?.href} href={tab?.href} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition", isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>{Icon && <Icon className="w-4 h-4" />}{t(tab?.labelKey ?? "")}</Link>); })}
-          </nav>
+          {/* dark:brightness-0 dark:invert faerbt das dunkelgraue Logo-PNG im
+              Dark Mode einfarbig weiss (das tuerkise X geht dabei bewusst
+              verloren) — sonst wäre der dunkelgraue Text auf dunklem
+              Hintergrund fast unsichtbar. */}
+          <div className="relative w-24 h-8"><Image src="/logo-onexis.png" alt="ONEXIS" fill className="object-contain object-left dark:brightness-0 dark:invert" /></div>
+          <div className="flex items-center gap-1">
+            <nav className="hidden sm:flex items-center gap-1">
+              {tabs?.map?.((tab: any) => { const Icon = tab?.icon; const isActive = pathname?.startsWith?.(tab?.href); return (<Link key={tab?.href} href={tab?.href} className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition", isActive ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-accent")}>{Icon && <Icon className="w-4 h-4" />}{t(tab?.labelKey ?? "")}</Link>); })}
+            </nav>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
       {/* Trial-Hinweis (MIGRATION.md Punkt 12) — sichtbar für alle Rollen,

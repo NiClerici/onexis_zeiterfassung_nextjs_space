@@ -56,26 +56,59 @@
     --status-off: 199 94% 67%;
   }
 
+  /* Dark Theme. Der Block hier war lange eine wortwoertliche Kopie von :root —
+     die .dark-Klasse wurde zwar gesetzt, aber keine einzige Farbe aenderte
+     sich. Die Ebenen-Logik der Hell-Palette bleibt erhalten, nur invertiert:
+     Cards sind HELLER als der Hintergrund (nicht dunkler), damit Karten wie
+     im Light Theme nach vorne treten. */
   .dark {
-    --background: 220 14% 96%;
-    --foreground: 0 0% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 11%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 11%;
-    --primary: 211 100% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 0 0% 20%;
-    --muted: 220 14% 96%;
-    --muted-foreground: 0 0% 53%;
-    --accent: 220 14% 93%;
-    --accent-foreground: 0 0% 11%;
-    --destructive: 0 84% 60%;
+    --background: 216 11% 9%;
+    --foreground: 240 5% 95%;
+
+    --card: 218 12% 13%;
+    --card-foreground: 240 5% 95%;
+
+    --popover: 218 12% 13%;
+    --popover-foreground: 240 5% 95%;
+
+    /* Blau wird heller (62% statt 50%) und die Vordergrundfarbe dunkel:
+       --primary traegt hier zwei Rollen — Buttonflaeche (bg-primary
+       text-primary-foreground) UND Textfarbe (text-primary fuer den aktiven
+       Nav-Tab, Akzentzahlen). Das Light-Blau bei 50% waere als Text auf
+       dunklem Grund zu kontrastarm; helles Blau + dunkler Text erfuellt
+       beide Rollen. */
+    --primary: 211 100% 62%;
+    --primary-foreground: 216 30% 12%;
+
+    --secondary: 218 12% 18%;
+    --secondary-foreground: 240 5% 90%;
+
+    --muted: 218 12% 18%;
+    --muted-foreground: 220 8% 65%;
+
+    --accent: 218 12% 22%;
+    --accent-foreground: 240 5% 95%;
+
+    --destructive: 0 72% 55%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 211 100% 50%;
+
+    --border: 216 9% 22%;
+    --input: 216 9% 26%;
+    --ring: 211 100% 62%;
+
+    /* Die :root-Werte sind auf weissen Grund kalibriert und wirken auf
+       dunklem Grund stumpf — hier eine Stufe heller. */
+    --chart-1: 211 100% 65%;
+    --chart-2: 141 55% 55%;
+    --chart-3: 30 85% 60%;
+    --chart-4: 280 60% 68%;
+    --chart-5: 340 70% 62%;
+
+    /* Die hellen Schatten (rgb(0 0 0 / 0.03)) sind auf Dunkel praktisch
+       unsichtbar — deutlich kraeftiger, damit Karten sich weiterhin abheben. */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 1px 3px 0 rgb(0 0 0 / 0.5);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.45);
   }
 }
 

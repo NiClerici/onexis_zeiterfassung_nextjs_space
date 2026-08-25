@@ -658,7 +658,7 @@ export default function CalendarPage() {
       <div className="flex justify-end gap-2 mb-3">
         <button
           onClick={openVacModal}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 text-sky-700 border border-sky-200/60 text-xs font-medium hover:bg-sky-100 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300 border border-sky-200/60 dark:border-sky-800/60 text-xs font-medium hover:bg-sky-100 dark:hover:bg-sky-950/50 transition"
           title={t("calendar.bulkVacation")}
         >
           <Palmtree className="w-3.5 h-3.5" />
@@ -677,9 +677,9 @@ export default function CalendarPage() {
       {/* Monatsabschluss-Hinweis (MIGRATION.md Punkt 6e) — nur für member,
           da nur diese Rolle laut Punkt-Text schreibgeschützt ist. */}
       {isMember && isCurrentMonthLocked && (
-        <div className="flex items-start gap-2 p-3 mb-3 rounded-xl bg-amber-50 border border-amber-200">
-          <Lock className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-800">{t("calendar.monthLocked")}</p>
+        <div className="flex items-start gap-2 p-3 mb-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50">
+          <Lock className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-800 dark:text-amber-200">{t("calendar.monthLocked")}</p>
         </div>
       )}
 
@@ -743,12 +743,12 @@ export default function CalendarPage() {
                   {distinctTypes.length > 0 && (
                     <span className="flex items-center gap-0.5 mt-0.5">
                       {distinctTypes.map((typ) => (
-                        <span key={typ} className={`w-1.5 h-1.5 rounded-full ${TYPE_DOT_COLOR[typ] ?? 'bg-gray-300'}`} />
+                        <span key={typ} className={`w-1.5 h-1.5 rounded-full ${TYPE_DOT_COLOR[typ] ?? 'bg-muted-foreground/30'}`} />
                       ))}
                     </span>
                   )}
                   {dayEntries.length === 0 && !isMissing && (
-                    <span className="w-1.5 h-1.5 rounded-full mt-0.5 bg-gray-300" />
+                    <span className="w-1.5 h-1.5 rounded-full mt-0.5 bg-muted-foreground/30" />
                   )}
                   <span className={`text-[10px] font-mono mt-0.5 leading-none ${isMissing ? 'text-red-500 font-semibold' : 'text-muted-foreground'}`}>
                     {dayEntries.length > 0 ? `${round1(totalHours)}h` : isMissing ? `${round1(tagesSoll)}h` : ' '}
@@ -776,7 +776,7 @@ export default function CalendarPage() {
 
       {/* Legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-gray-300" /> {t("calendar.noEntries")}</span>
+        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-muted-foreground/30" /> {t("calendar.noEntries")}</span>
         {Object.entries(TYPE_DOT_COLOR).map(([typ, color]) => (
           <span key={typ} className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${color}`} /> {t(`calendar.type.${typ}`)}</span>
         ))}
@@ -809,9 +809,9 @@ export default function CalendarPage() {
 
               {!hasStdWeek ? (
                 <div className="space-y-3">
-                  <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200">
-                    <CalendarClock className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                    <p className="text-xs text-amber-800">{t("calendar.applyNoTemplate")}</p>
+                  <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50">
+                    <CalendarClock className="w-4 h-4 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-800 dark:text-amber-200">{t("calendar.applyNoTemplate")}</p>
                   </div>
                   <Link
                     href="/profile"
@@ -921,8 +921,8 @@ export default function CalendarPage() {
 
                 {/* Preview */}
                 {vacFrom && vacTo && vacPreview.totalDays > 0 && (
-                  <div className="bg-sky-50 border border-sky-200/60 rounded-xl p-3 text-xs">
-                    <div className="flex items-center gap-2 text-sky-700 font-medium mb-1">
+                  <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-200/60 dark:border-sky-800/60 rounded-xl p-3 text-xs">
+                    <div className="flex items-center gap-2 text-sky-700 dark:text-sky-300 font-medium mb-1">
                       <Palmtree className="w-3.5 h-3.5" /> {t("calendar.vacPreviewTitle")}
                     </div>
                     <p className="text-sky-800">

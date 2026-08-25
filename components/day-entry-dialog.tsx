@@ -393,17 +393,17 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
             </div>
 
             {locked && (
-              <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 border border-amber-200">
-                <p className="text-xs text-amber-800">{t("calendar.monthLocked")}</p>
+              <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50">
+                <p className="text-xs text-amber-800 dark:text-amber-200">{t("calendar.monthLocked")}</p>
               </div>
             )}
 
             {violations.length > 0 && (
-              <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 border border-amber-200">
-                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2 p-3 mb-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs font-medium text-amber-800 mb-0.5">{t("calendar.complianceTitle")}</p>
-                  <ul className="text-xs text-amber-800 space-y-0.5">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-200 mb-0.5">{t("calendar.complianceTitle")}</p>
+                  <ul className="text-xs text-amber-800 dark:text-amber-200 space-y-0.5">
                     {violations.map((v, i) => (
                       <li key={i}>{v.message}</li>
                     ))}
@@ -455,20 +455,20 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                     </div>
 
                     {!row.countsAsWorktime && (
-                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5">
                         {t("calendar.countsAsWorktimeHint")}
                       </p>
                     )}
 
                     {(blockierend.length > 0 || ueberlappungen.length > 0) && (
-                      <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 space-y-1">
+                      <div className="text-xs bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-lg px-2.5 py-1.5 space-y-1">
                         {blockierend.map((k, i) => (
-                          <p key={`b-${i}`} className="text-amber-900 font-medium">
+                          <p key={`b-${i}`} className="text-amber-900 dark:text-amber-100 font-medium">
                             {t("calendar.conflictBlocking")} {k.message}
                           </p>
                         ))}
                         {ueberlappungen.map((k, i) => (
-                          <p key={`o-${i}`} className="text-amber-700">
+                          <p key={`o-${i}`} className="text-amber-700 dark:text-amber-300">
                             {t("calendar.conflictWarning")} {k.message}
                           </p>
                         ))}

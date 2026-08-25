@@ -364,7 +364,7 @@ export default function AbsencesPage() {
                           {member.days.map((cell) => (
                             <td
                               key={cell.date}
-                              className={`w-6 h-6 rounded-md ${cell.type ? TYPE_CELL_COLOR[cell.type] ?? "bg-gray-300" : "bg-secondary/40"} ${dayWarning[cell.date] ? "ring-2 ring-red-400" : ""}`}
+                              className={`w-6 h-6 rounded-md ${cell.type ? TYPE_CELL_COLOR[cell.type] ?? "bg-muted-foreground/30" : "bg-secondary/40"} ${dayWarning[cell.date] ? "ring-2 ring-red-400" : ""}`}
                               title={cell.type ? `${member.name}, ${fmtDate(cell.date)}: ${t(`calendar.type.${cell.type}`)}` : undefined}
                             />
                           ))}
@@ -395,7 +395,7 @@ export default function AbsencesPage() {
                   <div className="space-y-1 mt-3 pt-3 border-t border-border/50">
                     {calendarRanges.map((r) => (
                       <div key={`${r.userId}-${r.type}-${r.from}`} className="flex items-center gap-2 text-xs">
-                        <span className={`w-2 h-2 rounded-full shrink-0 ${TYPE_CELL_COLOR[r.type] ?? "bg-gray-300"}`} />
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${TYPE_CELL_COLOR[r.type] ?? "bg-muted-foreground/30"}`} />
                         <span className="font-medium">{r.name}</span>
                         <span className="text-muted-foreground">
                           {r.from === r.to ? fmtDate(r.from) : `${fmtDate(r.from)} – ${fmtDate(r.to)}`} · {t(`calendar.type.${r.type}`)} · {r.days} {r.days === 1 ? t("absences.dayOne") : t("absences.dayMany")}

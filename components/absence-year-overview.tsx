@@ -108,7 +108,7 @@ export function AbsenceYearOverview({ members, feriensaldi, typeColor }: Props) 
                             key={d.date}
                             className={`h-5 rounded-[1px] ${
                               d.type
-                                ? typeColor[d.type] ?? "bg-gray-300"
+                                ? typeColor[d.type] ?? "bg-muted-foreground/30"
                                 : isWeekend(d.date)
                                   ? "bg-secondary/30"
                                   : "bg-secondary/70"

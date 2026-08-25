@@ -203,7 +203,7 @@ export default function HolidaysAdminPage() {
                   <span className="text-sm">{h.name}</span>{" "}
                   {h.halfDay && <span className="text-xs text-muted-foreground">(halber Tag)</span>}{" "}
                   {h.canton ? (
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">{h.canton}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300">{h.canton}</span>
                   ) : (
                     <span className="text-xs px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">Basissatz</span>
                   )}
