@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
-import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, CalendarClock, Banknote, AlertTriangle } from "lucide-react";
+import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, CalendarClock, Banknote, AlertTriangle, Sigma } from "lucide-react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -34,6 +34,17 @@ interface AnalyticsData {
   futureHours: number;
   fullTargetHours: number;
   forecastOvertime: number;
+  // Kumulierter Saldo seit Eintritt, unabhängig vom gewählten Zeitraum — null,
+  // wenn der gewählte Zeitraum die Historie bereits abdeckt.
+  cumulative: {
+    since: string;
+    asOf: string;
+    targetHours: number;
+    actualHours: number;
+    overtimeGross: number;
+    paidOutHours: number;
+    netOvertime: number;
+  } | null;
   vacationBalance: VacationBalance;
   monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }>;
 }
@@ -174,7 +185,7 @@ export default function AnalyticsPage() {
               <p className={`text-xs font-mono mt-1 ${diffColor}`}>{diff >= 0 ? "+" : ""}{diff?.toFixed?.(1)}h</p>
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-              <div className="flex items-center gap-2 mb-2"><Clock className="w-4 h-4 text-orange-500" /><span className="text-xs text-muted-foreground">{hasPaidOut ? t("analytics.netOvertime") : t("analytics.overtime")}</span></div>
+              <div className="flex items-center gap-2 mb-2"><Clock className="w-4 h-4 text-orange-500" /><span className="text-xs text-muted-foreground">{hasPaidOut ? t("analytics.netOvertime") : t("analytics.overtimePeriod")}</span></div>
               <p className={`text-xl font-mono font-bold ${hasPaidOut ? netOvertimeColor : overtimeColor}`}>{hasPaidOut ? (netOvertimeVal >= 0 ? "+" : "") + netOvertimeVal?.toFixed?.(1) : (overtimeVal >= 0 ? "+" : "") + overtimeVal?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
               {hasPaidOut && (
                 <div className="mt-1.5 space-y-0.5">
@@ -183,6 +194,19 @@ export default function AnalyticsPage() {
                 </div>
               )}
             </motion.div>
+            {data?.cumulative && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }} title={t("analytics.cumulativeHint", { date: new Date(data.cumulative.asOf).toLocaleDateString('de-CH') })}>
+                <div className="flex items-center gap-2 mb-2"><Sigma className="w-4 h-4 text-indigo-500" /><span className="text-xs text-muted-foreground">{t("analytics.cumulativeOvertime")}</span></div>
+                <p className={`text-xl font-mono font-bold ${data.cumulative.netOvertime >= 0 ? "text-green-600" : "text-red-500"}`}>{data.cumulative.netOvertime >= 0 ? "+" : ""}{data.cumulative.netOvertime.toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
+                <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.cumulativeSince", { date: new Date(data.cumulative.since).toLocaleDateString('de-CH') })}</p>
+                {data.cumulative.paidOutHours > 0 && (
+                  <div className="mt-1.5 space-y-0.5">
+                    <p className="text-xs text-muted-foreground">{t("analytics.overtime")}: <span className={`font-mono ${data.cumulative.overtimeGross >= 0 ? "text-green-600" : "text-red-500"}`}>{data.cumulative.overtimeGross >= 0 ? "+" : ""}{data.cumulative.overtimeGross.toFixed(1)}h</span></p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1"><Banknote className="w-3 h-3" /> {t("analytics.paidOutOvertime")}: <span className="font-mono">−{data.cumulative.paidOutHours.toFixed(1)}h</span></p>
+                  </div>
+                )}
+              </motion.div>
+            )}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><Percent className="w-4 h-4 text-purple-500" /><span className="text-xs text-muted-foreground">{t("analytics.billingRate")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.billingRate ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">%</span></p>

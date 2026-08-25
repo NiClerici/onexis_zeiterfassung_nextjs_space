@@ -36,6 +36,18 @@ function mapChanges(changes: any[]): PensumChangeInput[] {
   return changes.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
 }
 
+// Lokale Kopie von lib/calc.ts toUTCDate() (dort nicht exportiert) — normalisiert
+// Date/String auf UTC-Mitternacht, konsistent mit den @db.Date-Grenzen oben.
+function toUTCDateLocal(input: Date | string): Date {
+  if (typeof input === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(input);
+    if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    const d = new Date(input);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  }
+  return new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()));
+}
+
 function mapEintraege(entries: any[]): EintragMitDatum[] {
   return entries.map((e) => ({
     date: e.date,
@@ -132,10 +144,54 @@ export async function GET(req: Request) {
     });
     const fs = feriensaldo({ jahr: displayYear, heute, profil, changes, holidays, eintraege: mapEintraege(yearFerienRaw) });
 
-    // Ausbezahlte Überstunden: kumulierte Gesamtsumme (informativ), unabhängig vom Zeitraum
-    const allPayouts = await prisma.overtimePayout.findMany({ where: { userId, orgId } });
-    const totalPaidOutHours = allPayouts.reduce((s, p) => s + p.hours, 0);
+    // Ausbezahlte Überstunden INNERHALB der gewählten Periode — konsistent mit
+    // k.ueberstunden (das ebenfalls nur Auszahlungen in [startDate,endDate]
+    // abzieht, siehe lib/calc.ts kennzahlen() payoutSum). Vorher wurde hier die
+    // Gesamtsumme aller Auszahlungen verwendet, wodurch "overtime − paidOutHours"
+    // nicht mehr mit "netOvertime" übereinstimmte, sobald eine Auszahlung
+    // ausserhalb des gewählten Zeitraums lag. Die Gesamtsumme lebt jetzt in
+    // cumulative.paidOutHours.
+    const periodPaidOutHours = payouts.reduce((s, p) => s + p.hours, 0);
     const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
+
+    // Kumulierter Überstundensaldo seit Eintritt (unabhängig vom gewählten
+    // Zeitraum) — analog zum Feriensaldo-Muster oben, das ebenfalls einen
+    // eigenen, vom periodType unabhängigen Query fährt. null, wenn der gewählte
+    // Zeitraum die ganze Historie bereits abdeckt (z.B. custom ab Eintritt) —
+    // dann wäre der kumulierte Wert identisch mit dem Zeitraum-Wert.
+    const saldoStart = toUTCDateLocal(membership?.startDate ?? membership?.entryDate ?? startDate);
+    let cumulative: {
+      since: string;
+      asOf: string;
+      targetHours: number;
+      actualHours: number;
+      overtimeGross: number;
+      paidOutHours: number;
+      netOvertime: number;
+    } | null = null;
+    if (saldoStart.getTime() < startDate.getTime()) {
+      const [cumEntriesRaw, cumPayoutsRaw] = await Promise.all([
+        prisma.timeEntry.findMany({ where: { userId, orgId, deletedAt: null, date: { gte: saldoStart, lte: endDate } } }),
+        prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: saldoStart, lte: endDate } } }),
+      ]);
+      const cumEintraege = mapEintraege(cumEntriesRaw);
+      const cumPayouts: PayoutInput[] = cumPayoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
+      // kundenstunden: 0 — Verrechnungsgrad wird aus diesem Aufruf nicht
+      // verwendet, ein zusätzlicher billableHoursByUserAndMonth()-Query über
+      // die ganze Historie wäre hier reiner Overhead.
+      const kc = kennzahlen({ from: saldoStart, to: endDate, heute, eintraege: cumEintraege, profil, changes, payouts: cumPayouts, holidays, kundenstunden: 0 });
+      const cumPaidOutHours = cumPayouts.reduce((s, p) => s + p.hours, 0);
+      const asOf = endDate.getTime() < heute.getTime() ? endDate : heute;
+      cumulative = {
+        since: saldoStart.toISOString().slice(0, 10),
+        asOf: asOf.toISOString().slice(0, 10),
+        targetHours: kc.soll,
+        actualHours: kc.ist,
+        overtimeGross: Math.round((kc.ist - kc.soll) * 10) / 10,
+        paidOutHours: Math.round(cumPaidOutHours * 10) / 10,
+        netOvertime: kc.ueberstunden,
+      };
+    }
 
     // Monatliche Aufschlüsselung fürs Chart
     const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
@@ -181,9 +237,12 @@ export async function GET(req: Request) {
       vacationDays: fs.bezogen,
       holidays: currentDailyRate > 0 ? Math.round((holidayHours / currentDailyRate) * 10) / 10 : 0,
       overtime: overtimeGross,
-      paidOutHours: Math.round(totalPaidOutHours * 10) / 10,
+      paidOutHours: Math.round(periodPaidOutHours * 10) / 10,
       // Überstunden (Art. 321c OR, vertraglich) — netto nach Auszahlungen.
       netOvertime: k.ueberstunden,
+      // Kumulierter Saldo seit Eintritt, unabhängig vom gewählten Zeitraum —
+      // s.o. Berechnung. null, wenn der Zeitraum die Historie bereits abdeckt.
+      cumulative,
       // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — separater Begriff,
       // siehe lib/calc.ts KennzahlenResult.ueberzeit (MIGRATION.md Punkt 6a).
       weeklyOvertime: k.ueberzeit,

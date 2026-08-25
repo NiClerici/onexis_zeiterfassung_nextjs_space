@@ -625,6 +625,53 @@ describe("ueberstunden berücksichtigt OvertimePayouts (Art. 321c OR)", () => {
   });
 });
 
+describe("kennzahlen über einen Mehrmonats-Zeitraum (Grundlage für kumulierten Überstundensaldo)", () => {
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+
+  it("liefert für [from,to] über mehrere Monate dieselbe Summe wie die Einzelmonate zusammen", () => {
+    // Regressionsschutz für die Klipp-Logik in kennzahlen() (from/to-Grenzen,
+    // lib/calc.ts) — die Monatsschleife in app/api/analytics/route.ts rief
+    // früher versehentlich mit demselben Perioden-Array pro Monat auf und
+    // erzeugte dadurch Laufsummen statt Monatswerte (siehe Kommentar dort).
+    const eintraege = [
+      { date: "2026-06-15", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 },
+      { date: "2026-07-15", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 },
+      { date: "2026-08-15", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 },
+    ];
+    const gesamt = kennzahlen({
+      from: "2026-06-01", to: "2026-08-31", heute: "2026-09-01",
+      eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    const juni = kennzahlen({ from: "2026-06-01", to: "2026-06-30", heute: "2026-09-01", eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0 });
+    const juli = kennzahlen({ from: "2026-07-01", to: "2026-07-31", heute: "2026-09-01", eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0 });
+    const august = kennzahlen({ from: "2026-08-01", to: "2026-08-31", heute: "2026-09-01", eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0 });
+
+    expect(gesamt.ist).toBeCloseTo(juni.ist + juli.ist + august.ist, 5);
+    expect(gesamt.soll).toBeCloseTo(juni.soll + juli.soll + august.soll, 5);
+    expect(gesamt.ueberstunden).toBeCloseTo(juni.ueberstunden + juli.ueberstunden + august.ueberstunden, 5);
+  });
+
+  it("klippt soll/ist bei einem in der Zukunft liegenden 'to' auf heute", () => {
+    // Für den kumulierten Saldo bis Ende eines gewählten (evtl. zukünftigen)
+    // Monats darf soll/ist nicht über 'heute' hinauslaufen — sonst würde ein
+    // in der Zukunft liegender Monat den Gesamtsaldo mit Zukunfts-Soll
+    // aufblähen, das noch gar nicht erarbeitet werden konnte.
+    const eintraege = [
+      { date: "2026-08-10", typ: "arbeit" as const, von: "08:00", bis: "17:00", pauseMin: 0 },
+    ];
+    const bisEndeSeptember = kennzahlen({
+      from: "2026-06-01", to: "2026-09-30", heute: "2026-08-20",
+      eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    const bisHeute = kennzahlen({
+      from: "2026-06-01", to: "2026-08-20", heute: "2026-08-20",
+      eintraege, profil, changes: [], holidays: [], payouts: [], kundenstunden: 0,
+    });
+    expect(bisEndeSeptember.ist).toBe(bisHeute.ist);
+    expect(bisEndeSeptember.soll).toBe(bisHeute.soll);
+  });
+});
+
 describe("ueberzeit: wöchentliches gesetzliches Limit (Art. 12/13 ArG)", () => {
   const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
 

@@ -244,6 +244,10 @@ const translations: Record<string, string> = {
   "profile.payoutSaved": "Auszahlung erfasst!",
   "analytics.paidOutOvertime": "Ausbezahlte Überstunden",
   "analytics.netOvertime": "Überstunden (netto)",
+  "analytics.overtimePeriod": "Überstunden (Zeitraum)",
+  "analytics.cumulativeOvertime": "Überstundensaldo gesamt",
+  "analytics.cumulativeSince": "seit {date}",
+  "analytics.cumulativeHint": "Aufgelaufener Saldo seit Eintritt: Ist − Soll − alle Auszahlungen, Stand {date}.",
   // Profile
   "profile.title": "Profil",
   "profile.personalInfo": "Persönliche Daten",
