@@ -190,8 +190,8 @@ const translations: Record<string, string> = {
   "analytics.targetHours": "Sollarbeitszeit",
   // Sollarbeitszeit ist bewusst der Wert BIS HEUTE (kennzahlen() rechnet
   // bisHeute = min(to, heute), lib/calc.ts) — bei laufender Periode zeigt die
-  // Karte darunter zusätzlich das Soll des ganzen Zeitraums (sollGesamt).
-  "analytics.targetToDate": "bis heute",
+  // Arbeitszeit-Karte darunter zusätzlich das Soll des ganzen Zeitraums
+  // (sollGesamt, ofFullTarget).
   "analytics.ofFullTarget": "{hours}h im ganzen Zeitraum",
   "analytics.actualHours": "Geleistete Stunden",
   "analytics.difference": "Differenz",
@@ -236,19 +236,30 @@ const translations: Record<string, string> = {
   "profile.addPayout": "Auszahlung erfassen",
   "profile.noPayouts": "Keine Auszahlungen erfasst",
   "profile.payoutSaved": "Auszahlung erfasst!",
-  // Überstunden-Matrix (bis heute / per Periodenende × dieser Monat / gesamt
-  // seit Eintritt) — löst die frühere Streuung über zwei Kacheln + eine
-  // Prognose-Box ab, die dieselben drei Zahlen unübersichtlich verteilt hatten.
-  "analytics.overtimeBlock": "Überstunden",
-  "analytics.colTotal": "Gesamt",
-  "analytics.colTotalSince": "seit {date}",
+  // Überstunden-Hero: eine dominante Zahl (kumulierter Nettosaldo seit Eintritt)
+  // plus Badge für den gewählten Zeitraum. Löst die frühere 4-Felder-Matrix ab —
+  // die vierte Zahl (Prognose nur für den Zeitraum) entfällt bewusst, sie stand
+  // gleichgewichtig neben drei anderen und wurde dadurch nicht gelesen.
+  "analytics.overtimeHeroTotal": "Überstunden gesamt seit {date}",
+  // Fallback, wenn der gewählte Zeitraum die ganze Historie abdeckt und die API
+  // deshalb kein cumulative liefert — dann ist die Hero-Zahl der Zeitraumwert.
+  "analytics.overtimeHeroPeriod": "Überstunden {label}",
+  // Akkusativ für den Badge ("+28.9h diesen Monat"), getrennt von den
+  // Nominativ-Labels colPeriodMonth/colPeriodRange, die die Auszahlungszeile
+  // beschriften.
+  "analytics.badgePeriodMonth": "diesen Monat",
+  "analytics.badgePeriodRange": "im Zeitraum",
+  "analytics.forecastFoot": "Prognose per {date}: {hours} · geplant: {planned}h",
   "analytics.colPeriodMonth": "dieser Monat",
   "analytics.colPeriodRange": "gewählter Zeitraum",
-  "analytics.rowToDate": "bis heute",
-  "analytics.rowAtPeriodEnd": "per {date}",
-  "analytics.plannedFutureFoot": "geplante Zukunft: {hours} h",
   "analytics.payoutsFootTotal": "Auszahlungen gesamt: {hours} h",
   "analytics.payoutsFootPeriod": "davon {label}: {hours} h",
+  // Arbeitszeit-Karte: Ist/Soll mit Fortschrittsbalken statt zwei getrennter
+  // Kacheln (Sollarbeitszeit + Geleistete Stunden).
+  "analytics.workTime": "Arbeitszeit",
+  "analytics.workTargetMet": "Soll erreicht, {hours}h darüber",
+  "analytics.workTargetShort": "noch {hours}h bis Soll",
+  "analytics.vacationToPlan": "Ferien noch zu planen",
   // Profile
   "profile.title": "Profil",
   "profile.personalInfo": "Persönliche Daten",
