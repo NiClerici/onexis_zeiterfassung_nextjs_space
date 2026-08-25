@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useI18n } from "@/lib/i18n";
-import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, CalendarClock, Banknote, AlertTriangle, Sigma } from "lucide-react";
+import { BarChart3, TrendingUp, Target, Percent, Clock, Palmtree, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -30,10 +30,15 @@ interface AnalyticsData {
   overtime: number;
   paidOutHours: number;
   netOvertime: number;
+  // Netto-Prognose per Periodenende (Ist + Geplant − Soll − Auszahlungen),
+  // für den gewählten Zeitraum. Zusammen mit netOvertime die rechte Spalte
+  // der Überstunden-Matrix unten.
+  forecastNetOvertime: number;
+  // ISO-Datum des Periodenendes — für die Zeilenbeschriftung "per <Datum>".
+  periodEnd: string;
   weeklyOvertime: number;
   futureHours: number;
   fullTargetHours: number;
-  forecastOvertime: number;
   // Kumulierter Saldo seit Eintritt, unabhängig vom gewählten Zeitraum — null,
   // wenn der gewählte Zeitraum die Historie bereits abdeckt.
   cumulative: {
@@ -44,6 +49,7 @@ interface AnalyticsData {
     overtimeGross: number;
     paidOutHours: number;
     netOvertime: number;
+    forecastNetOvertime: number;
   } | null;
   vacationBalance: VacationBalance;
   monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }>;
@@ -116,20 +122,23 @@ export default function AnalyticsPage() {
     fetchAnalytics();
   }, [fetchAnalytics, periodType, customFrom, customTo, customDefaultsLoaded]);
 
-  const diff = (data?.actualHours ?? 0) - (data?.targetHours ?? 0);
   // targetHours ist das Soll BIS HEUTE, fullTargetHours das der ganzen Periode
   // (k.soll vs. k.sollGesamt, siehe app/api/analytics/route.ts). Sind sie
-  // gleich, ist die Periode abgeschlossen — dann bleiben Soll-Subline und
-  // Prognose-Box weg, weil sie nichts Zusätzliches aussagen.
+  // gleich, ist die Periode abgeschlossen — dann bleibt die Soll-Subline weg,
+  // weil sie nichts Zusätzliches aussagt.
   const periodOngoing = (data?.fullTargetHours ?? 0) > (data?.targetHours ?? 0);
-  const diffColor = diff >= 0 ? "text-green-600" : "text-red-500";
-  const overtimeVal = data?.overtime ?? 0;
-  const overtimeColor = overtimeVal >= 0 ? "text-green-600" : "text-red-500";
-  const hasPaidOut = (data?.paidOutHours ?? 0) > 0;
-  const netOvertimeVal = data?.netOvertime ?? 0;
-  const netOvertimeColor = netOvertimeVal >= 0 ? "text-green-600" : "text-red-500";
   const weeklyOvertimeVal = data?.weeklyOvertime ?? 0;
   const weeklyOvertimeColor = weeklyOvertimeVal > 0 ? "text-red-500" : "text-green-600";
+
+  // Überstunden-Matrix: bis heute / per Periodenende × gesamt seit Eintritt /
+  // gewählter Zeitraum. Alle vier Werte netto (nach Auszahlungen), damit die
+  // Matrix zeilen- wie spaltenweise aufgeht (siehe app/api/analytics/route.ts).
+  const netOvertimeVal = data?.netOvertime ?? 0;
+  const forecastNetOvertimeVal = data?.forecastNetOvertime ?? 0;
+  const cumulative = data?.cumulative ?? null;
+  const periodColLabel = periodType === "month" ? t("analytics.colPeriodMonth") : t("analytics.colPeriodRange");
+  const periodEndLabel = data?.periodEnd ? new Date(data.periodEnd).toLocaleDateString("de-CH") : "";
+  const cellColor = (v: number) => (v >= 0 ? "text-green-600" : "text-red-500");
 
   return (
     <div>
@@ -170,8 +179,61 @@ export default function AnalyticsPage() {
         <div className="text-center py-12 text-muted-foreground text-sm">{t("common.loading")}</div>
       ) : data ? (
         <>
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+          {/* Überstunden-Matrix: bis heute / per Periodenende × gesamt seit
+              Eintritt / gewählter Zeitraum — zieht die drei zentralen Zahlen
+              zusammen, die vorher über zwei Kacheln und eine Prognose-Box
+              verstreut waren. */}
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card rounded-2xl p-4 mb-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-orange-500" /> {t("analytics.overtimeBlock")}
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th></th>
+                    {cumulative && (
+                      <th className="text-right font-normal pb-2 pl-4">
+                        <div className="text-xs text-muted-foreground">{t("analytics.colTotal")}</div>
+                        <div className="text-[11px] text-muted-foreground">{t("analytics.colTotalSince", { date: new Date(cumulative.since).toLocaleDateString("de-CH") })}</div>
+                      </th>
+                    )}
+                    <th className="text-right font-normal pb-2 pl-4">
+                      <div className="text-xs text-muted-foreground">{periodColLabel}</div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row" className="text-left font-normal text-xs text-muted-foreground py-1">{t("analytics.rowToDate")}</th>
+                    {cumulative && (
+                      <td className={`text-right font-mono font-bold pl-4 ${cellColor(cumulative.netOvertime)}`}>{cumulative.netOvertime >= 0 ? "+" : ""}{cumulative.netOvertime.toFixed(1)}h</td>
+                    )}
+                    <td className={`text-right font-mono font-bold pl-4 ${cellColor(netOvertimeVal)}`}>{netOvertimeVal >= 0 ? "+" : ""}{netOvertimeVal.toFixed(1)}h</td>
+                  </tr>
+                  <tr>
+                    <th scope="row" className="text-left font-normal text-xs text-muted-foreground py-1">{t("analytics.rowAtPeriodEnd", { date: periodEndLabel })}</th>
+                    {cumulative && (
+                      <td className={`text-right font-mono font-bold pl-4 ${cellColor(cumulative.forecastNetOvertime)}`}>{cumulative.forecastNetOvertime >= 0 ? "+" : ""}{cumulative.forecastNetOvertime.toFixed(1)}h</td>
+                    )}
+                    <td className={`text-right font-mono font-bold pl-4 ${cellColor(forecastNetOvertimeVal)}`}>{forecastNetOvertimeVal >= 0 ? "+" : ""}{forecastNetOvertimeVal.toFixed(1)}h</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-3 text-xs text-muted-foreground space-y-0.5">
+              <p>{t("analytics.plannedFutureFoot", { hours: (data.futureHours ?? 0).toFixed(1) })}</p>
+              {(cumulative ? cumulative.paidOutHours > 0 : (data.paidOutHours ?? 0) > 0) && (
+                <p>
+                  {t("analytics.payoutsFootTotal", { hours: (cumulative ? cumulative.paidOutHours : data.paidOutHours ?? 0).toFixed(1) })}
+                  {cumulative && ` · ${t("analytics.payoutsFootPeriod", { label: periodColLabel, hours: (data.paidOutHours ?? 0).toFixed(1) })}`}
+                </p>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Detail-Kacheln */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><Target className="w-4 h-4 text-primary" /><span className="text-xs text-muted-foreground">{t("analytics.targetHours")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.targetHours ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
@@ -182,79 +244,24 @@ export default function AnalyticsPage() {
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><TrendingUp className="w-4 h-4 text-green-500" /><span className="text-xs text-muted-foreground">{t("analytics.actualHours")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.actualHours ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
-              <p className={`text-xs font-mono mt-1 ${diffColor}`}>{diff >= 0 ? "+" : ""}{diff?.toFixed?.(1)}h</p>
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-              <div className="flex items-center gap-2 mb-2"><Clock className="w-4 h-4 text-orange-500" /><span className="text-xs text-muted-foreground">{hasPaidOut ? t("analytics.netOvertime") : t("analytics.overtimePeriod")}</span></div>
-              <p className={`text-xl font-mono font-bold ${hasPaidOut ? netOvertimeColor : overtimeColor}`}>{hasPaidOut ? (netOvertimeVal >= 0 ? "+" : "") + netOvertimeVal?.toFixed?.(1) : (overtimeVal >= 0 ? "+" : "") + overtimeVal?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
-              {hasPaidOut && (
-                <div className="mt-1.5 space-y-0.5">
-                  <p className="text-xs text-muted-foreground">{t("analytics.overtime")}: <span className={`font-mono ${overtimeColor}`}>{overtimeVal >= 0 ? "+" : ""}{overtimeVal?.toFixed?.(1)}h</span></p>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1"><Banknote className="w-3 h-3" /> {t("analytics.paidOutOvertime")}: <span className="font-mono">−{(data?.paidOutHours ?? 0)?.toFixed?.(1)}h</span></p>
-                </div>
-              )}
-            </motion.div>
-            {data?.cumulative && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }} title={t("analytics.cumulativeHint", { date: new Date(data.cumulative.asOf).toLocaleDateString('de-CH') })}>
-                <div className="flex items-center gap-2 mb-2"><Sigma className="w-4 h-4 text-indigo-500" /><span className="text-xs text-muted-foreground">{t("analytics.cumulativeOvertime")}</span></div>
-                <p className={`text-xl font-mono font-bold ${data.cumulative.netOvertime >= 0 ? "text-green-600" : "text-red-500"}`}>{data.cumulative.netOvertime >= 0 ? "+" : ""}{data.cumulative.netOvertime.toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
-                <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.cumulativeSince", { date: new Date(data.cumulative.since).toLocaleDateString('de-CH') })}</p>
-                {data.cumulative.paidOutHours > 0 && (
-                  <div className="mt-1.5 space-y-0.5">
-                    <p className="text-xs text-muted-foreground">{t("analytics.overtime")}: <span className={`font-mono ${data.cumulative.overtimeGross >= 0 ? "text-green-600" : "text-red-500"}`}>{data.cumulative.overtimeGross >= 0 ? "+" : ""}{data.cumulative.overtimeGross.toFixed(1)}h</span></p>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1"><Banknote className="w-3 h-3" /> {t("analytics.paidOutOvertime")}: <span className="font-mono">−{data.cumulative.paidOutHours.toFixed(1)}h</span></p>
-                  </div>
-                )}
-              </motion.div>
-            )}
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><Percent className="w-4 h-4 text-purple-500" /><span className="text-xs text-muted-foreground">{t("analytics.billingRate")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.billingRate ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">%</span></p>
               <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.billingRateBasis", { customer: (data?.customerHours ?? 0).toFixed(1), work: (data?.workHours ?? 0).toFixed(1) })}</p>
             </motion.div>
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
               <div className="flex items-center gap-2 mb-2"><BarChart3 className="w-4 h-4 text-sky-500" /><span className="text-xs text-muted-foreground">{t("analytics.customerHours")}</span></div>
               <p className="text-xl font-mono font-bold">{(data?.customerHours ?? 0)?.toFixed?.(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
               {(data?.customerHoursFromMigration ?? 0) > 0 && (
                 <p className="text-xs font-mono mt-1 text-muted-foreground">{t("analytics.customerHoursFromMigration", { hours: (data?.customerHoursFromMigration ?? 0).toFixed(1) })}</p>
               )}
             </motion.div>
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.32 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }} title={t("analytics.weeklyOvertimeHint")}>
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }} title={t("analytics.weeklyOvertimeHint")}>
               <div className="flex items-center gap-2 mb-2"><AlertTriangle className="w-4 h-4 text-red-500" /><span className="text-xs text-muted-foreground">{t("analytics.weeklyOvertime")}</span></div>
               <p className={`text-xl font-mono font-bold ${weeklyOvertimeColor}`}>{weeklyOvertimeVal.toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
             </motion.div>
-
           </div>
-
-          {/* Prognose-Info-Box (laufende Periode oder vorerfasste Zukunftseinträge) */}
-          {((data?.futureHours ?? 0) > 0 || periodOngoing) && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200/60 rounded-2xl p-4 mb-4" style={{ boxShadow: "var(--shadow-sm)" }}>
-              <h2 className="text-sm font-display font-semibold mb-3 flex items-center gap-2">
-                <CalendarClock className="w-4 h-4 text-sky-600" /> {t("analytics.forecast")}
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-white/70 rounded-xl p-3">
-                  <p className="text-xs text-muted-foreground mb-1">{t("analytics.plannedFuture")}</p>
-                  <p className="text-lg font-mono font-bold text-sky-600">{(data.futureHours ?? 0).toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
-                </div>
-                <div className="bg-white/70 rounded-xl p-3">
-                  <p className="text-xs text-muted-foreground mb-1">{t("analytics.fullTargetHours")}</p>
-                  <p className="text-lg font-mono font-bold">{(data.fullTargetHours ?? 0).toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
-                </div>
-                <div className="bg-white/70 rounded-xl p-3">
-                  <p className="text-xs text-muted-foreground mb-1">{t("analytics.totalIstPlusPlan")}</p>
-                  <p className="text-lg font-mono font-bold">{((data.actualHours ?? 0) + (data.futureHours ?? 0)).toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span></p>
-                </div>
-                <div className="bg-white/70 rounded-xl p-3">
-                  <p className="text-xs text-muted-foreground mb-1">{t("analytics.forecastBalance")}</p>
-                  <p className={`text-lg font-mono font-bold ${(data.forecastOvertime ?? 0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                    {(data.forecastOvertime ?? 0) >= 0 ? "+" : ""}{(data.forecastOvertime ?? 0).toFixed(1)}<span className="text-sm font-normal text-muted-foreground">h</span>
-                  </p>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2 italic">{t("analytics.forecastHint")}</p>
-            </motion.div>
-          )}
 
           {/* Vacation Balance */}
           {data?.vacationBalance && (

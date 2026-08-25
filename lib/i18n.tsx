@@ -214,7 +214,6 @@ const translations: Record<string, string> = {
   "analytics.to": "Bis",
   "analytics.h": "h",
   "analytics.noData": "Keine Daten für diesen Zeitraum",
-  "analytics.overtime": "Überstunden",
   // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — eigener Begriff,
   // getrennt von Überstunden (MIGRATION.md Punkt 6a).
   "analytics.weeklyOvertime": "Überzeit",
@@ -226,12 +225,7 @@ const translations: Record<string, string> = {
   "analytics.stillToPlan": "Noch zu planen",
   "analytics.plannedVacation": "Geplant",
   "analytics.totalEntitlement": "Gesamtanspruch",
-  "analytics.forecast": "Prognose bis Periodenende",
-  "analytics.plannedFuture": "Geplante Stunden (Zukunft)",
   "analytics.fullTargetHours": "Sollstunden (gesamt)",
-  "analytics.totalIstPlusPlan": "Total (Ist + Geplant)",
-  "analytics.forecastBalance": "Prognose Saldo",
-  "analytics.forecastHint": "Rein informativ — Soll für den ganzen Zeitraum, gegengerechnet mit dem Ist bis heute plus allfälligen vorerfassten Einträgen in der Zukunft.",
   // Overtime payouts
   "profile.overtimePayouts": "Überstunden-Auszahlungen",
   "profile.overtimePayoutsDesc": "Hier kannst du ausbezahlte Überstunden erfassen. Diese werden vom Überstundensaldo abgezogen.",
@@ -242,12 +236,19 @@ const translations: Record<string, string> = {
   "profile.addPayout": "Auszahlung erfassen",
   "profile.noPayouts": "Keine Auszahlungen erfasst",
   "profile.payoutSaved": "Auszahlung erfasst!",
-  "analytics.paidOutOvertime": "Ausbezahlte Überstunden",
-  "analytics.netOvertime": "Überstunden (netto)",
-  "analytics.overtimePeriod": "Überstunden (Zeitraum)",
-  "analytics.cumulativeOvertime": "Überstundensaldo gesamt",
-  "analytics.cumulativeSince": "seit {date}",
-  "analytics.cumulativeHint": "Aufgelaufener Saldo seit Eintritt: Ist − Soll − alle Auszahlungen, Stand {date}.",
+  // Überstunden-Matrix (bis heute / per Periodenende × dieser Monat / gesamt
+  // seit Eintritt) — löst die frühere Streuung über zwei Kacheln + eine
+  // Prognose-Box ab, die dieselben drei Zahlen unübersichtlich verteilt hatten.
+  "analytics.overtimeBlock": "Überstunden",
+  "analytics.colTotal": "Gesamt",
+  "analytics.colTotalSince": "seit {date}",
+  "analytics.colPeriodMonth": "dieser Monat",
+  "analytics.colPeriodRange": "gewählter Zeitraum",
+  "analytics.rowToDate": "bis heute",
+  "analytics.rowAtPeriodEnd": "per {date}",
+  "analytics.plannedFutureFoot": "geplante Zukunft: {hours} h",
+  "analytics.payoutsFootTotal": "Auszahlungen gesamt: {hours} h",
+  "analytics.payoutsFootPeriod": "davon {label}: {hours} h",
   // Profile
   "profile.title": "Profil",
   "profile.personalInfo": "Persönliche Daten",

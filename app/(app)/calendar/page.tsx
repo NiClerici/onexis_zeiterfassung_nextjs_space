@@ -478,7 +478,7 @@ export default function CalendarPage() {
       });
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
-        const skipped = (data?.skippedExisting ?? 0) + (data?.skippedProtected ?? 0) + (data?.skippedLocked ?? 0);
+        const skipped = (data?.skippedExisting ?? 0) + (data?.skippedProtected ?? 0) + (data?.skippedLocked ?? 0) + (data?.skippedHoliday ?? 0);
         toast.success(
           t("calendar.applyResult", {
             created: String(data?.created ?? 0),

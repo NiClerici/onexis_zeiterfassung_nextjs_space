@@ -153,6 +153,11 @@ export async function GET(req: Request) {
     // cumulative.paidOutHours.
     const periodPaidOutHours = payouts.reduce((s, p) => s + p.hours, 0);
     const overtimeGross = Math.round((k.ist - k.soll) * 10) / 10;
+    // Netto-Prognose per Periodenende (Ist + Geplant − Soll − Auszahlungen) —
+    // k.prognoseSaldo (lib/calc.ts:334) ist die Brutto-Variante, für die
+    // Überstunden-Matrix in der UI müssen beide Prognose-Werte aber netto sein,
+    // konsistent mit netOvertime/cumulative.netOvertime unten.
+    const forecastNetOvertimePeriod = Math.round((k.prognoseSaldo - periodPaidOutHours) * 10) / 10;
 
     // Kumulierter Überstundensaldo seit Eintritt (unabhängig vom gewählten
     // Zeitraum) — analog zum Feriensaldo-Muster oben, das ebenfalls einen
@@ -168,6 +173,7 @@ export async function GET(req: Request) {
       overtimeGross: number;
       paidOutHours: number;
       netOvertime: number;
+      forecastNetOvertime: number;
     } | null = null;
     if (saldoStart.getTime() < startDate.getTime()) {
       const [cumEntriesRaw, cumPayoutsRaw] = await Promise.all([
@@ -190,6 +196,7 @@ export async function GET(req: Request) {
         overtimeGross: Math.round((kc.ist - kc.soll) * 10) / 10,
         paidOutHours: Math.round(cumPaidOutHours * 10) / 10,
         netOvertime: kc.ueberstunden,
+        forecastNetOvertime: Math.round((kc.prognoseSaldo - cumPaidOutHours) * 10) / 10,
       };
     }
 
@@ -240,16 +247,20 @@ export async function GET(req: Request) {
       paidOutHours: Math.round(periodPaidOutHours * 10) / 10,
       // Überstunden (Art. 321c OR, vertraglich) — netto nach Auszahlungen.
       netOvertime: k.ueberstunden,
+      // Netto-Prognose per Periodenende, für die Überstunden-Matrix.
+      forecastNetOvertime: forecastNetOvertimePeriod,
+      // ISO-Datum des Periodenendes — für die Zeilenbeschriftung "per <Datum>"
+      // in der Überstunden-Matrix. Die UI kann das für quarter/year/custom
+      // nicht selbst ableiten.
+      periodEnd: endDate.toISOString().slice(0, 10),
       // Kumulierter Saldo seit Eintritt, unabhängig vom gewählten Zeitraum —
       // s.o. Berechnung. null, wenn der Zeitraum die Historie bereits abdeckt.
       cumulative,
       // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — separater Begriff,
       // siehe lib/calc.ts KennzahlenResult.ueberzeit (MIGRATION.md Punkt 6a).
       weeklyOvertime: k.ueberzeit,
-      // Forecast fields (für Prognose-Info-Box)
       futureHours: k.geplantZukunft,
       fullTargetHours: k.sollGesamt,
-      forecastOvertime: k.prognoseSaldo,
       // Feriensaldo (für Anzeigejahr)
       vacationBalance: {
         year: displayYear,

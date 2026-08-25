@@ -108,6 +108,22 @@ export async function POST(req: Request) {
         )
       : new Set<string>();
 
+    // Feiertage im Zielzeitraum — vorher fehlte dieser Query komplett, wodurch
+    // die Standardwoche auch auf Feiertage volle Arbeitszeit-Einträge legte,
+    // obwohl sollStundenTag() (lib/calc.ts) für diese Tage 0 (bzw. bei
+    // halfDay das halbe Tagessoll) ansetzt — die Analytics-Prognose lief dadurch
+    // pro Feiertag um ein Tagessoll zu hoch. Gleiches Set-Muster wie
+    // lockedMonths oben. Bei mehreren Holiday-Zeilen auf denselben Tag (das
+    // @@unique erlaubt das über verschiedene "name") gewinnt die zuerst
+    // gefundene, analog zu holidays.find() in sollStundenTag().
+    const holidaysRaw = await prisma.holiday.findMany({ where: { orgId, date: { gte: fromDate, lte: toDate } } });
+    const holidayMap = new Map<string, { halfDay: boolean }>();
+    for (const h of holidaysRaw) {
+      const d = new Date(h.date);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+      if (!holidayMap.has(key)) holidayMap.set(key, { halfDay: h.halfDay });
+    }
+
     let created = 0;
     let updated = 0;
     let skippedExisting = 0;
@@ -115,6 +131,7 @@ export async function POST(req: Request) {
     let skippedProtected = 0; // Ferien/Feiertage werden nie überschrieben
     let skippedLocked = 0; // gesperrter Monat (member)
     let skippedMultiple = 0; // Tag hat bereits mehrere Zeilen (z.B. Projektaufteilung) — wird nie angefasst
+    let skippedHoliday = 0; // ganzer Feiertag — kein Eintrag nötig, sollStundenTag() liest die Holiday-Tabelle direkt
 
     const current = new Date(fromDate);
     // entryId → alt/neu für den Audit-Trail bei Updates (MIGRATION.md Punkt
@@ -127,13 +144,21 @@ export async function POST(req: Request) {
     const updatesToApply: PlannedUpdate[] = [];
 
     while (current <= toDate) {
-      const hours = getTemplateHoursForDay(current, tpl);
+      const templateHours = getTemplateHoursForDay(current, tpl);
       const key = `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, "0")}-${String(current.getUTCDate()).padStart(2, "0")}`;
       // UTC-Grenzen: siehe parseDateYMD oben.
       const dbDate = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate()));
+      const holiday = holidayMap.get(key);
+      // Halbtags-Feiertag: halbe Stunden weiterverwenden, deckt sich mit
+      // sollStundenTag() (lib/calc.ts), das für Halbtage basis/2 ansetzt.
+      const hours = holiday?.halfDay ? templateHours / 2 : templateHours;
 
       if (lockedMonths.has(`${current.getUTCFullYear()}-${current.getUTCMonth() + 1}`)) {
         skippedLocked++;
+      } else if (holiday && !holiday.halfDay) {
+        // Ganzer Feiertag: kein Eintrag nötig, sollStundenTag() liest die
+        // Holiday-Tabelle direkt und setzt das Tagessoll ohnehin auf 0.
+        skippedHoliday++;
       } else if (hours <= 0) {
         skippedZero++;
       } else {
@@ -202,6 +227,7 @@ export async function POST(req: Request) {
       skippedProtected,
       skippedLocked,
       skippedMultiple,
+      skippedHoliday,
       totalDays: diffDays,
     });
   } catch (error: any) {
