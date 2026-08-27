@@ -71,7 +71,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] flex flex-col">
-      <header className="sticky top-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border/50">
+      <header className="sticky top-0 z-50 bg-card/95 supports-[backdrop-filter]:bg-card/80 backdrop-blur-xl border-b border-border/50">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center justify-between">
           {/* dark:brightness-0 dark:invert faerbt das dunkelgraue Logo-PNG im
               Dark Mode einfarbig weiss (das tuerkise X geht dabei bewusst
@@ -98,8 +98,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ) : null}
         </div>
       )}
-      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-4 pb-20 sm:pb-4">{children}</main>
-      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-card/90 backdrop-blur-xl border-t border-border/50 safe-area-pb">
+      <main className="flex-1 max-w-3xl mx-auto w-full px-4 py-4 pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom,0px)+1.5rem)] sm:pb-4">{children}</main>
+      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-card/95 supports-[backdrop-filter]:bg-card/90 backdrop-blur-xl border-t border-border/50 safe-area-pb">
         {/* HARDENING.md C2: bei 8 Tabs (owner/admin) ergab justify-around
             ohne Scroll-Möglichkeit ~520px Breite in 375px Viewport —
             "Feiertage"/"Rechtliches" liefen über den rechten Rand hinaus

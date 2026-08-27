@@ -31,6 +31,15 @@ export const metadata = {
   },
 };
 
+// viewportFit: "cover" macht die App-Inhalte hinter Notch/Home-Indicator
+// zeichenbar — erst dadurch liefert env(safe-area-inset-bottom) (siehe
+// .safe-area-pb in globals.css) auf dem iPhone einen Wert ungleich 0.
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="de" suppressHydrationWarning>

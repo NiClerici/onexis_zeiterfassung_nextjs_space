@@ -800,8 +800,8 @@ export default function CalendarPage() {
       {/* Apply Standardwoche Modal */}
       <AnimatePresence>
         {applyModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm px-4" onClick={() => setApplyModalOpen(false)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-md" style={{ boxShadow: "var(--shadow-lg)" }}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4" onClick={() => setApplyModalOpen(false)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-md max-h-[85svh] overflow-y-auto overscroll-contain" style={{ boxShadow: "var(--shadow-lg)" }}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-display font-semibold flex items-center gap-2"><CalendarClock className="w-4 h-4 text-primary" /> {t("calendar.applyStdWeekTitle")}</h3>
                 <button onClick={() => setApplyModalOpen(false)} className="p-1 rounded-lg hover:bg-accent transition"><X className="w-4 h-4" /></button>
@@ -847,11 +847,11 @@ export default function CalendarPage() {
                   )}
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <label htmlFor="apply-from" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyFrom")}</label>
                       <input id="apply-from" type="date" value={applyFrom} onChange={(e) => setApplyFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <label htmlFor="apply-to" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyTo")}</label>
                       <input id="apply-to" type="date" value={applyTo} onChange={(e) => setApplyTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                     </div>
@@ -898,8 +898,8 @@ export default function CalendarPage() {
       {/* Bulk Vacation Modal */}
       <AnimatePresence>
         {vacModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm px-4" onClick={() => setVacModalOpen(false)}>
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-md" style={{ boxShadow: "var(--shadow-lg)" }}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4" onClick={() => setVacModalOpen(false)}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e: React.MouseEvent) => e?.stopPropagation?.()} className="bg-card rounded-2xl p-6 w-full max-w-md max-h-[85svh] overflow-y-auto overscroll-contain" style={{ boxShadow: "var(--shadow-lg)" }}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-display font-semibold flex items-center gap-2"><Palmtree className="w-4 h-4 text-sky-600" /> {t("calendar.bulkVacationTitle")}</h3>
                 <button onClick={() => setVacModalOpen(false)} className="p-1 rounded-lg hover:bg-accent transition"><X className="w-4 h-4" /></button>
@@ -909,11 +909,11 @@ export default function CalendarPage() {
                 <p className="text-xs text-muted-foreground">{t("calendar.bulkVacationDesc")}</p>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <label htmlFor="vac-from" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyFrom")}</label>
                     <input id="vac-from" type="date" value={vacFrom} onChange={(e) => setVacFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <label htmlFor="vac-to" className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.applyTo")}</label>
                     <input id="vac-to" type="date" value={vacTo} onChange={(e) => setVacTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
                   </div>

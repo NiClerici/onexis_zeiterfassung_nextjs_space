@@ -378,7 +378,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm px-4"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4"
           onClick={onClose}
         >
           <motion.div
@@ -386,7 +386,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.95, opacity: 0 }}
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
-            className="bg-card rounded-2xl p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto"
+            className="bg-card rounded-2xl p-6 w-full max-w-lg max-h-[85svh] overflow-y-auto overscroll-contain"
             style={{ boxShadow: "var(--shadow-lg)" }}
           >
             <div className="flex items-center justify-between mb-4">
@@ -546,28 +546,28 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                             {zeit.geklemmt && <p className="text-xs text-amber-700 mt-1">{t("calendar.timeClamped")}</p>}
                           </div>
                         ) : (
-                          <div className="grid grid-cols-3 gap-2">
-                            <div>
+                          <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                            <div className="min-w-0">
                               <label htmlFor={`von-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.von")}</label>
                               <input
                                 id={`von-${row.key}`}
                                 type="time"
                                 value={row.von}
                                 onChange={(e) => updateRow(row.key, { von: e.target.value })}
-                                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                                className="w-full px-1 sm:px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                               />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <label htmlFor={`bis-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.bis")}</label>
                               <input
                                 id={`bis-${row.key}`}
                                 type="time"
                                 value={row.bis}
                                 onChange={(e) => updateRow(row.key, { bis: e.target.value })}
-                                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                                className="w-full px-1 sm:px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                               />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <label htmlFor={`pause-${row.key}`} className="text-xs font-medium text-muted-foreground mb-1 block">{t("calendar.pause")}</label>
                               <input
                                 id={`pause-${row.key}`}
@@ -577,7 +577,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                                 step="5"
                                 value={row.pauseMin}
                                 onChange={(e) => updateRow(row.key, { pauseMin: e.target.value })}
-                                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                                className="w-full px-1 sm:px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                               />
                             </div>
                             {nettoHours !== null && (

@@ -209,11 +209,11 @@ export default function AbsencesPage() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <h2 className="text-sm font-display font-semibold mb-3">{t("absences.newRequest")}</h2>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-muted-foreground mb-1 block">{t("absences.from")}</label>
             <input type="date" value={newFrom} onChange={(e) => setNewFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-muted-foreground mb-1 block">{t("absences.to")}</label>
             <input type="date" value={newTo} onChange={(e) => setNewTo(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>

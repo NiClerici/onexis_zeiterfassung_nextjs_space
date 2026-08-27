@@ -235,9 +235,9 @@ export default function AnalyticsPage() {
 
           {/* Arbeitszeit + Verrechnungsgrad: Ist/Soll mit Fortschrittsbalken
               statt vier separater Zahlenkacheln. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-              <Card className="p-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 items-stretch">
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="h-full">
+              <Card className="p-4 h-full">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 text-sm"><BarChart3 className="w-4 h-4 text-muted-foreground" />{t("analytics.workTime")}</div>
                   <span className="font-mono text-sm tabular-nums">{actualHoursVal.toFixed(1)}h / {targetHoursVal.toFixed(1)}h</span>
@@ -251,8 +251,8 @@ export default function AnalyticsPage() {
                 </p>
               </Card>
             </motion.div>
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-              <Card className="p-4">
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="h-full">
+              <Card className="p-4 h-full">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 text-sm"><Users className="w-4 h-4 text-muted-foreground" />{t("analytics.billingRate")}</div>
                   <span className="font-mono text-sm tabular-nums">{billingRateVal.toFixed(1)}%</span>
@@ -267,9 +267,9 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Überzeit + Ferien-Rest: kompakte 2er-Grid */}
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-              <Card className="p-4" title={t("analytics.weeklyOvertimeHint")}>
+          <div className="grid grid-cols-2 gap-4 mb-4 items-stretch">
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="h-full">
+              <Card className="p-4 h-full" title={t("analytics.weeklyOvertimeHint")}>
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
                   <TriangleAlert className="w-3.5 h-3.5" />{t("analytics.weeklyOvertime")}
                 </div>
@@ -278,8 +278,8 @@ export default function AnalyticsPage() {
                 </p>
               </Card>
             </motion.div>
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
-              <Card className="p-4">
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="h-full">
+              <Card className="p-4 h-full">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
                   <Palmtree className="w-3.5 h-3.5" />{t("analytics.vacationToPlan")}
                 </div>

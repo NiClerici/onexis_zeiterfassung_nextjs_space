@@ -19,7 +19,6 @@ const CHART_1 = "hsl(var(--chart-1))";
 const CHART_2 = "hsl(var(--chart-2))";
 const CHART_3 = "hsl(var(--chart-3))";
 const AXIS_TICK = { fontSize: 10, fill: "hsl(var(--muted-foreground))" };
-const AXIS_LABEL_STYLE = { textAnchor: "middle" as const, fontSize: 11, fill: "hsl(var(--muted-foreground))" };
 const TOOLTIP_STYLE = {
   fontSize: 11,
   borderRadius: 8,
@@ -41,20 +40,27 @@ export default function AnalyticsCharts({ data, t }: { data: AnalyticsData; t: (
         <h3 className="text-sm font-display font-semibold mb-3">{t("analytics.overview")}</h3>
         <div style={{ width: "100%", height: 280 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
+            <BarChart data={monthlyData} margin={{ top: 10, right: 0, left: 0, bottom: 20 }}>
               <XAxis
                 dataKey="month"
                 tickLine={false}
                 tick={AXIS_TICK}
                 interval="preserveStartEnd"
               />
-              <YAxis
-                tickLine={false}
-                tick={AXIS_TICK}
-                label={{ value: "h", angle: -90, position: "insideLeft", style: AXIS_LABEL_STYLE }}
+              <YAxis width={28} tickLine={false} tick={AXIS_TICK} />
+              {/* Der Default-Cursor von recharts ist ein deckender grauer
+                  Block ueber der vollen Balkenhoehe — auf Touch bleibt er
+                  nach dem Antippen stehen und verdeckt die Balken. Ein
+                  dezenter Tint statt Vollflaeche, dazu ausserhalb des
+                  Diagramms nicht sichtbar. */}
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                cursor={{ fill: "hsl(var(--muted-foreground))", fillOpacity: 0.08 }}
+                wrapperStyle={{ outline: "none", zIndex: 20 }}
+                allowEscapeViewBox={{ x: false, y: false }}
+                isAnimationActive={false}
               />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Legend verticalAlign="top" wrapperStyle={LEGEND_STYLE} />
+              <Legend verticalAlign="top" wrapperStyle={{ ...LEGEND_STYLE, paddingBottom: 8 }} />
               <Bar dataKey="target" name={t("analytics.targetHours")} fill={CHART_1} radius={[4, 4, 0, 0]} />
               <Bar dataKey="actual" name={t("analytics.actualHours")} fill={CHART_2} radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -67,20 +73,21 @@ export default function AnalyticsCharts({ data, t }: { data: AnalyticsData; t: (
         <h3 className="text-sm font-display font-semibold mb-3">{t("analytics.monthlyTrend")}</h3>
         <div style={{ width: "100%", height: 240 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={monthlyData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }}>
+            <LineChart data={monthlyData} margin={{ top: 10, right: 0, left: 0, bottom: 20 }}>
               <XAxis
                 dataKey="month"
                 tickLine={false}
                 tick={AXIS_TICK}
                 interval="preserveStartEnd"
               />
-              <YAxis
-                tickLine={false}
-                tick={AXIS_TICK}
-                label={{ value: "h", angle: -90, position: "insideLeft", style: AXIS_LABEL_STYLE }}
+              <YAxis width={28} tickLine={false} tick={AXIS_TICK} />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE}
+                wrapperStyle={{ outline: "none", zIndex: 20 }}
+                allowEscapeViewBox={{ x: false, y: false }}
+                isAnimationActive={false}
               />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Legend verticalAlign="top" wrapperStyle={LEGEND_STYLE} />
+              <Legend verticalAlign="top" wrapperStyle={{ ...LEGEND_STYLE, paddingBottom: 8 }} />
               <Line type="monotone" dataKey="work" name={t("analytics.workHours")} stroke={CHART_2} strokeWidth={2} dot={{ r: 3 }} />
               <Line type="monotone" dataKey="customer" name={t("analytics.customerHours")} stroke={CHART_3} strokeWidth={2} dot={{ r: 3 }} />
             </LineChart>

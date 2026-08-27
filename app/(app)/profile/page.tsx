@@ -701,7 +701,7 @@ export default function ProfilePage() {
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.weeklyHours")}</label><input type="number" step="0.5" min="0" max="100" value={weeklyHours} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWeeklyHours(clampNumInput(e?.target?.value ?? "", 0, 100))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.pensum")}</label><input type="number" step="5" min="0" max="200" value={pensum} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPensum(clampNumInput(e?.target?.value ?? "", 0, 200))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.vacationDays")}</label><input type="number" step="0.5" min="0" max="100" value={vacationDays} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVacationDays(clampNumInput(e?.target?.value ?? "", 0, 100))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
-          <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label><input type="date" value={startDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStartDate(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
+          <div className="min-w-0"><label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label><input type="date" value={startDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStartDate(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.kuerzel")}</label><input type="text" maxLength={10} value={kuerzel} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKuerzel(e?.target?.value ?? "")} placeholder={t("profile.kuerzelPlaceholder")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
         </div>
         <PensumPreview weeklyHours={weeklyHours} pensum={pensum} />
@@ -715,7 +715,7 @@ export default function ProfilePage() {
         <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> {t("profile.pensumChange")}</h2>
         <p className="text-xs text-muted-foreground mb-3">{t("profile.pensumChangeDesc")}</p>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-muted-foreground mb-1 block">{t("profile.effectiveFrom")}</label>
             <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
           </div>
@@ -771,7 +771,7 @@ export default function ProfilePage() {
         <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><Banknote className="w-4 h-4 text-primary" /> {t("profile.overtimePayouts")}</h2>
         <p className="text-xs text-muted-foreground mb-3">{t("profile.overtimePayoutsDesc")}</p>
         <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
+          <div className="min-w-0">
             <label className="text-xs text-muted-foreground mb-1 block">{t("profile.payoutDate")}</label>
             <input type="date" value={payoutDate} onChange={(e) => setPayoutDate(e.target.value)} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" />
           </div>
@@ -813,7 +813,12 @@ export default function ProfilePage() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.13 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><CalendarClock className="w-4 h-4 text-primary" /> {t("profile.standardWeek")}</h2>
         <p className="text-xs text-muted-foreground mb-3">{t("profile.standardWeekDesc")}</p>
-        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-3">
+        {/* 7 Spalten statt 4+3 — die 4er-Reihe liess in der zweiten Reihe
+            eine leere Luecke stehen (Kalender-Monatsraster geht mit demselben
+            grid-cols-7 als Vorbild). Enger Gap/Padding auf Mobile, weil bei
+            16px Feldschrift (iOS-Zoom-Fix) sonst der letzte Wochentag knapp
+            wird. */}
+        <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-3">
           {([
             { key: "weekday.mo", val: stdMon, set: setStdMon },
             { key: "weekday.tu", val: stdTue, set: setStdTue },
@@ -823,7 +828,7 @@ export default function ProfilePage() {
             { key: "weekday.sa", val: stdSat, set: setStdSat },
             { key: "weekday.su", val: stdSun, set: setStdSun },
           ] as const).map((d) => (
-            <div key={d.key}>
+            <div key={d.key} className="min-w-0">
               <label className="text-xs text-muted-foreground mb-1 block text-center">{t(d.key)}</label>
               <input
                 type="number"
@@ -832,7 +837,7 @@ export default function ProfilePage() {
                 max="24"
                 value={d.val}
                 onChange={(e) => d.set(clampNumInput(e.target.value, 0, 24))}
-                className="w-full px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                className="w-full px-1 sm:px-2 py-2 rounded-xl bg-secondary text-sm text-center font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
               />
             </div>
           ))}
@@ -1083,8 +1088,13 @@ export default function ProfilePage() {
               const expanded = !!cmExpanded[c.id];
               return (
                 <div key={c.id} className="bg-secondary rounded-xl px-3 py-2">
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="font-medium flex-1 min-w-0 truncate">{c.name}</span>
+                  {/* flex-wrap statt starrer Einzeiler: der Kundenname war auf
+                      375px zwischen Stunden-Input und "Auf Projekte
+                      aufteilen"-Button auf ein paar Buchstaben zusammen-
+                      gequetscht. Auf Mobile bekommt der Name seine eigene
+                      Zeile, ab sm bleibt der bisherige Einzeiler erhalten. */}
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="font-medium w-full sm:w-auto sm:flex-1 min-w-0 truncate">{c.name}</span>
                     <input
                       type="number"
                       min="0"

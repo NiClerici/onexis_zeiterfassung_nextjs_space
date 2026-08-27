@@ -54,6 +54,11 @@
     --status-none: 0 0% 83%;
     --status-logged: 141 60% 49%;
     --status-off: 199 94% 67%;
+
+    /* Hoehe der unteren Tab-Leiste (app/(app)/layout.tsx, h-16) — als Token
+       statt Magic Number, damit main-Padding und Leiste nicht auseinanderlaufen
+       koennen. */
+    --bottom-nav-h: 4rem;
   }
 
   /* Dark Theme. Der Block hier war lange eine wortwoertliche Kopie von :root —
@@ -115,6 +120,9 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    /* Hoehe des sticky Headers (app/(app)/layout.tsx, h-14) — verhindert dass
+       Anker/Fokus-Ziele darunter verschwinden. */
+    scroll-padding-top: 3.5rem;
   }
 
   * {
@@ -150,4 +158,54 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* --- Mobile/iOS-Safari-Korrekturen ------------------------------------- */
+
+/* iOS Safari gibt nativen Datums-/Zeitfeldern eine intrinsische Mindestbreite
+   und ignoriert dadurch die Spaltenbreite ihres Grid-Items (min-width: auto
+   loest sich aus dem Inhalt auf). Ohne appearance/min-width laufen die Felder
+   aus der Karte heraus und ueberlappen einander — sichtbar in "Neuer Antrag"
+   (Von/Bis), im Profil (Startdatum, Gueltig ab, Datum der Auszahlung) und im
+   Tagesdialog (Von/Bis/Pause). */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* iOS rendert den Wert unabhaengig von text-align rechtsbuendig und haengt
+   ihm einen Aussenabstand an. */
+input[type="date"]::-webkit-date-and-time-value,
+input[type="time"]::-webkit-date-and-time-value,
+input[type="datetime-local"]::-webkit-date-and-time-value {
+  text-align: inherit;
+  margin: 0;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  margin-left: 0;
+}
+
+/* Unter 16px zoomt iOS Safari beim Fokussieren automatisch in das Feld hinein
+   und bleibt danach verschoben stehen. Nur die Felder selbst — Labels und
+   Fliesstext behalten ihre Groesse. */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Die Klasse wurde auf der unteren Tab-Leiste schon benutzt, war aber nirgends
+   definiert (weder hier noch in tailwind.config.ts) — der Home-Indicator des
+   iPhones schnitt dadurch die Tab-Labels an. Wirkt nur zusammen mit
+   viewport-fit=cover (app/layout.tsx), sonst ist env() immer 0. */
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
