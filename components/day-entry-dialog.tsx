@@ -254,14 +254,18 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
   };
 
   const addRow = () => {
-    // Neue Zeile beginnt beim spätesten Ende der bestehenden
-    // Von/Bis-"arbeit"-Zeilen dieses Tages (Fallback 08:00 für die erste
-    // Zeile) — vorher startete jede neue Zeile unabhängig davon immer bei
-    // 08:00–17:00, wodurch ein zweiter Eintrag am selben Tag per Default
-    // deckungsgleich mit dem ersten war (Bugfix "Doppelbuchung möglich").
+    // Neue Zeile beginnt beim spätesten Ende der bestehenden "arbeit"-Zeilen
+    // dieses Tages (Fallback 08:00 für die erste Zeile) — vorher startete
+    // jede neue Zeile unabhängig davon immer bei 08:00–17:00, wodurch ein
+    // zweiter Eintrag am selben Tag per Default deckungsgleich mit dem
+    // ersten war (Bugfix "Doppelbuchung möglich"). Über resolvedZeit()
+    // statt des rohen r.bis werden dabei auch im Modus "Stunden direkt"
+    // erfasste Zeilen korrekt berücksichtigt (Bugfix "zweiter Stunden-
+    // direkt-Eintrag startet wieder bei 08:00 und überschneidet sich").
     const bisZeiten = rows
-      .filter((r) => r.type === "arbeit" && !r.hoursMode && r.bis)
-      .map((r) => r.bis)
+      .filter((r) => r.type === "arbeit")
+      .map((r) => resolvedZeit(r).bis)
+      .filter((bis): bis is string => !!bis)
       .sort();
     const startVon = bisZeiten.length > 0 ? bisZeiten[bisZeiten.length - 1] : "08:00";
     setRows((prev) => [...prev, newDraft(tagesSoll, startVon)]);
