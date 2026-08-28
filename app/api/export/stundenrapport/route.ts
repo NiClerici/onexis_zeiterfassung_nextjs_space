@@ -17,6 +17,7 @@ import {
 } from "@/lib/export-helpers";
 import { stundenAusEintrag } from "@/lib/calc";
 import { logError } from "@/lib/error-log";
+import { ownProjectsWhere } from "@/lib/project-visibility";
 
 const MONTH_NAMES = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
 
@@ -66,13 +67,20 @@ export async function GET(req: Request) {
     const monthStart = new Date(Date.UTC(year, month - 1, 1));
     const monthEnd = new Date(Date.UTC(year, month, 0));
 
+    // Katalog nur mit EIGENEN Projekten (lib/project-visibility.ts, gleiche
+    // Regel wie GET /api/projects für "member") — der Rapport ist ein
+    // persönliches Dokument, deshalb gilt der Filter für jede Rolle, auch
+    // für owner/admin/manager. Ohne ihn stünden Projekte von Kolleg:innen
+    // meist mit 0.00 h im Katalog (Bug: "sehe Projekte der anderen
+    // Mitarbeiter").
+    const ownFilter = await ownProjectsWhere(orgId, userId);
     const [entries, activeProjects] = await Promise.all([
       prisma.timeEntry.findMany({
         where: { userId, orgId, type: "arbeit", deletedAt: null, customerId: customer.id, date: { gte: monthStart, lte: monthEnd } },
         include: { project: { select: { id: true, name: true, hourlyRate: true, externalRef: true } } },
         orderBy: { date: "asc" },
       }),
-      prisma.project.findMany({ where: { orgId, customerId: customer.id, active: true }, orderBy: { name: "asc" } }),
+      prisma.project.findMany({ where: { orgId, customerId: customer.id, active: true, ...ownFilter }, orderBy: { name: "asc" } }),
     ]);
 
     const kuerzel = membership.kuerzel ?? "";
@@ -96,10 +104,11 @@ export async function GET(req: Request) {
       hoursByKey.set(key, (hoursByKey.get(key) ?? 0) + r.hours);
     }
 
-    // Katalog = alle aktiven Projekte des Kunden (auch mit 0 Stunden diesen
-    // Monat) + Projekte, auf die diesen Monat gebucht wurde, aber die nicht
-    // (mehr) aktiv sind + "(ohne Projekt)", falls Stunden ohne Zuordnung
-    // existieren. Sonst würde die Kopfsumme unter der Detailsumme liegen.
+    // Katalog = alle aktiven EIGENEN Projekte des Kunden (auch mit 0 Stunden
+    // diesen Monat, siehe ownFilter oben) + Projekte, auf die diesen Monat
+    // gebucht wurde, aber die nicht (mehr) aktiv sind + "(ohne Projekt)",
+    // falls Stunden ohne Zuordnung existieren. Sonst würde die Kopfsumme
+    // unter der Detailsumme liegen.
     const catalogByKey = new Map<string, { label: string; sortKey: string; rate: number | null }>();
     for (const p of activeProjects) {
       catalogByKey.set(p.id, {

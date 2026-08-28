@@ -32,6 +32,7 @@ async function readWorkbook(res: Response): Promise<ExcelJS.Workbook> {
 
 const ORG = "test_export_stundenrapport_org";
 let userId: string;
+let kollegeId: string;
 let customerId: string;
 let projectAId: string;
 let projectBId: string;
@@ -41,6 +42,13 @@ beforeAll(async () => {
   const user = await prisma.user.create({ data: { email: "export-sr@example.test", password: "irrelevant", firstName: "Nico", lastName: "Clerici" } });
   userId = user.id;
   await prisma.membership.create({ data: { orgId: ORG, userId, role: "member", entryDate: new Date("2026-01-01"), kuerzel: "CLN" } });
+
+  // Kollege in derselben Org/demselben Kunden — deckt den Bug ab, dass der
+  // Katalog früher ALLE aktiven Projekte des Kunden zeigte statt nur die
+  // eigenen (siehe lib/project-visibility.ts).
+  const kollege = await prisma.user.create({ data: { email: "export-sr-kollege@example.test", password: "irrelevant", firstName: "Kollege", lastName: "Muster" } });
+  kollegeId = kollege.id;
+  await prisma.membership.create({ data: { orgId: ORG, userId: kollegeId, role: "member", entryDate: new Date("2026-01-01"), kuerzel: "MUS" } });
 
   // Kunde mit Fallback-Stundensatz (200) — greift für Projekte ohne eigenen Satz.
   const customer = await prisma.customer.create({ data: { orgId: ORG, name: "Swissgrid", hourlyRate: 200 } });
@@ -53,8 +61,13 @@ beforeAll(async () => {
   // Kein eigener Satz, keine SAP-Nummer — fällt auf den Kundensatz zurück.
   const projectB = await prisma.project.create({ data: { orgId: ORG, customerId, name: "Phy. Schutz UW" } });
   projectBId = projectB.id;
-  // Aktives Projekt OHNE Buchung in diesem Monat — muss trotzdem mit 0h im Katalog stehen.
-  await prisma.project.create({ data: { orgId: ORG, customerId, name: "Zukunftsprojekt", active: true } });
+  // Aktives Projekt OHNE Buchung in diesem Monat, aber von userId selbst
+  // angelegt — muss trotzdem mit 0h im Katalog stehen (createdBy-Zweig von
+  // ownProjectsWhere).
+  await prisma.project.create({ data: { orgId: ORG, customerId, name: "Zukunftsprojekt", active: true, createdBy: userId } });
+  // Aktives Projekt des Kollegen, das NICHTS mit userId zu tun hat (weder
+  // Buchung noch createdBy) — darf im Export von userId nicht auftauchen.
+  await prisma.project.create({ data: { orgId: ORG, customerId, name: "Kollegenprojekt", active: true, createdBy: kollegeId } });
 
   await prisma.timeEntry.create({
     data: { orgId: ORG, userId, date: new Date("2026-07-01"), type: "arbeit", hours: 6, notiz: "SPI und SF anbindung", customerId, projectId: projectAId },
@@ -71,6 +84,12 @@ beforeAll(async () => {
   await prisma.timeEntry.create({
     data: { orgId: ORG, userId, date: new Date("2026-08-01"), type: "arbeit", hours: 8, notiz: "August", customerId, projectId: projectAId },
   });
+  // Buchung des Kollegen auf "Kollegenprojekt" im selben Monat — die
+  // Detailzeilen von userId dürfen sie nicht enthalten, und sie darf auch
+  // keine Katalogzeile für userId erzeugen.
+  await prisma.timeEntry.create({
+    data: { orgId: ORG, userId: kollegeId, date: new Date("2026-07-10"), type: "arbeit", hours: 5, notiz: "Kollege bucht", customerId },
+  });
 });
 
 afterAll(async () => {
@@ -78,7 +97,7 @@ afterAll(async () => {
   await prisma.project.deleteMany({ where: { orgId: ORG } });
   await prisma.customer.deleteMany({ where: { orgId: ORG } });
   await prisma.membership.deleteMany({ where: { orgId: ORG } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await prisma.user.deleteMany({ where: { id: { in: [userId, kollegeId] } } });
   await prisma.organization.deleteMany({ where: { id: ORG } });
 });
 
@@ -131,6 +150,16 @@ describe("GET /api/export/stundenrapport", () => {
     const catalogHoursSum = [6, 7, 8, 9].reduce((s, r) => s + (ws.getCell(`A${r}`).value as number), 0);
     expect(catalogHoursSum).toBe(11);
 
+    // "Kollegenprojekt" gehört dem Kollegen (weder Buchung noch createdBy
+    // von userId) — darf im Katalog von userId nicht auftauchen (Bug: sah
+    // vorher ALLE aktiven Projekte des Kunden, nicht nur die eigenen).
+    // Kein Zeilenversatz, weil ausgeschlossene Projekte gar nicht erst
+    // geladen werden statt nachträglich herausgefiltert zu werden.
+    for (let row = 6; row <= 10; row++) {
+      expect(ws.getCell(`B${row}`).value).not.toBe("Kollegenprojekt");
+      expect(ws.getCell(`C${row}`).value).not.toBe("Kollegenprojekt");
+    }
+
     // Detail-Header ab Zeile 13 (zwei Leerzeilen nach dem Kopf-Total).
     expect(ws.getCell("A13").value).toBe("Datum");
     expect(ws.getCell("B13").value).toBe("Kürzel");
@@ -159,6 +188,29 @@ describe("GET /api/export/stundenrapport", () => {
     expect(ws.getCell("A18").value).toBe("TOTAL");
     const totalCell = ws.getCell("E18").value as any;
     expect(totalCell?.formula).toBe("SUM(E14:E17)");
+
+    // Detailblock enthält nur Zeilen von userId — die Buchung des Kollegen
+    // auf "Kollegenprojekt" darf hier nicht auftauchen. 3 Detailzeilen
+    // (14-16) wie oben geprüft, Zeile 17 ist die Leerzeile vor TOTAL.
+    for (let row = 14; row <= 17; row++) {
+      expect(ws.getCell(`C${row}`).value).not.toBe("Kollegenprojekt");
+    }
+  });
+
+  it("schliesst Projekte von Kolleg:innen aus dem Katalog aus — unabhängig von der Rolle", async () => {
+    // Gleicher Export wie oben, aber als "owner" statt "member" — der
+    // Rapport ist ein persönliches Dokument, der Eigen-Projekt-Filter gilt
+    // deshalb für JEDE Rolle, nicht nur für member (anders als GET
+    // /api/projects, wo manager/admin/owner die ganze Organisation sehen).
+    setSession(userId, ORG, "owner");
+    const res = await exportGet(req(`/api/export/stundenrapport?year=2026&month=7&customerId=${customerId}`));
+    expect(res.status).toBe(200);
+    const wb = await readWorkbook(res);
+    const ws = wb.worksheets[0];
+    expect(ws.getCell("A10").value).toBe("Total (o. MwSt)");
+    for (let row = 6; row <= 10; row++) {
+      expect(ws.getCell(`B${row}`).value).not.toBe("Kollegenprojekt");
+    }
   });
 
   it("lässt die Betragszelle leer, wenn weder Projekt noch Kunde einen Stundensatz haben", async () => {

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 import { logError } from "@/lib/error-log";
+import { ownProjectsWhere } from "@/lib/project-visibility";
 
 // Projekte gehören wie Kunden der Organisation (MIGRATION.md Punkt 5) — kein
 // Rollen-Gate für Anlegen/Pflegen, das darf jedes Mitglied. Beim Lesen
@@ -23,30 +24,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ projects: projects ?? [] });
     }
 
-    const [fromEntries, fromMonths] = await Promise.all([
-      prisma.timeEntry.findMany({
-        where: { userId, orgId, deletedAt: null, projectId: { not: null } },
-        select: { projectId: true },
-        distinct: ["projectId"],
-      }),
-      prisma.customerMonth.findMany({
-        where: { userId, orgId, projectId: { not: null } },
-        select: { projectId: true },
-        distinct: ["projectId"],
-      }),
-    ]);
-    const visibleIds = Array.from(
-      new Set([...fromEntries.map((e) => e.projectId), ...fromMonths.map((m) => m.projectId)].filter((id): id is string => !!id))
-    );
-
-    // Ohne diesen OR-Zweig wäre ein frisch von einem "member" erstelltes
-    // Projekt für ihn selbst unsichtbar, bis er zum ersten Mal Stunden
-    // darauf gebucht hat — Henne-Ei-Problem, da das Projekt-Dropdown im
-    // Kalender genau aus dieser Liste gespeist wird.
+    // Sichtbarkeitsregel ausgelagert nach lib/project-visibility.ts — der
+    // Stundenrapport-Export (app/api/export/stundenrapport) braucht dieselbe
+    // Regel für seinen Projektkatalog.
+    const ownFilter = await ownProjectsWhere(orgId, userId);
     const projects = await prisma.project.findMany({
       where: {
         orgId,
-        OR: [{ id: { in: visibleIds } }, { createdBy: userId }],
+        ...ownFilter,
         ...(customerId ? { customerId } : {}),
       },
       orderBy: { name: "asc" },
