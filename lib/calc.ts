@@ -119,6 +119,13 @@ export interface KennzahlenResult {
   prognoseSaldo: number;
 }
 
+// anspruch wird pro rata über die Monatsspanne der tatsächlichen Anstellung
+// in profil.jahr gerechnet (Eintritt UND Austritt, siehe feriensaldo()).
+// Bewusste Kulanz: der Ein-/Austrittsmonat zählt dabei immer VOLL,
+// unabhängig vom Tag innerhalb des Monats — wer am 31.03. austritt, bekommt
+// denselben Anspruch wie jemand, der am 01.03. austritt. Das ist eine
+// Kulanzregel, kein Rundungsfehler, und soll nicht im Vorbeigehen
+// "korrigiert" werden.
 export interface FeriensaldoInput {
   jahr: number;
   heute: Date | string;
@@ -495,15 +502,17 @@ export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {
   const { jahr, profil, changes, holidays } = input;
   const heute = toUTCDate(input.heute);
   const startDate = profil.startDate ? toUTCDate(profil.startDate) : null;
+  const exitDate = profil.exitDate ? toUTCDate(profil.exitDate) : null;
 
-  let anspruch: number;
-  if (startDate && startDate.getUTCFullYear() === jahr) {
-    const startMonat = startDate.getUTCMonth() + 1;
-    anspruch = (profil.ferientage * (13 - startMonat)) / 12;
-  } else {
-    anspruch = profil.ferientage;
-  }
-  anspruch = round1(anspruch);
+  // Pro-rata-Anspruch über die Monatsspanne der Anstellung in diesem Jahr —
+  // deckt Eintritt, Austritt und beides im selben Jahr in einem Ausdruck ab,
+  // statt wie zuvor nur den Eintritt zu kürzen. sollStundenTag() (oben)
+  // wertet exitDate längst aus; feriensaldo() tat das bisher nicht, obwohl
+  // beide auf demselben Profil rechnen (Audit-Fund HOCH, REVIEW_LOOP.md).
+  const vonMonat = startDate && startDate.getUTCFullYear() === jahr ? startDate.getUTCMonth() + 1 : 1;
+  const bisMonat = exitDate && exitDate.getUTCFullYear() === jahr ? exitDate.getUTCMonth() + 1 : 12;
+  // Austritt vor Eintritt ist ein Datenfehler, kein negativer Anspruch.
+  const anspruch = round1((profil.ferientage * Math.max(0, bisMonat - vonMonat + 1)) / 12);
 
   // bezogen/geplant sind wie anspruch in Tagen. Jeder Eintrag wird über das
   // Tagessoll seines Datums in einen Tage-Anteil umgerechnet (Halbtage etc.

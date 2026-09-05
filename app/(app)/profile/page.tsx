@@ -9,6 +9,16 @@ import { toast } from "sonner";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { downloadBlob } from "@/lib/download-blob";
 import { PensumPreview } from "@/components/pensum-preview";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ProfileData {
   firstName: string;
@@ -112,6 +122,7 @@ export default function ProfilePage() {
   const [newCustomerRate, setNewCustomerRate] = useState("");
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
+  const [customerPendingDelete, setCustomerPendingDelete] = useState<CustomerData | null>(null);
   const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerRate, setEditCustomerRate] = useState("");
 
@@ -124,6 +135,7 @@ export default function ProfilePage() {
   const [newProjectExternalRef, setNewProjectExternalRef] = useState("");
   const [savingProject, setSavingProject] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [projectPendingDelete, setProjectPendingDelete] = useState<ProjectData | null>(null);
   const [editProjectName, setEditProjectName] = useState("");
   const [editProjectRate, setEditProjectRate] = useState("");
   const [editProjectBudget, setEditProjectBudget] = useState("");
@@ -304,7 +316,9 @@ export default function ProfilePage() {
           weeklyHours: parseFloat(weeklyHours) || 42,
           pensum: parseFloat(pensum) || 100,
           vacationDays: parseFloat(vacationDays) || 25,
-          startDate: startDate || null,
+          // startDate NICHT mitschicken — wirkt in sollStundenTag() (lib/
+          // calc.ts) spiegelbildlich zu exitDate und ist deshalb wie dieses
+          // nur noch über /admin/team änderbar (siehe app/api/profile/route.ts).
           kuerzel: kuerzel?.trim?.() || null,
         }),
       });
@@ -482,9 +496,14 @@ export default function ProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
+      const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) { toast.success(t("profile.customerDeleted")); await fetchCustomers(); }
-      else { toast.error(t("profile.customerError")); }
-    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); }
+      // data?.error trägt bei 409 die konkrete Zahl betroffener Zeiteinträge/
+      // Monatswerte (siehe lib/entity-deletion.ts) — nicht durch die generische
+      // Meldung ersetzen, sonst verschwindet genau die Information, die den
+      // Nutzer davon abhält, es einfach nochmal zu versuchen.
+      else { toast.error(data?.error ?? t("profile.customerError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.customerError")); } finally { setSavingCustomer(false); setCustomerPendingDelete(null); }
   };
 
   const addProject = async () => {
@@ -564,9 +583,10 @@ export default function ProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
+      const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) { toast.success(t("profile.projectDeleted")); await fetchProjects(); }
-      else { toast.error(t("profile.projectError")); }
-    } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); }
+      else { toast.error(data?.error ?? t("profile.projectError")); }
+    } catch (err: any) { console.error(err); toast.error(t("profile.projectError")); } finally { setSavingProject(false); setProjectPendingDelete(null); }
   };
 
   const toggleCmExpanded = (customerId: string) => setCmExpanded((prev) => ({ ...prev, [customerId]: !prev[customerId] }));
@@ -701,7 +721,11 @@ export default function ProfilePage() {
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.weeklyHours")}</label><input type="number" step="0.5" min="0" max="100" value={weeklyHours} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWeeklyHours(clampNumInput(e?.target?.value ?? "", 0, 100))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.pensum")}</label><input type="number" step="5" min="0" max="200" value={pensum} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPensum(clampNumInput(e?.target?.value ?? "", 0, 200))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.vacationDays")}</label><input type="number" step="0.5" min="0" max="100" value={vacationDays} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVacationDays(clampNumInput(e?.target?.value ?? "", 0, 100))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
-          <div className="min-w-0"><label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label><input type="date" value={startDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStartDate(e?.target?.value ?? "")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
+          <div className="min-w-0">
+            <label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label>
+            <input type="date" value={startDate} disabled title={t("profile.startDateReadOnly")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm text-muted-foreground cursor-not-allowed" />
+            <p className="text-[11px] text-muted-foreground mt-1">{t("profile.startDateReadOnly")}</p>
+          </div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("profile.kuerzel")}</label><input type="text" maxLength={10} value={kuerzel} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKuerzel(e?.target?.value ?? "")} placeholder={t("profile.kuerzelPlaceholder")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
         </div>
         <PensumPreview weeklyHours={weeklyHours} pensum={pensum} />
@@ -927,7 +951,7 @@ export default function ProfilePage() {
                   <>
                     <span className="font-medium flex-1 min-w-0 truncate">{c.name}{c.hourlyRate != null && <span className="text-muted-foreground font-normal"> · {c.hourlyRate.toFixed(0)} CHF/h</span>}</span>
                     <button onClick={() => startEditCustomer(c)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition shrink-0"><Pencil className="w-3.5 h-3.5" /></button>
-                    <button onClick={() => deleteCustomer(c.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => setCustomerPendingDelete(c)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                   </>
                 )}
               </div>
@@ -937,6 +961,26 @@ export default function ProfilePage() {
           <p className="text-xs text-muted-foreground text-center">{t("profile.noCustomers")}</p>
         )}
       </motion.div>
+
+      <AlertDialog open={!!customerPendingDelete} onOpenChange={(open) => { if (!open) setCustomerPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("profile.deleteCustomerTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {customerPendingDelete && t("profile.deleteCustomerConfirm", { name: customerPendingDelete.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("profile.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={savingCustomer}
+              onClick={(e) => { e.preventDefault(); if (customerPendingDelete) deleteCustomer(customerPendingDelete.id); }}
+            >
+              {t("profile.confirmDelete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Project Management (MIGRATION.md Punkt 5) */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
@@ -1060,7 +1104,7 @@ export default function ProfilePage() {
                     {t("profile.active")}
                   </label>
                   <button onClick={() => startEditProject(p)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-accent transition shrink-0"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => deleteProject(p.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => setProjectPendingDelete(p)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
               );
             })}
@@ -1069,6 +1113,26 @@ export default function ProfilePage() {
           <p className="text-xs text-muted-foreground text-center">{t("profile.noProjects")}</p>
         )}
       </motion.div>
+
+      <AlertDialog open={!!projectPendingDelete} onOpenChange={(open) => { if (!open) setProjectPendingDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("profile.deleteProjectTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {projectPendingDelete && t("profile.deleteProjectConfirm", { name: projectPendingDelete.name })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("profile.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={savingProject}
+              onClick={(e) => { e.preventDefault(); if (projectPendingDelete) deleteProject(projectPendingDelete.id); }}
+            >
+              {t("profile.confirmDelete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Kundenstunden monatlich (statt am Tageseintrag) */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.18 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>

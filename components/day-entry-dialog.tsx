@@ -8,6 +8,7 @@ import { useI18n } from "@/lib/i18n";
 import { EINTRAG_TYPEN, stundenAusEintrag, type EintragTyp } from "@/lib/calc";
 import { buildArbeitszeit } from "@/lib/arbeitszeit";
 import { pruefeEintragKonflikte, type VergleichbarerEintrag, type EintragKonflikt } from "@/lib/entry-overlap";
+import { verschiebeFolgezeilen } from "@/lib/day-shift";
 
 export interface DayTimeEntry {
   id: string;
@@ -55,7 +56,6 @@ interface DraftRow {
   // leitet resolvedZeit() von/bis/pauseMin beim Speichern über
   // buildArbeitszeit ab, die Datenstruktur beim Server bleibt identisch.
   hoursMode: boolean;
-  saving: boolean;
   countsAsWorktime: boolean;
 }
 
@@ -97,7 +97,6 @@ function toDraft(entry: DayTimeEntry, fallbackHours: number, hoursMode: boolean 
     projectId: entry.projectId ?? "",
     hours: hoursStr,
     hoursMode: isArbeit ? hoursMode : false,
-    saving: false,
     countsAsWorktime: entry.countsAsWorktime ?? true,
   };
 }
@@ -120,7 +119,6 @@ function newDraft(fallbackHours: number, startVon: string = "08:00"): DraftRow {
     projectId: "",
     hours: fallbackHours.toFixed(2),
     hoursMode: false,
-    saving: false,
     countsAsWorktime: true,
   };
 }
@@ -152,6 +150,11 @@ function resolvedZeit(row: DraftRow): { von: string | null; bis: string | null; 
     return { von, bis, pauseMin, hours: null, geklemmt };
   }
   return { von: row.von, bis: row.bis, pauseMin: pauseMinCurrent, hours: null, geklemmt: false };
+}
+
+function zeitInMinuten(zeit: string): number {
+  const [h, m] = zeit.split(":").map(Number);
+  return h * 60 + m;
 }
 
 function toVergleichbarerEintrag(row: DraftRow): VergleichbarerEintrag {
@@ -192,6 +195,12 @@ interface DayEntryDialogProps {
 export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, customers, projects, tagesSoll, onChanged, locked = false, violations = [] }: DayEntryDialogProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<DraftRow[]>([]);
+  const [savingDay, setSavingDay] = useState(false);
+  // Ob seit dem letzten Öffnen/Speichern ungespeicherte Änderungen bestehen
+  // — mit nur noch einem Speichern-Button pro Tag (statt einem pro Zeile)
+  // wiegt ein versehentliches Schliessen schwerer als vorher, siehe
+  // handleClose() unten.
+  const [dirty, setDirty] = useState(false);
 
   // Merkt sich, für welches Datum `rows` zuletzt aus `entries` aufgebaut
   // wurde. Bugfix: der Dialog baute `rows` bisher bei JEDER Änderung von
@@ -199,9 +208,9 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
   // Speichern EINER Zeile, siehe onChanged→fetchEntries in
   // calendar/page.tsx) — dabei gingen alle noch ungespeicherten Zeilen und
   // laufenden Eingaben verloren ("kann ich am gleichen Tag weitere
-  // Einträge hinzufügen"). Jede Zeilen-Mutation (saveRow/deleteRow)
-  // aktualisiert `rows` bereits direkt und lokal; dieser Effect ist nur
-  // noch für den initialen Aufbau beim Öffnen zuständig.
+  // Einträge hinzufügen"). Jede Zeilen-Mutation aktualisiert `rows` bereits
+  // direkt und lokal; dieser Effect ist nur noch für den initialen Aufbau
+  // beim Öffnen zuständig.
   const openedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!open) {
@@ -211,11 +220,43 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
     if (openedForRef.current === dateStr) return;
     openedForRef.current = dateStr;
     setRows(entries.length > 0 ? entries.map((e) => toDraft(e, tagesSoll)) : []);
+    setDirty(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, dateStr]);
 
+  // Ändert ein Patch die aufgelöste Bis-Zeit einer "arbeit"-Zeile, rücken
+  // alle FOLGENDEN "arbeit"-Zeilen desselben Tages automatisch um dieselbe
+  // Differenz nach (lib/day-shift.ts) — vorher musste das von Hand in jeder
+  // Zeile nachgetragen werden. Alte und neue Bis-Zeit kommen beide aus
+  // resolvedZeit(), derselben Funktion, die Anzeige und Speichern schon
+  // nutzen, damit die drei nicht auseinanderlaufen können; das trifft damit
+  // automatisch beide Eingabemodi (Von/Bis und Stunden direkt).
   const updateRow = (key: string, patch: Partial<DraftRow>) => {
-    setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setDirty(true);
+    setRows((prev) => {
+      const before = prev.find((r) => r.key === key);
+      if (!before) return prev;
+      const after = { ...before, ...patch };
+      let next = prev.map((r) => (r.key === key ? after : r));
+
+      if (after.type === "arbeit") {
+        const beforeBis = resolvedZeit(before).bis;
+        const afterBis = resolvedZeit(after).bis;
+        const deltaMin = beforeBis && afterBis ? zeitInMinuten(afterBis) - zeitInMinuten(beforeBis) : 0;
+        if (deltaMin !== 0) {
+          const shiftInput = next.map((r) => ({ key: r.key, typ: r.type, von: r.von, bis: r.bis, hoursMode: r.hoursMode }));
+          const { rows: shifted, geklemmt } = verschiebeFolgezeilen(shiftInput, key, deltaMin);
+          const shiftedByKey = new Map(shifted.map((s) => [s.key, s]));
+          next = next.map((r) => {
+            if (r.key === key) return r;
+            const s = shiftedByKey.get(r.key);
+            return s ? { ...r, von: s.von, bis: s.bis } : r;
+          });
+          if (geklemmt) toast.warning(t("calendar.dayShiftClamped"));
+        }
+      }
+      return next;
+    });
   };
 
   // Kunde ist keine eigene Auswahl mehr — er ergibt sich aus dem gewählten
@@ -223,6 +264,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
   // route.ts:resolveProjectAndCustomer).
   const handleProjectChange = (key: string, projectId: string) => {
     const project = projects.find((p) => p.id === projectId);
+    setDirty(true);
     setRows((prev) =>
       prev.map((r) => {
         if (r.key !== key) return r;
@@ -233,6 +275,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
   };
 
   const handleTypeChange = (key: string, type: EintragTyp) => {
+    setDirty(true);
     setRows((prev) =>
       prev.map((r) => {
         if (r.key !== key) return r;
@@ -268,108 +311,96 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
       .filter((bis): bis is string => !!bis)
       .sort();
     const startVon = bisZeiten.length > 0 ? bisZeiten[bisZeiten.length - 1] : "08:00";
+    setDirty(true);
     setRows((prev) => [...prev, newDraft(tagesSoll, startVon)]);
   };
 
-  const removeUnsavedRow = (key: string) => setRows((prev) => prev.filter((r) => r.key !== key));
+  // Löscht nur noch lokal — egal ob die Zeile schon gespeichert ist oder
+  // nicht. Die eigentliche Löschung (Soft-Delete + Audit) wird erst mit dem
+  // nächsten "Tag speichern" wirksam (app/api/time-entries/day/route.ts:
+  // Zeilen, die im Payload fehlen, werden dort entfernt) — Speichern ist
+  // damit die einzige schreibende Aktion dieses Dialogs.
+  const removeRow = (key: string) => {
+    setDirty(true);
+    setRows((prev) => prev.filter((r) => r.key !== key));
+  };
 
-  const saveRow = async (row: DraftRow) => {
-    const isArbeit = row.type === "arbeit";
-    const zeit = resolvedZeit(row);
-
-    // Pause > Zeitspanne (Bugfix "negative Stunden") — vorher speicherbar,
-    // weil weder Client noch Server die Pause gegen die Spanne prüften.
-    if (isArbeit && zeit.von && zeit.bis) {
-      const netto = stundenAusEintrag({ typ: "arbeit", von: zeit.von, bis: zeit.bis, pauseMin: zeit.pauseMin }, 0);
-      if (netto < 0) {
-        toast.error(t("calendar.pauseExceedsSpan"));
-        return;
-      }
-    }
-
-    // Blockierende Konflikte (Duplikat/doppelte Absenz) client-seitig vorab
-    // prüfen — derselbe Check läuft auch serverseitig (lib/entry-overlap.ts
-    // über POST/PUT /api/time-entries) und lehnt mit 409 ab, hier sparen wir
-    // uns den Roundtrip und zeigen die Meldung sofort.
-    const andereDesTages = rows.filter((r) => r.key !== row.key).map(toVergleichbarerEintrag);
-    const konflikte = pruefeEintragKonflikte(toVergleichbarerEintrag(row), andereDesTages);
-    const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
-    if (blockierend.length > 0) {
-      toast.error(blockierend[0].message);
-      return;
-    }
-
-    updateRow(row.key, { saving: true });
+  const saveDay = async () => {
+    setSavingDay(true);
     try {
-      const body: Record<string, unknown> = {
-        date: dateStr,
-        type: row.type,
-        von: zeit.von,
-        bis: zeit.bis,
-        pauseMin: zeit.pauseMin,
-        notiz: row.notiz.trim() || null,
-        customerId: row.customerId || null,
-        projectId: row.projectId || null,
-        // hours ist nur für Absenzen relevant — bei arbeit wird aus von/bis/pauseMin berechnet
-        hours: zeit.hours,
-      };
-      if (row.id) body.id = row.id;
+      const hoursModeByIndex = rows.map((r) => r.hoursMode);
+      const payloadRows = rows.map((row) => {
+        const zeit = resolvedZeit(row);
+        return {
+          id: row.id ?? undefined,
+          type: row.type,
+          von: zeit.von,
+          bis: zeit.bis,
+          pauseMin: zeit.pauseMin,
+          notiz: row.notiz.trim() || null,
+          customerId: row.customerId || null,
+          projectId: row.projectId || null,
+          hours: zeit.hours,
+        };
+      });
 
-      const res = await fetch("/api/time-entries", {
-        method: row.id ? "PUT" : "POST",
+      const res = await fetch("/api/time-entries/day", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ date: dateStr, rows: payloadRows }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        toast.success(t("calendar.entrySaved"));
+        toast.success(t("calendar.daySaved"));
         const warnings: string[] = data?.warnings ?? [];
         warnings.forEach((w) => toast.warning(w));
-        const saved = data?.entry;
-        if (saved) {
-          setRows((prev) => prev.map((r) => (r.key === row.key ? toDraft(saved, tagesSoll, row.hoursMode) : r)));
-        } else {
-          updateRow(row.key, { saving: false });
-        }
+        const savedEntries: DayTimeEntry[] = data?.entries ?? [];
+        // Antwort und Anfrage haben dieselbe Reihenfolge (die Route verarbeitet
+        // rows in Eingabereihenfolge) — per Index statt per id zuordnen, damit
+        // auch neu angelegte Zeilen (id war beim Senden noch null) ihren
+        // gewählten hoursMode behalten (gleiche Begründung wie zuvor bei
+        // saveRow(): ein Refetch darf den Eingabemodus nicht zurücksetzen).
+        setRows(savedEntries.map((e, i) => toDraft(e, tagesSoll, hoursModeByIndex[i])));
+        setDirty(false);
         onChanged();
       } else {
-        toast.error(data?.error ?? t("calendar.entryError"));
-        updateRow(row.key, { saving: false });
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error(t("calendar.entryError"));
-      updateRow(row.key, { saving: false });
-    }
-  };
-
-  const deleteRow = async (row: DraftRow) => {
-    if (!row.id) {
-      removeUnsavedRow(row.key);
-      return;
-    }
-    updateRow(row.key, { saving: true });
-    try {
-      const res = await fetch("/api/time-entries", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: row.id }),
-      });
-      if (res.ok) {
-        toast.success(t("calendar.entryDeleted"));
-        setRows((prev) => prev.filter((r) => r.key !== row.key));
-        onChanged();
-      } else {
-        const data = await res.json().catch(() => ({}));
         toast.error(data?.error ?? t("calendar.entryError"));
       }
     } catch (err) {
       console.error(err);
       toast.error(t("calendar.entryError"));
     } finally {
-      updateRow(row.key, { saving: false });
+      setSavingDay(false);
     }
   };
+
+  const handleClose = () => {
+    if (dirty && !window.confirm(t("calendar.unsavedWarning"))) return;
+    onClose();
+  };
+
+  // Einmal pro Zeile berechnet (statt separat für die Anzeige UND das
+  // aggregierte Sperren des Tages-Speichern-Buttons unten) — jede Zeile
+  // prüft dieselben Konflikte gegen alle anderen Zeilen des Tages, wie es
+  // vorher schon der Fall war.
+  const rowChecks = new Map(
+    rows.map((row) => {
+      const isArbeit = row.type === "arbeit";
+      const zeit = resolvedZeit(row);
+      const nettoHours =
+        isArbeit && zeit.von && zeit.bis
+          ? stundenAusEintrag({ typ: "arbeit", von: zeit.von, bis: zeit.bis, pauseMin: zeit.pauseMin }, 0)
+          : null;
+      const pauseInvalid = nettoHours !== null && nettoHours < 0;
+      const andereDesTages = rows.filter((r) => r.key !== row.key).map(toVergleichbarerEintrag);
+      const konflikte: EintragKonflikt[] = pruefeEintragKonflikte(toVergleichbarerEintrag(row), andereDesTages);
+      const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
+      const ueberlappungen = konflikte.filter((k) => k.art === "ueberlappung");
+      return [row.key, { isArbeit, zeit, nettoHours, pauseInvalid, blockierend, ueberlappungen }] as const;
+    })
+  );
+  const canSaveDay =
+    !locked && !savingDay && rows.every((r) => !rowChecks.get(r.key)!.pauseInvalid && rowChecks.get(r.key)!.blockierend.length === 0);
 
   return (
     <AnimatePresence>
@@ -379,7 +410,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm p-4"
-          onClick={onClose}
+          onClick={handleClose}
         >
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
@@ -391,7 +422,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-display font-semibold">{dayLabel}</h3>
-              <button onClick={onClose} className="p-1 rounded-lg hover:bg-accent transition">
+              <button onClick={handleClose} className="p-1 rounded-lg hover:bg-accent transition">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -420,18 +451,7 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
             <div className="space-y-4">
               {rows.map((row) => {
-                const isArbeit = row.type === "arbeit";
-                const zeit = resolvedZeit(row);
-                const nettoHours =
-                  isArbeit && zeit.von && zeit.bis
-                    ? stundenAusEintrag({ typ: "arbeit", von: zeit.von, bis: zeit.bis, pauseMin: zeit.pauseMin }, 0)
-                    : null;
-                const pauseInvalid = nettoHours !== null && nettoHours < 0;
-
-                const andereDesTages = rows.filter((r) => r.key !== row.key).map(toVergleichbarerEintrag);
-                const konflikte: EintragKonflikt[] = pruefeEintragKonflikte(toVergleichbarerEintrag(row), andereDesTages);
-                const blockierend = konflikte.filter((k) => k.art !== "ueberlappung");
-                const ueberlappungen = konflikte.filter((k) => k.art === "ueberlappung");
+                const { isArbeit, zeit, nettoHours, pauseInvalid, blockierend, ueberlappungen } = rowChecks.get(row.key)!;
 
                 return (
                   <div key={row.key} className="rounded-xl bg-secondary/60 p-3 space-y-3">
@@ -449,8 +469,8 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                         ))}
                       </select>
                       <button
-                        onClick={() => deleteRow(row)}
-                        disabled={row.saving || locked}
+                        onClick={() => removeRow(row.key)}
+                        disabled={locked || savingDay}
                         className="p-2 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition disabled:opacity-50"
                         title={t("calendar.delete")}
                       >
@@ -647,14 +667,6 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
                         className="w-full px-2 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                       />
                     </div>
-
-                    <button
-                      onClick={() => saveRow(row)}
-                      disabled={row.saving || locked || pauseInvalid || blockierend.length > 0}
-                      className="w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
-                    >
-                      {row.saving ? t("common.loading") : t("calendar.save")}
-                    </button>
                   </div>
                 );
               })}
@@ -662,10 +674,18 @@ export function DayEntryDialog({ open, onClose, dateStr, dayLabel, entries, cust
 
             <button
               onClick={addRow}
-              disabled={locked}
+              disabled={locked || savingDay}
               className="mt-4 w-full py-2.5 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" /> {t("calendar.addEntry")}
+            </button>
+
+            <button
+              onClick={saveDay}
+              disabled={!canSaveDay}
+              className="mt-2 w-full py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+            >
+              {savingDay ? t("common.loading") : t("calendar.saveDay")}
             </button>
           </motion.div>
         </motion.div>

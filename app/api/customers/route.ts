@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 import { logError } from "@/lib/error-log";
+import { ownCustomersWhere } from "@/lib/visibility";
+import { assertMayDelete, countCustomerReferences, referenceCountsMessage } from "@/lib/entity-deletion";
 
 export async function GET() {
   try {
@@ -13,10 +15,10 @@ export async function GET() {
     // (MIGRATION.md Punkt 3) — manager/admin/owner sehen deshalb weiterhin
     // alle. Ein normales Mitglied sieht dagegen nur Kunden, bei denen es
     // selbst schon Stunden erfasst hat (Tageseintrag oder monatliche
-    // Kundenstunden), damit z.B. Gabriel nicht Nicos Kundenportfolio sieht
-    // und umgekehrt. Bekannte Einschränkung: ein frisch angelegter, noch nie
-    // bebuchter Kunde taucht in der eigenen Liste erst nach dem ersten
-    // Eintrag auf.
+    // Kundenstunden) ODER die es selbst angelegt hat (Customer.createdBy,
+    // lib/visibility.ts ownCustomersWhere — dasselbe Muster wie bei
+    // Projekten), damit z.B. Gabriel nicht Nicos Kundenportfolio sieht und
+    // umgekehrt, ein frisch angelegter Kunde aber sofort nutzbar ist.
     if (role === "manager" || role === "admin" || role === "owner") {
       const customers = await prisma.customer.findMany({
         where: { orgId },
@@ -25,25 +27,9 @@ export async function GET() {
       return NextResponse.json({ customers: customers ?? [] });
     }
 
-    const [fromEntries, fromMonths] = await Promise.all([
-      prisma.timeEntry.findMany({
-        where: { userId, orgId, deletedAt: null, customerId: { not: null } },
-        select: { customerId: true },
-        distinct: ["customerId"],
-      }),
-      prisma.customerMonth.findMany({
-        where: { userId, orgId },
-        select: { customerId: true },
-        distinct: ["customerId"],
-      }),
-    ]);
-    const visibleIds = Array.from(
-      new Set([...fromEntries.map((e) => e.customerId), ...fromMonths.map((m) => m.customerId)].filter((id): id is string => !!id))
-    );
-    if (visibleIds.length === 0) return NextResponse.json({ customers: [] });
-
+    const ownFilter = await ownCustomersWhere(orgId, userId);
     const customers = await prisma.customer.findMany({
-      where: { orgId, id: { in: visibleIds } },
+      where: { orgId, ...ownFilter },
       orderBy: { name: "asc" },
     });
 
@@ -58,7 +44,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { orgId } = await requireOrg();
+    const { userId, orgId } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { name, hourlyRate } = body ?? {};
@@ -74,8 +60,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Ungültiger Stundensatz" }, { status: 400 });
     }
 
+    // createdBy macht diesen Kunden für die erstellende Person sofort
+    // sichtbar (siehe ownCustomersWhere) — ohne das Feld war ein frisch
+    // angelegter, noch nie bebuchter Kunde eine Sackgasse (REVIEW_LOOP.md).
     const customer = await prisma.customer.create({
-      data: { orgId, name: trimmedName, hourlyRate: parsedRate },
+      data: { orgId, name: trimmedName, hourlyRate: parsedRate, createdBy: userId },
     });
 
     return NextResponse.json({ customer });
@@ -132,7 +121,7 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id } = body ?? {};
@@ -141,6 +130,19 @@ export async function DELETE(req: Request) {
 
     const existing = await prisma.customer.findFirst({ where: { id, orgId } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // owner/admin dürfen jeden Kunden löschen, sonst nur die Person, die ihn
+    // selbst angelegt hat (REVIEW_LOOP.md, Audit-Fund KRITISCH).
+    assertMayDelete(role, existing.createdBy, userId);
+
+    // Referenzsperre gilt für JEDE Rolle — verhindert genau den Fall aus dem
+    // Audit, in dem ein versehentlicher Klick in der Profilseite Zeiteinträge
+    // und von Hand rekonstruierte CustomerMonth-Werte unwiederbringlich
+    // mitgerissen hat.
+    const refs = await countCustomerReferences(orgId, id);
+    if (refs.total > 0) {
+      return NextResponse.json({ error: referenceCountsMessage("Kunde", refs) }, { status: 409 });
+    }
 
     await prisma.customer.delete({ where: { id } });
 

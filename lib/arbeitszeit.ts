@@ -25,22 +25,30 @@ export interface BuildArbeitszeitOptions {
   // rufen buildArbeitszeit() weiterhin ohne opts auf und bleiben dadurch
   // bit-genau beim bisherigen Verhalten (Start 08:00).
   startVon?: string;
-  // Manuell gesetzte Pause statt der ArG-Staffel — derselbe Grund: ein
-  // Nutzer, der schon 60 Min. Pause eingetragen hatte, soll beim Wechsel in
-  // den Stunden-Modus und zurück nicht stillschweigend auf das gesetzliche
-  // Minimum (z.B. 30 Min.) gekürzt werden.
+  // Manuell gesetzte Pause statt des 0-Minuten-Defaults — derselbe Grund
+  // wie bei startVon: ein Nutzer, der schon 60 Min. Pause eingetragen
+  // hatte, soll beim Wechsel in den Stunden-Modus und zurück nicht
+  // stillschweigend auf 0 zurückgesetzt werden.
   pauseMin?: number;
 }
 
-// Start 08:00 (bzw. opts.startVon), Pause nach der ArG-Staffel (bzw.
+// Start 08:00 (bzw. opts.startVon), Pause standardmässig 0 Minuten (bzw.
 // opts.pauseMin) — liefert von/bis für "arbeit"-Einträge. `geklemmt` zeigt
 // an, ob das Ende auf 23:59 begrenzt wurde (Aufrufer können das dem Nutzer
 // anzeigen statt die Kürzung stillschweigend zu übernehmen).
+//
+// Bewusst KEINE automatische Pausenvorbelegung nach der ArG-Staffel mehr
+// (Bugfix "neue Zeile bekommt eine Pause, die niemand erfasst hat"): eine
+// erfundene Pause verzerrte die Bis-Zeit, ohne dass sie je manuell
+// eingetragen wurde. mindestPauseMin() bleibt unverändert bestehen — sie
+// wird weiterhin von lib/compliance.ts für die (nicht-blockierende) Warnung
+// "Pause zu kurz" gebraucht, sobald ein Tag über 5.5h Nettoarbeit ohne
+// ausreichende Pause hat. Wer eine Pause will, trägt sie jetzt bewusst ein.
 export function buildArbeitszeit(
   hours: number,
   opts: BuildArbeitszeitOptions = {}
 ): { von: string; bis: string; pauseMin: number; geklemmt: boolean } {
-  const pauseMin = opts.pauseMin ?? mindestPauseMin(hours);
+  const pauseMin = opts.pauseMin ?? 0;
   const startVon = opts.startVon ?? "08:00";
   const [startH, startM] = startVon.split(":").map(Number);
   const startMinutes = (Number.isFinite(startH) ? startH : 8) * 60 + (Number.isFinite(startM) ? startM : 0);

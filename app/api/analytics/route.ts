@@ -15,6 +15,7 @@ import {
 } from "@/lib/calc";
 import { billableHoursByUserAndMonth, combineCustomerHours, type MonthlyCustomerHours } from "@/lib/customer-months";
 import { logError } from "@/lib/error-log";
+import { parseDateYMD } from "@/lib/dates";
 
 // Profil.pensum/.wochenstunden sind in lib/calc.ts der Fallback von pensumAt()
 // für Daten VOR der ersten PensumChange — also die historische Basis, nicht der
@@ -90,10 +91,23 @@ export async function GET(req: Request) {
       startDate = new Date(Date.UTC(year, 0, 1));
       endDate = new Date(Date.UTC(year, 11, 31));
     } else {
+      // Vorher fiel ein "custom"-Request ohne (oder mit unparsbarem) from/to
+      // stillschweigend auf das ganze Jahr zurück bzw. ergab bei einem
+      // kaputten Datumsstring "Invalid Date" und damit NaN-Vergleiche weiter
+      // unten — beides ohne jede Fehlermeldung. Jetzt ein harter 400, analog
+      // zur Validierung in app/api/time-entries/route.ts.
       const fromStr = url?.searchParams?.get?.("from") ?? "";
       const toStr = url?.searchParams?.get?.("to") ?? "";
-      startDate = fromStr ? new Date(fromStr) : new Date(Date.UTC(year, 0, 1));
-      endDate = toStr ? new Date(toStr) : new Date(Date.UTC(year, 11, 31));
+      const parsedFrom = parseDateYMD(fromStr);
+      const parsedTo = parseDateYMD(toStr);
+      if (!parsedFrom || !parsedTo) {
+        return NextResponse.json({ error: "Ungültiger oder unvollständiger Zeitraum" }, { status: 400 });
+      }
+      if (parsedTo.getTime() < parsedFrom.getTime()) {
+        return NextResponse.json({ error: "Enddatum liegt vor dem Startdatum" }, { status: 400 });
+      }
+      startDate = parsedFrom;
+      endDate = parsedTo;
     }
 
     const profil = buildProfil(membership);

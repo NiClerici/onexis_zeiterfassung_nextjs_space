@@ -98,6 +98,48 @@ describe("Referenzwerte (Testprofil: 40h/60%/25 Ferientage, Start 01.04.2026, St
   });
 });
 
+// Hält einen Nicht-Bug fest, der aus dem laufenden Betrieb gemeldet wurde:
+// "Monat September bis heute" (04.09.) und "Frei wählen 01.09.–04.09." sahen
+// in der Analytics-Kachel wie dieselbe (angeblich hängengebliebene) Zahl
+// aus. Tatsächlich schneidet kennzahlen() soll UND ist symmetrisch bei
+// bisHeute = min(to, heute) ab (siehe oben) — fällt "heute" auf den letzten
+// Tag eines custom-Zeitraums, sind beide Auswahlen für soll/ist notwendig
+// identisch. Das ist korrekt, nicht zufällig falsch; nur sollGesamt (das
+// Monatssoll) unterscheidet sich, und genau die fehlende Beschriftung dieses
+// Unterschieds war der eigentliche Fund (siehe analytics/page.tsx,
+// "Soll bis heute").
+describe("Monat-bis-heute vs. gleichwertiger custom-Zeitraum (Regressionsanker, kein Bug)", () => {
+  it("liefern identisches soll/ist, wenn 'heute' auf den letzten Tag des custom-Zeitraums fällt", () => {
+    const monatBisHeute = kennzahlen({
+      from: "2026-09-01",
+      to: "2026-09-30",
+      heute: "2026-09-04",
+      eintraege: [],
+      profil: testProfil,
+      changes: [],
+      holidays: [],
+      payouts: [],
+      kundenstunden: 0,
+    });
+    const customZeitraum = kennzahlen({
+      from: "2026-09-01",
+      to: "2026-09-04",
+      heute: "2026-09-04",
+      eintraege: [],
+      profil: testProfil,
+      changes: [],
+      holidays: [],
+      payouts: [],
+      kundenstunden: 0,
+    });
+    expect(customZeitraum.soll).toBe(monatBisHeute.soll);
+    expect(customZeitraum.ist).toBe(monatBisHeute.ist);
+    // sollGesamt unterscheidet sich dagegen bewusst — das ist das Monatssoll
+    // vs. das Soll des (kurzen) custom-Zeitraums, keine Diskrepanz.
+    expect(customZeitraum.sollGesamt).not.toBe(monatBisHeute.sollGesamt);
+  });
+});
+
 describe("stundenAusEintrag", () => {
   it("Schicht über Mitternacht (22:00–06:00, 30min Pause) = 7.5h", () => {
     const stunden = stundenAusEintrag(
@@ -140,15 +182,16 @@ describe("Stunden-Umschalter im Tagesdialog — Hin-/Rückrechnung", () => {
     expect(stunden).toBeCloseTo(7.25, 5);
   });
 
-  it("Stunden → Von/Bis normalisiert (Start 08:00, Pause nach Schwelle), Gesamtstunden bleiben erhalten", () => {
+  it("Stunden → Von/Bis normalisiert (Start 08:00, 0 Min. Pause), Gesamtstunden bleiben erhalten", () => {
     // Rückrichtung ist bewusst NICHT symmetrisch zur Hinrichtung —
-    // buildArbeitszeit setzt immer 08:00 als Start, nicht die ursprüngliche
-    // Zeit. Der Test hält fest, was tatsächlich passiert, nicht eine
-    // Symmetrie, die es nicht gibt.
+    // buildArbeitszeit setzt immer 08:00 als Start und (ohne manuell
+    // gesetzte Pause) 0 Minuten Pause, nicht die ursprüngliche Zeit. Der
+    // Test hält fest, was tatsächlich passiert, nicht eine Symmetrie, die
+    // es nicht gibt.
     const { von, bis, pauseMin } = buildArbeitszeit(7.25);
     expect(von).toBe("08:00");
-    expect(bis).toBe("15:45");
-    expect(pauseMin).toBe(30);
+    expect(bis).toBe("15:15");
+    expect(pauseMin).toBe(0);
     // Aber: die daraus resultierenden Gesamtstunden entsprechen wieder 7.25 —
     // nur die Aufteilung (Startzeit/Pausenlänge) hat sich geändert.
     const zurueck = stundenAusEintrag({ typ: "arbeit", von, bis, pauseMin }, 0);
@@ -1154,13 +1197,31 @@ describe("Kalenderrandfälle (HARDENING.md A3)", () => {
       expect(result.anspruch).toBe(25);
     });
 
-    it("dokumentiert: exitDate kürzt den Anspruch NICHT (nur startDate geht ein)", () => {
-      // Bewusst festgehaltenes Ist-Verhalten, kein Wunschverhalten: wer am
-      // 31.01.2026 austritt, bekommt für 2026 trotzdem den vollen Anspruch.
-      // Siehe "Notizen des Loops" in HARDENING.md — eine anteilige Kürzung
-      // bei Austritt ist eine fehlende REGEL, kein Rechenfehler, und wird in
-      // diesem Loop bewusst nicht gebaut.
+    it("exitDate kürzt den Anspruch anteilig (Audit-Fund HOCH, REVIEW_LOOP.md — vorher wurde exitDate hier ignoriert)", () => {
+      // Wer am 31.01.2026 austritt, hat 2026 nur einen Monat gearbeitet —
+      // derselbe Monatsanteil wie beim spiegelbildlichen Eintritts-Fall oben
+      // (25/12 = 2.1). sollStundenTag() wertet exitDate an dieser Stelle
+      // längst korrekt aus; feriensaldo() tat das bisher nicht, obwohl beide
+      // auf demselben Profil rechnen.
       const profil: Profil = { ...vollzeit, startDate: "2020-01-01", exitDate: "2026-01-31" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(2.1);
+    });
+
+    it("Ein- UND Austritt im selben Jahr kombinieren sich (März bis September = 7 Monate)", () => {
+      const profil: Profil = { ...vollzeit, startDate: "2026-03-15", exitDate: "2026-09-10" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(14.6); // 25 * 7 / 12, gerundet auf eine Nachkommastelle
+    });
+
+    it("Austritt vor Eintritt (Datenfehler) klemmt den Anspruch auf 0 statt negativ zu werden", () => {
+      const profil: Profil = { ...vollzeit, startDate: "2026-09-01", exitDate: "2026-03-01" };
+      const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
+      expect(result.anspruch).toBe(0);
+    });
+
+    it("Austritt in einem SPÄTEREN Jahr wirkt sich auf den Anspruch des Prüfjahres nicht aus", () => {
+      const profil: Profil = { ...vollzeit, startDate: "2020-01-01", exitDate: "2027-06-30" };
       const result = feriensaldo({ jahr: 2026, heute: "2026-12-31", profil, changes: [], holidays: [], eintraege: [] });
       expect(result.anspruch).toBe(25);
     });

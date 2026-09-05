@@ -413,7 +413,7 @@ export default function CalendarPage() {
     // Fallback-Name, falls der Content-Disposition-Header aus irgendeinem
     // Grund fehlt — der Server liefert den eigentlichen Dateinamen im
     // Vorlagenstil (siehe app/api/export/stundenrapport/route.ts).
-    const fallbackFileName = `Stundenrapport_${customerName}_${currentDate.month}-${currentDate.year}.xlsx`;
+    const fallbackFileName = `Stundenrapport_${customerName}_${currentDate.month}-${currentDate.year}.pdf`;
     await downloadBlob(url, fallbackFileName, (msg) => toast.error(msg), t("calendar.exportError"), true);
   };
 

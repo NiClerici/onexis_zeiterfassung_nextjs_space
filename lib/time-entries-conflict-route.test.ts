@@ -67,6 +67,41 @@ describe("POST /api/time-entries — Zeit-Validierung", () => {
   });
 });
 
+// Audit-Fund HOCH (REVIEW_LOOP.md): Number(hours) auf einem nicht-numerischen
+// Wert ergibt NaN, und Math.max(0, Math.min(24, NaN)) bleibt NaN — das
+// vergiftete bisher Monatssummen und Exporte, ohne dass die Route es bemerkte.
+// Gilt für JEDEN Eintragstyp, nicht nur "arbeit", da für andere Typen zuvor
+// gar keine Prüfung von hours stattfand.
+describe("POST/PUT /api/time-entries — ungültige Stundenzahl (NaN) wird abgelehnt", () => {
+  it("POST 'arbeit' mit hours: 'acht' wird mit 400 abgelehnt statt NaN zu speichern", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-06-05", type: "arbeit", hours: "acht" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST 'ferien' mit hours: 'acht' wird ebenfalls mit 400 abgelehnt (vorher: keine Prüfung für Nicht-arbeit-Typen)", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-06-06", type: "ferien", hours: "acht" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("POST mit hours: 8 (eine gültige Zahl) bleibt erlaubt", async () => {
+    const res = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-06-07", type: "ferien", hours: 8 }));
+    expect(res.status).toBe(200);
+  });
+
+  it("PUT mit hours: 'acht' auf eine bestehende Zeile wird mit 400 abgelehnt", async () => {
+    const created = await tePost(jsonReq("/api/time-entries", "POST", { date: "2026-06-08", type: "ferien", hours: 8 }));
+    const { entry } = await created.json();
+
+    const res = await tePut(jsonReq("/api/time-entries", "PUT", { id: entry.id, hours: "acht" }));
+    expect(res.status).toBe(400);
+
+    // die ursprüngliche Zeile darf durch den abgelehnten PUT nicht verändert
+    // worden sein
+    const stillThere = await prisma.timeEntry.findUnique({ where: { id: entry.id } });
+    expect(stillThere?.hours).toBe(8);
+  });
+});
+
 describe("POST /api/time-entries — Duplikate & Absenz-Konflikte (409)", () => {
   it("ein exakt identischer zweiter Eintrag (gleiche Zeit) wird mit 409 abgelehnt", async () => {
     const first = await tePost(

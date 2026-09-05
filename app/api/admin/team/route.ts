@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { logError } from "@/lib/error-log";
+import { parseDateYMD } from "@/lib/dates";
+import { validateMembershipNumbers } from "@/lib/membership-validation";
 
 const VALID_ROLES = ["owner", "admin", "manager", "member"];
 const VALID_STATUS = ["aktiv", "inaktiv"];
@@ -104,12 +106,42 @@ export async function PUT(req: Request) {
       }
     }
 
-    if (entryDate !== undefined) updateData.entryDate = new Date(entryDate);
-    if (exitDate !== undefined) updateData.exitDate = exitDate ? new Date(exitDate) : null;
-    if (weeklyHours !== undefined) updateData.weeklyHours = weeklyHours;
-    if (pensum !== undefined) updateData.pensum = pensum;
-    if (vacationDays !== undefined) updateData.vacationDays = vacationDays;
-    if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
+    // Ungeprüfte new Date(...)-Aufrufe liessen ein kaputtes Datum (Tippfehler,
+    // falsches Format) klaglos als "Invalid Date" bis nach Prisma durch — dort
+    // wurde daraus ein 500er statt eines 400ers auf einen Eingabefehler
+    // (dasselbe Muster wie bei PUT /api/profile, Audit-Fund HOCH,
+    // REVIEW_LOOP.md). parseDateYMD validiert zusätzlich den Kalendertag.
+    if (entryDate !== undefined) {
+      const parsed = parseDateYMD(entryDate);
+      if (!parsed) return NextResponse.json({ error: "Ungültiges Eintrittsdatum" }, { status: 400 });
+      updateData.entryDate = parsed;
+    }
+    if (exitDate !== undefined) {
+      if (exitDate === null || exitDate === "") {
+        updateData.exitDate = null;
+      } else {
+        const parsed = parseDateYMD(exitDate);
+        if (!parsed) return NextResponse.json({ error: "Ungültiges Austrittsdatum" }, { status: 400 });
+        updateData.exitDate = parsed;
+      }
+    }
+    if (startDate !== undefined) {
+      if (startDate === null || startDate === "") {
+        updateData.startDate = null;
+      } else {
+        const parsed = parseDateYMD(startDate);
+        if (!parsed) return NextResponse.json({ error: "Ungültiges Startdatum" }, { status: 400 });
+        updateData.startDate = parsed;
+      }
+    }
+
+    const numberValidation = validateMembershipNumbers({ weeklyHours, pensum, vacationDays });
+    if (!numberValidation.ok) {
+      return NextResponse.json({ error: numberValidation.error }, { status: 400 });
+    }
+    if (numberValidation.values.weeklyHours !== undefined) updateData.weeklyHours = numberValidation.values.weeklyHours;
+    if (numberValidation.values.pensum !== undefined) updateData.pensum = numberValidation.values.pensum;
+    if (numberValidation.values.vacationDays !== undefined) updateData.vacationDays = numberValidation.values.vacationDays;
 
     const clampDay = (v: any) => Math.max(0, Math.min(24, Number(v) || 0));
     if (standardWeek && typeof standardWeek === "object") {

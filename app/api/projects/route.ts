@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, AccessError } from "@/lib/access";
 import { logError } from "@/lib/error-log";
-import { ownProjectsWhere } from "@/lib/project-visibility";
+import { ownProjectsWhere } from "@/lib/visibility";
+import { assertMayDelete, countProjectReferences, referenceCountsMessage } from "@/lib/entity-deletion";
 
 // Projekte gehören wie Kunden der Organisation (MIGRATION.md Punkt 5) — kein
 // Rollen-Gate für Anlegen/Pflegen, das darf jedes Mitglied. Beim Lesen
@@ -24,7 +25,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ projects: projects ?? [] });
     }
 
-    // Sichtbarkeitsregel ausgelagert nach lib/project-visibility.ts — der
+    // Sichtbarkeitsregel ausgelagert nach lib/visibility.ts — der
     // Stundenrapport-Export (app/api/export/stundenrapport) braucht dieselbe
     // Regel für seinen Projektkatalog.
     const ownFilter = await ownProjectsWhere(orgId, userId);
@@ -137,7 +138,7 @@ export async function PUT(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { orgId } = await requireOrg();
+    const { userId, orgId, role } = await requireOrg();
 
     const body = await req?.json?.().catch(() => ({}));
     const { id } = body ?? {};
@@ -146,8 +147,21 @@ export async function DELETE(req: Request) {
     const existing = await prisma.project.findFirst({ where: { id, orgId } });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // TimeEntry.projectId ist onDelete: SetNull — bereits erfasste Stunden
-    // bleiben erhalten, verlieren nur die Projektzuordnung.
+    // owner/admin dürfen jedes Projekt löschen, sonst nur die Person, die es
+    // selbst angelegt hat (REVIEW_LOOP.md, Audit-Fund KRITISCH — dieselbe
+    // Lücke wie bei /api/customers, hier per lib/entity-deletion.ts geteilt).
+    assertMayDelete(role, existing.createdBy, userId);
+
+    // Referenzsperre gilt für JEDE Rolle. TimeEntry.projectId ist zwar
+    // onDelete: SetNull — bereits erfasste Stunden blieben also technisch
+    // erhalten —, aber das Löschen soll trotzdem verhindert werden, solange
+    // noch gebucht wurde, statt Stunden stillschweigend ihre Projektzuordnung
+    // verlieren zu lassen.
+    const refs = await countProjectReferences(orgId, id);
+    if (refs.total > 0) {
+      return NextResponse.json({ error: referenceCountsMessage("Projekt", refs) }, { status: 409 });
+    }
+
     await prisma.project.delete({ where: { id } });
 
     return NextResponse.json({ success: true });

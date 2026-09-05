@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 import { requireOrg, AccessError } from "@/lib/access";
 import { logError } from "@/lib/error-log";
+import { validateMembershipNumbers } from "@/lib/membership-validation";
 
 export async function GET() {
   try {
@@ -36,9 +37,13 @@ export async function GET() {
       // ArG-Warnungen im Kalender (lib/compliance.ts ComplianceOptions).
       warnPauseZuKurz: (membership as any)?.org?.warnPauseZuKurz ?? true,
       warnSonntagsarbeit: (membership as any)?.org?.warnSonntagsarbeit ?? false,
+      // Nur lesend — Eintritts- UND Austrittsdatum werden ausschliesslich
+      // über /admin/team gesetzt (MIGRATION.md Punkt 4c), nicht von der
+      // Person selbst: startDate wirkt in sollStundenTag() (lib/calc.ts)
+      // spiegelbildlich zu exitDate und war deshalb dieselbe Lücke wie
+      // exitDate, bevor es hier aus dem PUT entfernt wurde (Audit-Fund HOCH,
+      // REVIEW_LOOP.md).
       startDate: membership?.startDate?.toISOString?.() ?? null,
-      // Nur lesend — Austrittsdatum wird ausschliesslich über /admin/team
-      // gesetzt (MIGRATION.md Punkt 4c), nicht von der Person selbst.
       exitDate: membership?.exitDate?.toISOString?.() ?? null,
       language: user?.language ?? "de",
       standardWeek: {
@@ -73,10 +78,23 @@ export async function PUT(req: Request) {
     if (body?.lastName !== undefined) userUpdateData.lastName = body.lastName;
     if (body?.language !== undefined) userUpdateData.language = body.language;
 
-    if (body?.weeklyHours !== undefined) membershipUpdateData.weeklyHours = body.weeklyHours;
-    if (body?.pensum !== undefined) membershipUpdateData.pensum = body.pensum;
-    if (body?.vacationDays !== undefined) membershipUpdateData.vacationDays = body.vacationDays;
-    if (body?.startDate !== undefined) membershipUpdateData.startDate = body.startDate ? new Date(body.startDate) : null;
+    // pensum/weeklyHours/vacationDays gehen direkt in den Überstunden- und
+    // Ferienanspruch ein (lib/calc.ts) — ungeprüft war hier ein Eingabefehler
+    // gleichbedeutend mit einem falschen Lohnexport (Audit-Fund HOCH,
+    // REVIEW_LOOP.md). startDate wird nicht mehr entgegengenommen: es wirkt
+    // in sollStundenTag() spiegelbildlich zu exitDate und ist deshalb wie
+    // dieses nur noch über /admin/team änderbar (siehe GET oben).
+    const numberValidation = validateMembershipNumbers({
+      weeklyHours: body?.weeklyHours,
+      pensum: body?.pensum,
+      vacationDays: body?.vacationDays,
+    });
+    if (!numberValidation.ok) {
+      return NextResponse.json({ error: numberValidation.error }, { status: 400 });
+    }
+    if (numberValidation.values.weeklyHours !== undefined) membershipUpdateData.weeklyHours = numberValidation.values.weeklyHours;
+    if (numberValidation.values.pensum !== undefined) membershipUpdateData.pensum = numberValidation.values.pensum;
+    if (numberValidation.values.vacationDays !== undefined) membershipUpdateData.vacationDays = numberValidation.values.vacationDays;
     if (body?.kuerzel !== undefined) membershipUpdateData.kuerzel = body.kuerzel?.trim?.() || null;
 
     // Standard week (Stunden pro Wochentag, 0-24 clamped)

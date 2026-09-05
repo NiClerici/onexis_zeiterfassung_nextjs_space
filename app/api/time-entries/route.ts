@@ -2,111 +2,14 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { EINTRAG_TYPEN, type EintragTyp } from "@/lib/calc";
+import type { EintragTyp } from "@/lib/calc";
 import { requireOrg, assertMonthEditable, AccessError } from "@/lib/access";
 import { diffTimeEntryFields } from "@/lib/audit";
 import { logError } from "@/lib/error-log";
 import { pruefeEintragKonflikte, type VergleichbarerEintrag } from "@/lib/entry-overlap";
-
-function isValidType(type: unknown): type is EintragTyp {
-  return typeof type === "string" && (EINTRAG_TYPEN as readonly string[]).includes(type);
-}
-
-// "HH:MM", 00:00–23:59 — dieselbe Prüfung, die vorher fehlte und wodurch ein
-// Wert wie "8" oder "25:00" ungefiltert bis in stundenAusEintrag() (lib/
-// calc.ts) durchlief und dort split(":").map(Number) zu NaN machte, das sich
-// danach durch Monatssummen, Überzeit-Berechnung und Exporte frisst.
-function isValidTimeString(s: unknown): s is string {
-  return typeof s === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
-}
-
-// Eine "arbeit"-Zeile ist gültig, wenn entweder BEIDE Zeiten ein valides
-// HH:MM sind (der Normalfall — jede Zeile, die über den Tagesdialog
-// gespeichert wird) ODER beide null sind und stattdessen eine Stundenzahl
-// vorliegt (das reine hours-Format des Stundenrapport-Imports, siehe
-// TimeEntry.countsAsWorktime in prisma/schema.prisma und
-// stundenAusEintrag() in lib/calc.ts, die für diesen Fall auf `hours`
-// zurückfällt). Jede andere Kombination — fehlende, halb gesetzte oder
-// falsch formatierte Zeiten — war vorher speicherbar und ergab über
-// stundenAusEintrag() stumm 0h oder NaN; das ist jetzt ein 400.
-function arbeitszeitIstGueltig(von: string | null, bis: string | null, hours: number | null): boolean {
-  if (isValidTimeString(von) && isValidTimeString(bis)) return true;
-  if (von == null && bis == null && hours != null) return true;
-  return false;
-}
-
-// Netto-Minuten (bis − von − Pause, Mitternachts-Konvention wie
-// stundenAusEintrag() in lib/calc.ts). null nur, wenn von/bis fehlen.
-function nettoMinuten(von: string, bis: string, pauseMin: number): number {
-  const [vh, vm] = von.split(":").map(Number);
-  const [bh, bm] = bis.split(":").map(Number);
-  let bisMin = bh * 60 + bm;
-  const vonMin = vh * 60 + vm;
-  if (bisMin < vonMin) bisMin += 24 * 60;
-  return bisMin - vonMin - pauseMin;
-}
-
-// Nimmt nur "YYYY-MM-DD" (führender Teil, Rest wird ignoriert) und baut UTC-Mitternacht.
-// new Date(date) auf einem vollen ISO-Datetime ohne Offset würde lokal statt UTC
-// interpretiert und könnte auf einem Server mit TZ≠UTC den Tag verschieben.
-function parseDateYMD(s: unknown): Date | null {
-  if (!s || typeof s !== "string") return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (!m) return null;
-  const y = parseInt(m[1], 10);
-  const mo = parseInt(m[2], 10);
-  const d = parseInt(m[3], 10);
-  const date = new Date(Date.UTC(y, mo - 1, d));
-  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
-  return date;
-}
-
-// Löst customerId/projectId auf. Ein Projekt gehört immer zu genau einem
-// Kunden (Project.customerId ist required) — ist projectId gesetzt, gewinnt
-// dessen customerId gegenüber einer abweichend mitgeschickten customerId,
-// damit die beiden Felder nie auseinanderlaufen.
-async function resolveProjectAndCustomer(
-  orgId: string,
-  projectId: unknown,
-  customerId: unknown
-): Promise<{ projectId: string | null; customerId: string | null } | { error: string }> {
-  if (projectId) {
-    const project = await prisma.project.findFirst({ where: { id: projectId as string, orgId } });
-    if (!project) return { error: "Invalid project" };
-    return { projectId: project.id, customerId: project.customerId };
-  }
-  if (customerId) {
-    const customer = await prisma.customer.findFirst({ where: { id: customerId as string, orgId } });
-    if (!customer) return { error: "Invalid customer" };
-    return { projectId: null, customerId: customer.id };
-  }
-  return { projectId: null, customerId: null };
-}
-
-// Alle anderen (nicht gelöschten) Zeilen desselben Kalendertags, als Basis
-// für pruefeEintragKonflikte() (lib/entry-overlap.ts). excludeId schliesst
-// bei PUT die eigene Zeile aus, damit sie nicht gegen sich selbst geprüft
-// wird — bei POST (neue Zeile) ist excludeId immer undefined.
-async function loadOtherEntriesOfDay(
-  orgId: string,
-  userId: string,
-  date: Date,
-  excludeId?: string
-): Promise<VergleichbarerEintrag[]> {
-  const rows = await prisma.timeEntry.findMany({
-    where: { userId, orgId, deletedAt: null, date, ...(excludeId ? { id: { not: excludeId } } : {}) },
-    select: { id: true, type: true, von: true, bis: true, pauseMin: true, hours: true, countsAsWorktime: true },
-  });
-  return rows.map((r) => ({
-    id: r.id,
-    typ: r.type as EintragTyp,
-    von: r.von,
-    bis: r.bis,
-    pauseMin: r.pauseMin,
-    hours: r.hours,
-    countsAsWorktime: r.countsAsWorktime,
-  }));
-}
+import { parseDateYMD } from "@/lib/dates";
+import { isValidType, arbeitszeitIstGueltig, INVALID_HOURS, nettoMinuten, parseHours } from "@/lib/time-entry-validation";
+import { resolveProjectAndCustomer, loadOtherEntriesOfDay } from "@/lib/time-entries";
 
 export async function GET(req: Request) {
   try {
@@ -172,7 +75,11 @@ export async function POST(req: Request) {
 
     const isArbeit = type === "arbeit";
     const clampedPause = Math.max(0, Math.min(1440, Number(pauseMin) || 0));
-    const clampedHours = hours != null && hours !== "" ? Math.max(0, Math.min(24, Number(hours))) : null;
+    const parsedHours = parseHours(hours);
+    if (parsedHours === INVALID_HOURS) {
+      return NextResponse.json({ error: "Ungültige Stundenzahl" }, { status: 400 });
+    }
+    const clampedHours = parsedHours;
     const nextVon = isArbeit ? (von || null) : null;
     const nextBis = isArbeit ? (bis || null) : null;
     // Arbeitszeit ohne gültige Von/Bis und ohne Stundenzahl wurde bisher
@@ -270,8 +177,11 @@ export async function PUT(req: Request) {
 
     const nextType: EintragTyp = isValidType(type) ? type : (existing.type as EintragTyp);
     const isArbeit = nextType === "arbeit";
-    const clampedHours =
-      hours !== undefined ? (hours === null || hours === "" ? null : Math.max(0, Math.min(24, Number(hours)))) : undefined;
+    const parsedHours = hours !== undefined ? parseHours(hours) : undefined;
+    if (parsedHours === INVALID_HOURS) {
+      return NextResponse.json({ error: "Ungültige Stundenzahl" }, { status: 400 });
+    }
+    const clampedHours = parsedHours;
 
     const nextVon = isArbeit ? (von !== undefined ? von || null : existing.von) : null;
     const nextBis = isArbeit ? (bis !== undefined ? bis || null : existing.bis) : null;

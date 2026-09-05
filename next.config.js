@@ -46,6 +46,21 @@ const nextConfig = {
   productionBrowserSourceMaps: false,
   experimental: {
     outputFileTracingRoot: path.join(__dirname, '../'),
+    // pdfkit lädt seine Helvetica/Times/Courier-.afm-Fontmetriken und ein
+    // ICC-Profil zur LAUFZEIT aus node_modules/pdfkit/js/data/ (kein
+    // require(), also übersieht Next.js' automatisches File Tracing sie —
+    // der Kundenrapport-Export (app/api/export/stundenrapport) würde im
+    // Standalone-Container mit "ENOENT .../Helvetica.afm" abbrechen, obwohl
+    // er im Dev-Server (der direkt aus node_modules liest) funktioniert.
+    // Das GANZE Paket statt nur js/data/ einschliessen: eine engere Glob nur
+    // auf die .afm-Dateien liess in der Praxis node_modules/pdfkit/package.json
+    // weg (Next's eigenes Tracing fügte zwar js/*.js hinzu, aber ohne
+    // package.json findet Node keinen Einstiegspunkt mehr → "Cannot find
+    // module 'pdfkit'", per "docker run ... node -e require('pdfkit')"
+    // gegen das gebaute Image verifiziert). Kostet nur ~10 MB im Image.
+    outputFileTracingIncludes: {
+      "/api/export/stundenrapport": ["./node_modules/pdfkit/**/*"],
+    },
   },
   eslint: {
     ignoreDuringBuilds: true,

@@ -128,6 +128,10 @@ const translations: Record<string, string> = {
   "calendar.entrySaved": "Eintrag gespeichert",
   "calendar.entryDeleted": "Eintrag gelöscht",
   "calendar.entryError": "Fehler beim Speichern des Eintrags",
+  "calendar.saveDay": "Tag speichern",
+  "calendar.daySaved": "Tag gespeichert",
+  "calendar.dayShiftClamped": "Eine Folgezeit wurde auf 23:59 begrenzt.",
+  "calendar.unsavedWarning": "Es gibt ungespeicherte Änderungen an diesem Tag. Trotzdem schliessen?",
   "calendar.noEntries": "Keine Einträge",
   "calendar.deleteConfirm": "Wirklich löschen?",
   "calendar.selectMonth": "Monat wählen",
@@ -193,6 +197,13 @@ const translations: Record<string, string> = {
   // Arbeitszeit-Karte darunter zusätzlich das Soll des ganzen Zeitraums
   // (sollGesamt, ofFullTarget).
   "analytics.ofFullTarget": "{hours}h im ganzen Zeitraum",
+  // Ergänzung zu ofFullTarget: macht in der Arbeitszeit-Kachel sichtbar,
+  // dass "23.3h / 25.6h" das Soll BIS HEUTE ist, nicht das Monatssoll —
+  // sonst liest sich ein noch laufender Zeitraum wie eine hängengebliebene
+  // Zahl (gemeldeter Fall: Wechsel "Frei wählen" → "Monat" zeigte scheinbar
+  // dieselbe Zahl weiter, war aber für beide Auswahlen korrekt und zufällig
+  // identisch, weil "heute" auf den letzten Tag des Zeitraums fiel).
+  "analytics.targetToDate": "Soll bis heute",
   "analytics.actualHours": "Geleistete Stunden",
   "analytics.difference": "Differenz",
   "analytics.billingRate": "Verrechnungsgrad",
@@ -214,6 +225,12 @@ const translations: Record<string, string> = {
   "analytics.to": "Bis",
   "analytics.h": "h",
   "analytics.noData": "Keine Daten für diesen Zeitraum",
+  // Bugfix REVIEW_LOOP.md "Analytics zeigt bei einem Fehler die Zahlen des
+  // vorherigen Zeitraums unter neuer Beschriftung": vorher blieb bei einem
+  // fehlgeschlagenen Request der ALTE data-Zustand stehen. Jetzt wird data
+  // bei einem Fehler auf null gesetzt und dieser Text statt der Kacheln
+  // gezeigt — Fallback, falls der Server keine eigene Fehlermeldung liefert.
+  "analytics.loadError": "Auswertung konnte nicht geladen werden.",
   // Überzeit (Art. 12/13 ArG, gesetzliches Wochenlimit) — eigener Begriff,
   // getrennt von Überstunden (MIGRATION.md Punkt 6a).
   "analytics.weeklyOvertime": "Überzeit",
@@ -264,6 +281,7 @@ const translations: Record<string, string> = {
   "profile.title": "Profil",
   "profile.personalInfo": "Persönliche Daten",
   "profile.workSettings": "Arbeitseinstellungen",
+  "profile.startDateReadOnly": "Nur über die Team-Verwaltung änderbar",
   "profile.kuerzel": "Kürzel",
   "profile.kuerzelPlaceholder": "z.B. CLN",
   "profile.security": "Sicherheit",
@@ -309,6 +327,8 @@ const translations: Record<string, string> = {
   "profile.customerSaved": "Kunde gespeichert",
   "profile.customerDeleted": "Kunde gelöscht",
   "profile.customerError": "Fehler beim Speichern des Kunden",
+  "profile.deleteCustomerTitle": "Kunde löschen?",
+  "profile.deleteCustomerConfirm": "\"{name}\" wird unwiderruflich gelöscht. Das lässt sich nicht rückgängig machen.",
   "profile.hourlyRate": "CHF/h",
   // Erweiterter Export (MIGRATION.md Punkt 7)
   "profile.exportScopeSelf": "Eigene Daten",
@@ -333,6 +353,10 @@ const translations: Record<string, string> = {
   "profile.projectSaved": "Projekt gespeichert",
   "profile.projectDeleted": "Projekt gelöscht",
   "profile.projectError": "Fehler beim Speichern des Projekts",
+  "profile.deleteProjectTitle": "Projekt löschen?",
+  "profile.deleteProjectConfirm": "\"{name}\" wird unwiderruflich gelöscht. Das lässt sich nicht rückgängig machen.",
+  "profile.cancel": "Abbrechen",
+  "profile.confirmDelete": "Löschen",
   // Kundenstunden monatlich (statt am Tageseintrag)
   "profile.customerMonth": "Kundenstunden",
   "profile.customerMonthDesc": "Diese Monatserfassung ist für migrierte Altmonate gedacht. Läuft der Monat schon im Kalender pro Tag mit, gilt dort die Kundenzuordnung — hier eingetragene Stunden für denselben Monat werden dann nicht mitgezählt. Bei Kunden mit mindestens einem Projekt kannst du die Stunden über \"Auf Projekte aufteilen\" aufsplitten.",
@@ -480,6 +504,13 @@ const translations: Record<string, string> = {
   "legal.confirmNameLabel": "Zum Bestätigen \"{name}\" eingeben:",
   "legal.deleteButton": "Organisation endgültig löschen",
   "legal.orgDeleted": "Organisation gelöscht",
+  "legal.logoTitle": "Firmenlogo",
+  "legal.logoHint": "Erscheint oben rechts im Kundenrapport-PDF (PNG oder JPEG, max. 512 KB).",
+  "legal.logoUpload": "Logo hochladen",
+  "legal.logoRemove": "Entfernen",
+  "legal.logoSaved": "Logo gespeichert",
+  "legal.logoRemoved": "Logo entfernt",
+  "legal.logoInvalid": "Logo konnte nicht gespeichert werden",
   "legal.warningsTitle": "ArG-Warnungen",
   "legal.warningsHint": "Nicht-blockierende Hinweise im Kalender — betrifft nur die Anzeige, nichts wird dadurch am Speichern gehindert.",
   "legal.warnPauseZuKurzLabel": "Pausen-Warnung",

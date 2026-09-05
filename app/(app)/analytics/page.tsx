@@ -71,6 +71,11 @@ export default function AnalyticsPage() {
   const [customDefaultsLoaded, setCustomDefaultsLoaded] = useState(false);
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(false);
+  // Bugfix (REVIEW_LOOP.md): vorher wurde setData nur bei res.ok aufgerufen —
+  // schlug ein Request fehl, blieben die Zahlen des VORHERIGEN Zeitraums
+  // unter der neuen Auswahl stehen, ohne jeden Hinweis. Jetzt räumt jeder
+  // fehlgeschlagene Request data konsequent ab und setzt stattdessen error.
+  const [error, setError] = useState<string | null>(null);
 
   // Load user's startDate for custom period defaults
   useEffect(() => {
@@ -100,8 +105,9 @@ export default function AnalyticsPage() {
     loadDefaults();
   }, []);
 
-  const fetchAnalytics = useCallback(async () => {
+  const fetchAnalytics = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    setError(null);
     try {
       let url = "/api/analytics?";
       if (periodType === "month") {
@@ -114,17 +120,39 @@ export default function AnalyticsPage() {
       } else {
         url += `type=custom&from=${customFrom}&to=${customTo}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       if (res?.ok) {
         const d = await res?.json?.().catch(() => ({}));
         setData(d ?? null);
+      } else {
+        // Vorher: data blieb unverändert, die Seite zeigte die Zahlen des
+        // ALTEN Zeitraums unter der neuen Beschriftung. Jetzt: kein
+        // gültiges Ergebnis heisst keine Zahlen.
+        const errBody = await res?.json?.().catch(() => ({}));
+        setData(null);
+        setError(errBody?.error ?? t("analytics.loadError"));
       }
-    } catch (err: any) { console.error(err); } finally { setLoading(false); }
-  }, [periodType, selectedMonth, selectedYear, selectedQuarter, customFrom, customTo]);
+    } catch (err: any) {
+      // Ein AbortError kommt vom eigenen Cleanup unten (Zeitraum wurde
+      // gewechselt, während der vorige Request noch lief) — nicht die
+      // Anfrage, die gerade läuft, mit dem Abbruch der VORIGEN überschreiben.
+      if (err?.name === "AbortError") return;
+      console.error(err);
+      setData(null);
+      setError(t("analytics.loadError"));
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, [periodType, selectedMonth, selectedYear, selectedQuarter, customFrom, customTo, t]);
 
   useEffect(() => {
     if (periodType === "custom" && (!customFrom || !customTo || !customDefaultsLoaded)) return;
-    fetchAnalytics();
+    // AbortController gegen die Race beim schnellen Umschalten des
+    // Zeitraums: ohne das konnte eine langsamere ältere Antwort NACH der
+    // neueren eintreffen und data wieder mit alten Werten überschreiben.
+    const controller = new AbortController();
+    fetchAnalytics(controller.signal);
+    return () => controller.abort();
   }, [fetchAnalytics, periodType, customFrom, customTo, customDefaultsLoaded]);
 
   // targetHours ist das Soll BIS HEUTE, fullTargetHours das der ganzen Periode
@@ -204,6 +232,8 @@ export default function AnalyticsPage() {
 
       {loading ? (
         <div className="text-center py-12 text-muted-foreground text-sm">{t("common.loading")}</div>
+      ) : error ? (
+        <div className="text-center py-12 text-sm text-red-700 dark:text-red-400">{error}</div>
       ) : data ? (
         <>
           {/* Überstunden-Hero: eine dominante Zahl statt vier gleichwertiger
@@ -242,6 +272,12 @@ export default function AnalyticsPage() {
                   <div className="flex items-center gap-2 text-sm"><BarChart3 className="w-4 h-4 text-muted-foreground" />{t("analytics.workTime")}</div>
                   <span className="font-mono text-sm tabular-nums">{actualHoursVal.toFixed(1)}h / {targetHoursVal.toFixed(1)}h</span>
                 </div>
+                {/* Macht sichtbar, dass die Zahl links das Soll BIS HEUTE ist
+                    (kennzahlen() schneidet soll und ist symmetrisch bei
+                    bisHeute ab) — nur solange der Zeitraum noch läuft, sonst
+                    sind Soll-bis-heute und Monatssoll identisch und der
+                    Zusatz wäre nur Rauschen. */}
+                {periodOngoing && <div className="text-[11px] text-muted-foreground -mt-1 mb-1">{t("analytics.targetToDate")}</div>}
                 <Progress value={workProgress} className={cn("h-2", workTargetMet ? "[&>div]:bg-emerald-600 dark:[&>div]:bg-emerald-500" : "[&>div]:bg-primary")} />
                 <p className="text-xs text-muted-foreground mt-2">
                   {workTargetMet

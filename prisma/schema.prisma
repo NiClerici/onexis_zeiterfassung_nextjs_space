@@ -78,6 +78,24 @@ model Organization {
   monthLocks      MonthLock[]
   absenceRequests AbsenceRequest[]
   customerMonths  CustomerMonth[]
+  logo            OrganizationLogo?
+}
+
+// Firmenlogo für den Kundenrapport-PDF (lib/pdf-stundenrapport.ts) — eigenes
+// Modell statt eines Blob-Felds direkt auf Organization: rund ein Dutzend
+// Stellen laden die Organisation über include: { org: true } (u.a.
+// app/api/profile/route.ts, app/api/export/*/route.ts,
+// lib/absence-entries.ts) und würden das Bild sonst bei jedem dieser
+// Aufrufe ungenutzt mitladen. onDelete: Cascade deckt die
+// Organisationslöschung (app/api/admin/organization/route.ts DELETE)
+// automatisch ab.
+model OrganizationLogo {
+  orgId     String   @id
+  data      Bytes
+  mimeType  String // "image/png" | "image/jpeg" (siehe lib/org-logo.ts)
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 // Monatsabschluss (MIGRATION.md Punkt 6e). Existenz einer Zeile = der Monat
@@ -335,6 +353,12 @@ model Customer {
   // Fallback-Stundensatz, falls ein Projekt dieses Kunden keinen eigenen
   // hourlyRate trägt (MIGRATION.md Punkt 5).
   hourlyRate     Float?
+  createdBy      String? // userId der erstellenden Person — bewusst keine Relation
+  // (gleiches Muster wie Project.createdBy), NULL bei Bestandskunden vor
+  // dieser Migration. Macht einen von einem "member" frisch angelegten
+  // Kunden für diesen sichtbar, bevor er selbst Stunden darauf gebucht hat
+  // (siehe GET /api/customers), und erlaubt ihm, genau diesen Kunden auch
+  // wieder selbst zu löschen (siehe lib/entity-deletion.ts).
   org            Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   timeEntries    TimeEntry[]
   projects       Project[]
@@ -403,7 +427,13 @@ model CustomerMonth {
 
   org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customer Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  // Restrict statt Cascade (Audit-Fund KRITISCH, REVIEW_LOOP.md Batch 5): die
+  // CustomerMonth-Werte sind von Hand aus alten Stundenrapporten
+  // rekonstruierte Migrationsdaten — ein gelöschter Kunde darf sie nicht
+  // stillschweigend mitreissen. Löschen ist über die API ohnehin gesperrt,
+  // solange Referenzen bestehen (lib/entity-deletion.ts); Restrict sorgt
+  // dafür, dass das auch am API-Layer vorbei hält.
+  customer Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
   project  Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
 
   @@index([orgId, year, month])

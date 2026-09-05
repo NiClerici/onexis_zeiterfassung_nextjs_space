@@ -28,8 +28,8 @@ describe("parseTimesheetWorkbook — 4-Spalten-Altformat (Nicos Datei)", () => {
     expect(rows).toHaveLength(4);
 
     expect(rows[0]).toMatchObject({ date: "2026-04-01", type: "arbeit", hours: 6, von: "08:00" });
-    // 8h + 30min Pause ab 6h → 16:30 laut buildArbeitszeit
-    expect(rows[1]).toMatchObject({ date: "2026-04-02", type: "arbeit", hours: 8, von: "08:00", bis: "16:30", pauseMin: 30 });
+    // 8h + 0 Min. Pause (kein automatischer ArG-Vorschlag mehr) → 16:00
+    expect(rows[1]).toMatchObject({ date: "2026-04-02", type: "arbeit", hours: 8, von: "08:00", bis: "16:00", pauseMin: 0 });
     expect(rows[2]).toMatchObject({ date: "2026-04-03", type: "feiertag", hours: 4.8, von: null, bis: null });
     expect(rows[3]).toMatchObject({ date: "2026-04-06", type: "ferien", hours: 8, von: null, bis: null });
   });

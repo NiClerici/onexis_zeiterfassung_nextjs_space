@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
-import { FileText, Download, AlertTriangle, ShieldAlert, BellOff } from "lucide-react";
+import { FileText, Download, AlertTriangle, ShieldAlert, BellOff, Image as ImageIcon, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
@@ -30,6 +30,9 @@ export default function LegalPage() {
   const [warnPauseZuKurz, setWarnPauseZuKurz] = useState(true);
   const [warnSonntagsarbeit, setWarnSonntagsarbeit] = useState(false);
   const [savingWarnings, setSavingWarnings] = useState<"warnPauseZuKurz" | "warnSonntagsarbeit" | null>(null);
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [logoLoading, setLogoLoading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (sessionStatus === "authenticated" && role && !isOrgAdmin) {
@@ -49,7 +52,60 @@ export default function LegalPage() {
         }
       })
       .catch((err) => console.error(err));
+    fetch("/api/admin/organization/logo")
+      .then((r) => (r?.ok ? r.json() : null))
+      .then((d) => setLogoDataUrl(d?.dataUrl ?? null))
+      .catch((err) => console.error(err));
   }, [isOrgAdmin]);
+
+  const handleLogoUpload = async (file: File) => {
+    setLogoLoading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch("/api/admin/organization/logo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      if (res?.ok) {
+        setLogoDataUrl(dataUrl);
+        toast.success(t("legal.logoSaved"));
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error ?? t("legal.logoInvalid"));
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(t("legal.logoInvalid"));
+    } finally {
+      setLogoLoading(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    setLogoLoading(true);
+    try {
+      const res = await fetch("/api/admin/organization/logo", { method: "DELETE" });
+      if (res?.ok) {
+        setLogoDataUrl(null);
+        toast.success(t("legal.logoRemoved"));
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error ?? t("profile.error"));
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(t("profile.error"));
+    } finally {
+      setLogoLoading(false);
+    }
+  };
 
   const handleToggleWarning = async (key: "warnPauseZuKurz" | "warnSonntagsarbeit", value: boolean) => {
     const setter = key === "warnPauseZuKurz" ? setWarnPauseZuKurz : setWarnSonntagsarbeit;
@@ -151,6 +207,46 @@ export default function LegalPage() {
           <button onClick={() => handleExport("excel")} disabled={exporting !== null} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50">
             <Download className="w-4 h-4" /> {exporting === "excel" ? t("common.loading") : t("legal.exportExcel")}
           </button>
+        </div>
+      </motion.div>
+
+      {/* Firmenlogo für den Kundenrapport-PDF */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.07 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
+        <h2 className="text-sm font-display font-semibold mb-1 flex items-center gap-2"><ImageIcon className="w-4 h-4 text-primary" /> {t("legal.logoTitle")}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t("legal.logoHint")}</p>
+        <div className="flex items-center gap-3 flex-wrap">
+          {logoDataUrl && (
+            <div className="bg-secondary/60 rounded-xl p-2 flex items-center justify-center" style={{ width: 120, height: 60 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoDataUrl} alt="" className="max-w-full max-h-full object-contain" />
+            </div>
+          )}
+          <input
+            ref={logoInputRef}
+            type="file"
+            accept="image/png,image/jpeg"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleLogoUpload(file);
+            }}
+          />
+          <button
+            onClick={() => logoInputRef.current?.click()}
+            disabled={logoLoading}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-secondary text-foreground text-sm font-medium hover:bg-accent transition disabled:opacity-50"
+          >
+            <ImageIcon className="w-4 h-4" /> {logoLoading ? t("common.loading") : t("legal.logoUpload")}
+          </button>
+          {logoDataUrl && (
+            <button
+              onClick={handleLogoRemove}
+              disabled={logoLoading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition text-sm font-medium disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4" /> {t("legal.logoRemove")}
+            </button>
+          )}
         </div>
       </motion.div>
 
