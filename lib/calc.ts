@@ -198,6 +198,18 @@ export function tagessollBasis(wochenstunden: number, pensum: number): number {
   return (wochenstunden * pensum) / 100 / 5;
 }
 
+// Findet die Holiday-Zeile, die an diesem Tag gilt — einzige Definition
+// davon (bisher inline in sollStundenTag), damit kennzahlen() dieselbe
+// Regel verwenden kann, um Absenz-Doppelzählung an Feiertagen zu erkennen
+// (siehe kennzahlen() unten). Bei mehreren Holiday-Zeilen auf denselben Tag
+// (das @@unique erlaubt das über verschiedene "name") gewinnt die zuerst
+// gefundene — dieselbe Regel wie bisher hier und in
+// app/api/time-entries/bulk-apply/route.ts.
+export function feiertagAmTag(datum: Date | string, holidays: HolidayInput[]): HolidayInput | undefined {
+  const d = toUTCDate(datum);
+  return holidays.find((h) => toUTCDate(h.date).getTime() === d.getTime());
+}
+
 export function sollStundenTag(
   datum: Date | string,
   profil: Profil,
@@ -216,7 +228,7 @@ export function sollStundenTag(
   const { pensum, wochenstunden } = pensumAt(d, profil, changes);
   const basis = tagessollBasis(wochenstunden, pensum);
   // Feiertag (MIGRATION.md Punkt 6c): ganzer Tag → 0, Halbtag → halbes Soll.
-  const feiertag = holidays.find((h) => toUTCDate(h.date).getTime() === d.getTime());
+  const feiertag = feiertagAmTag(d, holidays);
   if (feiertag) return feiertag.halfDay ? basis / 2 : 0;
   return basis;
 }
@@ -305,7 +317,18 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
     // geplantZukunft so behandelt, als gäbe es die Zeile nicht.
     if (eintrag.countsAsWorktime === false) continue;
     const tagesSoll = sollStundenTag(d, input.profil, input.changes, input.holidays);
-    const stunden = stundenAusEintrag(eintrag, tagesSoll);
+    const rohStunden = stundenAusEintrag(eintrag, tagesSoll);
+    // Ein Feiertag wirkt bereits über das Tagessoll (sollStundenTag() oben →
+    // 0, bei halfDay → basis/2). Wird zusätzlich ein Absenz-Eintrag desselben
+    // Tages erfasst (z.B. type="feiertag" mit von Hand eingetragenen
+    // Stunden), legte das dieselben Stunden ein zweites Mal aufs Ist und
+    // erzeugte pro Feiertag ein ganzes Tagessoll Phantom-Überstunden
+    // (Betrieb.md-Nachtrag: nico.clerici@onexis.ch zeigte dadurch +24h zu
+    // viel). typ="arbeit" ist bewusst ausgenommen — echte Arbeit am
+    // Feiertag IST Überstunden und soll nicht gekappt werden.
+    const stunden = eintrag.typ !== "arbeit" && feiertagAmTag(d, input.holidays)
+      ? Math.min(rohStunden, tagesSoll)
+      : rohStunden;
     if (d.getTime() <= bisHeute.getTime()) {
       ist += stunden;
       if (eintrag.typ === "arbeit") {

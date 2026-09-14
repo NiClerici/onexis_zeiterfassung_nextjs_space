@@ -10,6 +10,21 @@ import { parseDateYMD } from "@/lib/dates";
 import { isValidType, arbeitszeitIstGueltig, INVALID_HOURS, nettoMinuten, parseHours } from "@/lib/time-entry-validation";
 import { resolveProjectAndCustomer } from "@/lib/time-entries";
 
+// Siehe app/api/time-entries/route.ts — dieselbe Regel, hier für den
+// Tages-Speichern-Endpunkt: ein Feiertag kürzt das Tagessoll bereits über
+// sollStundenTag() (lib/calc.ts), ein zusätzlicher type="feiertag"-Eintrag
+// desselben Tages legte die Stunden bisher ein zweites Mal aufs Ist. Dieser
+// Endpunkt ist der eigentliche Speicherpfad des Kalender-Tagesdialogs
+// (components/day-entry-dialog.tsx) — der Schutz gehört deshalb auch hierhin,
+// nicht nur in den Einzel-POST/PUT.
+async function hasHolidayOnDate(orgId: string, date: Date): Promise<boolean> {
+  const holiday = await prisma.holiday.findFirst({ where: { orgId, date } });
+  return holiday !== null;
+}
+
+const FEIERTAG_KONFLIKT_MESSAGE =
+  "Dieser Tag ist bereits als Feiertag hinterlegt — das Soll ist automatisch gekürzt, ein eigener Eintrag ist nicht nötig";
+
 const MAX_ROWS_PER_DAY = 50;
 
 interface IncomingRow {
@@ -61,6 +76,9 @@ export async function PUT(req: Request) {
     const rowsIn: IncomingRow[] = Array.isArray(body?.rows) ? body.rows : [];
     if (rowsIn.length > MAX_ROWS_PER_DAY) {
       return NextResponse.json({ error: "Zu viele Zeilen" }, { status: 400 });
+    }
+    if (rowsIn.some((r) => r?.type === "feiertag") && (await hasHolidayOnDate(orgId, parsedDate))) {
+      return NextResponse.json({ error: FEIERTAG_KONFLIKT_MESSAGE }, { status: 400 });
     }
 
     // Jede Zeile einzeln validieren und auflösen (Projekt/Kunde), bevor

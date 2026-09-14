@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   feriensaldo,
+  feiertagAmTag,
   kennzahlen,
   pensumAt,
   sollStundenTag,
@@ -986,6 +987,105 @@ describe("Feiertage (MIGRATION.md Punkt 6c)", () => {
     });
     expect(result.soll).toBe(0);
     expect(result.ist).toBe(4);
+  });
+
+  // Betrieb.md-Nachtrag: nico.clerici@onexis.ch zeigte in Prod +24h
+  // Phantom-Überstunden, weil Admin-erzeugte Holiday-Zeilen UND von Hand
+  // erfasste "feiertag"-Tageseinträge (mit fest gespeicherten Stunden)
+  // gleichzeitig existierten — sollStundenTag() kürzt das Soll auf 0, der
+  // Eintrag legte dieselben Stunden aber zusätzlich aufs Ist. Diese vier
+  // Tests decken den Fix in kennzahlen() ab (Clamp auf Absenz-Einträge an
+  // Feiertagen, typ="arbeit" ausgenommen).
+  describe("Doppelzählung: Absenz-Eintrag zusätzlich zur Holiday-Zeile", () => {
+    it("ein ganztags-Feiertag mit zusätzlichem feiertag-Eintrag (feste Stunden) zählt NICHT doppelt", () => {
+      const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+      const mitEintrag = kennzahlen({
+        from: "2026-04-03", to: "2026-04-03", heute: "2026-04-03",
+        eintraege: [{ date: "2026-04-03", typ: "feiertag", hours: 8 }],
+        profil, changes: [], payouts: [], holidays, kundenstunden: 0,
+      });
+      const ohneEintrag = kennzahlen({
+        from: "2026-04-03", to: "2026-04-03", heute: "2026-04-03",
+        eintraege: [],
+        profil, changes: [], payouts: [], holidays, kundenstunden: 0,
+      });
+      expect(mitEintrag.ist).toBe(0);
+      expect(mitEintrag.ueberstunden).toBe(ohneEintrag.ueberstunden);
+    });
+
+    it("ein Halbtags-Feiertag mit feiertag-Eintrag (8h) klemmt auf das halbe Tagessoll (4h)", () => {
+      const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: true }];
+      const result = kennzahlen({
+        from: "2026-04-03", to: "2026-04-03", heute: "2026-04-03",
+        eintraege: [{ date: "2026-04-03", typ: "feiertag", hours: 8 }],
+        profil, changes: [], payouts: [], holidays, kundenstunden: 0,
+      });
+      expect(result.ist).toBe(4);
+    });
+
+    it("ein ferien-Eintrag (8h) auf einem Ganztags-Feiertag zählt ebenfalls nicht doppelt", () => {
+      const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+      const result = kennzahlen({
+        from: "2026-04-03", to: "2026-04-03", heute: "2026-04-03",
+        eintraege: [{ date: "2026-04-03", typ: "ferien", hours: 8 }],
+        profil, changes: [], payouts: [], holidays, kundenstunden: 0,
+      });
+      expect(result.ist).toBe(0);
+    });
+
+    it("echte Arbeit an einem Feiertag bleibt UNGEKAPPT — typ=arbeit ist vom Clamp ausgenommen", () => {
+      const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+      const result = kennzahlen({
+        from: "2026-04-03", to: "2026-04-03", heute: "2026-04-03",
+        eintraege: [{ date: "2026-04-03", typ: "arbeit", von: "08:00", bis: "17:00", pauseMin: 0 }],
+        profil, changes: [], payouts: [], holidays, kundenstunden: 0,
+      });
+      expect(result.ist).toBe(9);
+      expect(result.ueberstunden).toBe(9);
+    });
+
+    // Regressionstest mit den echten Prod-Zahlen (Diagnose vom 14.09.2026):
+    // Profil 60% ab 01.04.2026, PensumChange auf 80% ab 01.09.2026, fünf
+    // Werktags-Feiertage (Karfreitag, Ostermontag, 1. Mai, Auffahrt,
+    // Pfingstmontag) je mit zusätzlichem feiertag-Eintrag à 4.8h (= volles
+    // Tagessoll bei 60%). VOR dem Fix betrug die Differenz zwischen "mit
+    // Doppelerfassung" und "bereinigt" 24.0h (angezeigt 47.3h statt
+    // korrekt 23.3h) — nach dem Fix ist die Differenz 0, weil der Clamp
+    // die überzähligen Stunden gar nicht erst zulässt.
+    it("Regressionstest: 5 doppelt erfasste Feiertage bei 60%→80%-Pensumwechsel liefern denselben Saldo wie ohne die Einträge", () => {
+      const teilzeitProfil: Profil = { wochenstunden: 40, pensum: 60, ferientage: 25, startDate: "2026-04-01", exitDate: null, maxWeeklyHours: 45 };
+      const changes = [{ effectiveFrom: "2026-09-01", pensum: 80, wochenstunden: 40 }];
+      const feiertagsDaten = ["2026-04-03", "2026-04-06", "2026-05-01", "2026-05-14", "2026-05-25"];
+      const holidays: HolidayInput[] = feiertagsDaten.map((date) => ({ date, halfDay: false }));
+      const eintraege = feiertagsDaten.map((date) => ({ date, typ: "feiertag" as const, hours: 4.8 }));
+
+      const mitDoppelerfassung = kennzahlen({
+        from: "2026-04-01", to: "2026-09-14", heute: "2026-09-14",
+        eintraege, profil: teilzeitProfil, changes, payouts: [], holidays, kundenstunden: 0,
+      });
+      const bereinigt = kennzahlen({
+        from: "2026-04-01", to: "2026-09-14", heute: "2026-09-14",
+        eintraege: [], profil: teilzeitProfil, changes, payouts: [], holidays, kundenstunden: 0,
+      });
+      // Kernaussage: mit und ohne die doppelt erfassten Feiertage kommt
+      // exakt derselbe Saldo raus. (Dieser synthetische Fall hat keine
+      // echten Arbeitseinträge, daher ist der absolute Wert hier nur
+      // -sollGesamt — die reale Differenz von 47.3h→23.3h in Prod enthielt
+      // zusätzlich echte Arbeitszeit, siehe Plan.)
+      expect(mitDoppelerfassung.ueberstunden).toBe(bereinigt.ueberstunden);
+    });
+  });
+
+  describe("feiertagAmTag()", () => {
+    it("findet die Holiday-Zeile am exakten Datum", () => {
+      const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+      expect(feiertagAmTag("2026-04-03", holidays)?.halfDay).toBe(false);
+    });
+
+    it("gibt undefined zurück, wenn keine Holiday-Zeile auf diesen Tag fällt", () => {
+      const holidays: HolidayInput[] = [{ date: "2026-04-03", halfDay: false }];
+      expect(feiertagAmTag("2026-04-04", holidays)).toBeUndefined();
+    });
   });
 });
 

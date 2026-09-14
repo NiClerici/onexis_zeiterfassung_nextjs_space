@@ -41,6 +41,7 @@ beforeAll(async () => {
 afterEach(async () => {
   await prisma.timeEntryAudit.deleteMany({ where: { orgId: ORG } });
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
+  await prisma.holiday.deleteMany({ where: { orgId: ORG } });
 });
 
 afterAll(async () => {
@@ -122,6 +123,22 @@ describe("PUT /api/time-entries/day", () => {
     );
     expect(res.status).toBe(409);
     const stored = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId, date: new Date("2026-06-05") } });
+    expect(stored).toHaveLength(0);
+  });
+
+  // Betrieb.md-Nachtrag: ein admin-erzeugter Holiday-Eintrag UND ein
+  // zusätzlicher type="feiertag"-Tageseintrag desselben Tages führten zu
+  // Phantom-Überstunden (sollStundenTag() kürzt das Soll bereits auf 0, der
+  // Eintrag legte die Stunden ein zweites Mal aufs Ist). Dieser Endpunkt ist
+  // der Speicherpfad des Kalender-Tagesdialogs — der Schutz muss also auch
+  // hier greifen, nicht nur im Einzel-POST/PUT von app/api/time-entries.
+  it("lehnt einen feiertag-Eintrag an einem Tag mit bestehender Holiday-Zeile mit 400 ab", async () => {
+    await prisma.holiday.create({ data: { orgId: ORG, date: new Date("2026-06-10"), name: "Test-Feiertag", halfDay: false } });
+    const res = await dayPut(
+      jsonReq({ date: "2026-06-10", rows: [{ type: "feiertag", von: null, bis: null, pauseMin: 0, hours: 8 }] })
+    );
+    expect(res.status).toBe(400);
+    const stored = await prisma.timeEntry.findMany({ where: { orgId: ORG, userId, date: new Date("2026-06-10") } });
     expect(stored).toHaveLength(0);
   });
 

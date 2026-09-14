@@ -6,6 +6,7 @@ import { requireOrg, AccessError } from "@/lib/access";
 import {
   kennzahlen,
   feriensaldo,
+  sollStundenTag,
   tagessollBasis,
   type Profil,
   type PensumChangeInput,
@@ -139,15 +140,48 @@ export async function GET(req: Request) {
 
     const k = kennzahlen({ from: startDate, to: endDate, heute, eintraege, profil, changes, payouts, holidays, kundenstunden: kundenstundenTotal });
 
-    // Feiertagsstunden (bis heute) für die bestehende Feiertags-Karte
+    // Feiertagsstunden (bis heute) für die bestehende Feiertags-Karte. Bewusst
+    // der AKTUELLE Tarif (currentProfil unten), nicht die Basis aus profil —
+    // diese Karte zeigt Feiertagsstunden zum heute gültigen Pensum.
+    //
+    // Quelle ist die Holiday-Tabelle, nicht mehr in erster Linie
+    // "feiertag"-TimeEntries: Ein admin-seitig angelegter Feiertag kürzt das
+    // Soll bereits automatisch über sollStundenTag() (lib/calc.ts) auf 0
+    // bzw. die Hälfte. Zeigte diese Karte "0 Feiertage", solange niemand
+    // zusätzlich einen Tageseintrag erfasste, lud das genau zu der
+    // Doppelerfassung ein, die in kennzahlen() Phantom-Überstunden erzeugte
+    // (Betrieb.md-Nachtrag: nico.clerici@onexis.ch, +24h). Für jede
+    // Holiday-Zeile im Zeitraum wird jetzt direkt der von ihr verursachte
+    // Soll-Ausfall gezählt — die Differenz von sollStundenTag() mit/ohne
+    // diese Holiday-Zeile ergibt automatisch 0 an Wochenenden und ausserhalb
+    // der Anstellung, sowie das halbe Tagessoll bei halfDay.
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
-    // Bewusst der AKTUELLE Tarif, nicht die Basis aus profil — diese Karte zeigt
-    // Feiertagsstunden zum heute gültigen Pensum.
     const currentDailyRate = tagessollBasis(membership?.weeklyHours ?? 42, membership?.pensum ?? 100);
-    const holidayHours = entriesRaw
-      .filter((e) => e.type === "feiertag" && new Date(e.date) <= todayEnd)
+    const currentProfil: Profil = {
+      pensum: membership?.pensum ?? 100,
+      wochenstunden: membership?.weeklyHours ?? 42,
+      startDate: membership?.startDate ?? null,
+      exitDate: membership?.exitDate ?? null,
+      ferientage: membership?.vacationDays ?? 25,
+      maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,
+    };
+    const holidayHoursFromTable = holidaysRaw
+      .filter((h) => new Date(h.date) <= todayEnd)
+      .reduce((s, h) => {
+        const ohneFeiertag = sollStundenTag(h.date, currentProfil, [], []);
+        const mitFeiertag = sollStundenTag(h.date, currentProfil, [], holidays);
+        return s + Math.max(0, ohneFeiertag - mitFeiertag);
+      }, 0);
+    // Manuell erfasste "feiertag"-Einträge an Tagen OHNE Holiday-Zeile —
+    // seltener Sonderfall (z.B. ein Feiertag, den die Organisation nicht in
+    // der Holiday-Tabelle gepflegt hat) — bleiben zusätzlich sichtbar, ohne
+    // mit obigem doppelt zu zählen.
+    const holidayDatesSet = new Set(holidaysRaw.map((h) => new Date(h.date).getTime()));
+    const holidayHoursFromEntries = entriesRaw
+      .filter((e) => e.type === "feiertag" && new Date(e.date) <= todayEnd && !holidayDatesSet.has(new Date(e.date).getTime()))
       .reduce((s, e) => s + (e.hours ?? currentDailyRate), 0);
+    const holidayHours = holidayHoursFromTable + holidayHoursFromEntries;
 
     // Feriensaldo für das Anzeigejahr (eigener Jahres-Query, unabhängig vom gewählten Zeitraum)
     const displayYear = startDate.getUTCFullYear();

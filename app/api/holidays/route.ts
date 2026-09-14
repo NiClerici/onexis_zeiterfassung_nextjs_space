@@ -71,7 +71,23 @@ export async function POST(req: Request) {
         skipDuplicates: true,
       });
 
-      return NextResponse.json({ success: true, created: result.count, total: defs.length });
+      // Aktive Absenz-Einträge (nicht "arbeit"), die jetzt auf einem der
+      // gerade angelegten Feiertage liegen — sollStundenTag() (lib/calc.ts)
+      // kürzt das Tagessoll dieser Tage bereits automatisch auf 0/halb; ein
+      // zusätzlicher Tageseintrag mit fest gespeicherten Stunden zählt seine
+      // Stunden dann ein zweites Mal aufs Ist (Betrieb.md-Nachtrag:
+      // nico.clerici@onexis.ch, +24h Phantom-Überstunden durch genau diese
+      // Konstellation). Rein informativ für die Admin-UI, verändert nichts.
+      const conflictingEntries = await prisma.timeEntry.count({
+        where: {
+          orgId,
+          deletedAt: null,
+          type: { not: "arbeit" },
+          date: { in: defs.map((d) => new Date(`${d.date}T00:00:00.000Z`)) },
+        },
+      });
+
+      return NextResponse.json({ success: true, created: result.count, total: defs.length, conflictingEntries });
     }
 
     const { date, name, halfDay, canton } = body ?? {};
@@ -91,7 +107,13 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ holiday });
+    // Siehe Kommentar im generateYear-Zweig oben — derselbe Konflikt kann
+    // auch bei einem einzeln angelegten Feiertag entstehen.
+    const conflictingEntries = await prisma.timeEntry.count({
+      where: { orgId, deletedAt: null, type: { not: "arbeit" }, date: parsedDate },
+    });
+
+    return NextResponse.json({ holiday, conflictingEntries });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     // Unique-Constraint (orgId, date, name) — derselbe Feiertag existiert bereits.

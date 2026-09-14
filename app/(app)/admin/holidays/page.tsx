@@ -81,6 +81,17 @@ export default function HolidaysAdminPage() {
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
         toast.success(`${data?.created ?? 0} Feiertage für ${genYear} angelegt (${data?.total ?? 0} insgesamt geprüft)`);
+        // Absenz-Einträge (nicht "arbeit"), die schon auf einem dieser
+        // Feiertage liegen, zählen ihre Stunden sonst zusätzlich zum bereits
+        // automatisch gekürzten Tagessoll — Phantom-Überstunden. Nur ein
+        // Hinweis, ändert nichts automatisch (siehe lib/calc.ts
+        // kennzahlen()-Clamp, der das inzwischen zwar abfängt, aber die
+        // doppelten Zeilen bleiben bis zur Bereinigung im Kalender sichtbar).
+        if (data?.conflictingEntries > 0) {
+          toast.warning(
+            `${data.conflictingEntries} bereits erfasste Abwesenheits-Einträge liegen auf diesen Feiertagen — bitte im Kalender prüfen und ggf. löschen.`
+          );
+        }
         fetchHolidays();
       } else {
         toast.error(data?.error ?? "Fehler beim Generieren");
@@ -100,6 +111,13 @@ export default function HolidaysAdminPage() {
       const data = await res?.json?.().catch(() => ({}));
       if (res?.ok) {
         toast.success("Feiertag hinzugefügt");
+        // Siehe Kommentar in generateYear() oben — derselbe Konflikt kann
+        // auch bei einem einzeln angelegten Feiertag entstehen.
+        if (data?.conflictingEntries > 0) {
+          toast.warning(
+            `${data.conflictingEntries} bereits erfasste Abwesenheits-Einträge liegen auf diesem Tag — bitte im Kalender prüfen und ggf. löschen.`
+          );
+        }
         setCustomDate("");
         setCustomName("");
         setCustomHalfDay(false);

@@ -11,6 +11,21 @@ import { parseDateYMD } from "@/lib/dates";
 import { isValidType, arbeitszeitIstGueltig, INVALID_HOURS, nettoMinuten, parseHours } from "@/lib/time-entry-validation";
 import { resolveProjectAndCustomer, loadOtherEntriesOfDay } from "@/lib/time-entries";
 
+// Feiertage kürzen das Tagessoll bereits automatisch über sollStundenTag()
+// (lib/calc.ts liest die Holiday-Tabelle direkt). Ein zusätzlicher
+// type="feiertag"-Eintrag auf demselben Tag legte dieselben Stunden bisher
+// ein zweites Mal aufs Ist und erzeugte pro Feiertag ein ganzes Tagessoll
+// Phantom-Überstunden (Betrieb.md-Nachtrag: nico.clerici@onexis.ch, +24h).
+// POST/PUT lehnen diese Kombination deshalb hart ab, statt sie kommentarlos
+// zu speichern.
+async function hasHolidayOnDate(orgId: string, date: Date): Promise<boolean> {
+  const holiday = await prisma.holiday.findFirst({ where: { orgId, date } });
+  return holiday !== null;
+}
+
+const FEIERTAG_KONFLIKT_MESSAGE =
+  "Dieser Tag ist bereits als Feiertag hinterlegt — das Soll ist automatisch gekürzt, ein eigener Eintrag ist nicht nötig";
+
 export async function GET(req: Request) {
   try {
     const { userId, orgId } = await requireOrg();
@@ -67,6 +82,9 @@ export async function POST(req: Request) {
     }
     if (!isValidType(type)) {
       return NextResponse.json({ error: "Invalid type" }, { status: 400 });
+    }
+    if (type === "feiertag" && (await hasHolidayOnDate(orgId, parsedDate))) {
+      return NextResponse.json({ error: FEIERTAG_KONFLIKT_MESSAGE }, { status: 400 });
     }
     await assertMonthEditable(orgId, userId, role, parsedDate);
 
@@ -177,6 +195,9 @@ export async function PUT(req: Request) {
 
     const nextType: EintragTyp = isValidType(type) ? type : (existing.type as EintragTyp);
     const isArbeit = nextType === "arbeit";
+    if (nextType === "feiertag" && (await hasHolidayOnDate(orgId, parsedDate ?? existing.date))) {
+      return NextResponse.json({ error: FEIERTAG_KONFLIKT_MESSAGE }, { status: 400 });
+    }
     const parsedHours = hours !== undefined ? parseHours(hours) : undefined;
     if (parsedHours === INVALID_HOURS) {
       return NextResponse.json({ error: "Ungültige Stundenzahl" }, { status: 400 });
