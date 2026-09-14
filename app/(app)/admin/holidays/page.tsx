@@ -15,18 +15,37 @@ interface Holiday {
   halfDay: boolean;
 }
 
+// Alle 26 Kantone, alphabetisch nach deutschem Namen — Erweiterung von
+// vorher 10 auf alle 26, siehe lib/holidays.ts (kantonaleFeiertage) für die
+// dahinterliegenden Feiertagsdaten und Quellenangaben.
 const CANTON_OPTIONS = [
   { value: "", label: "Kein Kanton (nur Basissatz)" },
-  { value: "ZH", label: "Zürich" },
-  { value: "BE", label: "Bern" },
-  { value: "SO", label: "Solothurn" },
   { value: "AG", label: "Aargau" },
-  { value: "LU", label: "Luzern" },
-  { value: "UR", label: "Uri" },
-  { value: "SZ", label: "Schwyz" },
-  { value: "TI", label: "Tessin" },
-  { value: "VS", label: "Wallis" },
+  { value: "AI", label: "Appenzell Innerrhoden" },
+  { value: "AR", label: "Appenzell Ausserrhoden" },
+  { value: "BE", label: "Bern" },
+  { value: "BL", label: "Basel-Landschaft" },
+  { value: "BS", label: "Basel-Stadt" },
+  { value: "FR", label: "Freiburg" },
+  { value: "GE", label: "Genf" },
+  { value: "GL", label: "Glarus" },
+  { value: "GR", label: "Graubünden" },
   { value: "JU", label: "Jura" },
+  { value: "LU", label: "Luzern" },
+  { value: "NE", label: "Neuenburg" },
+  { value: "NW", label: "Nidwalden" },
+  { value: "OW", label: "Obwalden" },
+  { value: "SG", label: "St. Gallen" },
+  { value: "SH", label: "Schaffhausen" },
+  { value: "SO", label: "Solothurn" },
+  { value: "SZ", label: "Schwyz" },
+  { value: "TG", label: "Thurgau" },
+  { value: "TI", label: "Tessin" },
+  { value: "UR", label: "Uri" },
+  { value: "VD", label: "Waadt" },
+  { value: "VS", label: "Wallis" },
+  { value: "ZG", label: "Zug" },
+  { value: "ZH", label: "Zürich" },
 ];
 
 function fmtDate(d: string): string {
