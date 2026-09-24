@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 const BarChartComponent = dynamic(() => import("@/components/analytics-charts"), { ssr: false, loading: () => <div className="h-64 flex items-center justify-center text-sm text-muted-foreground">Loading...</div> });
+const OvertimeSparkline = dynamic(() => import("@/components/analytics-charts").then((m) => m.OvertimeSparkline), { ssr: false });
 
 interface VacationBalance {
   year: number;
@@ -58,6 +59,10 @@ interface AnalyticsData {
   } | null;
   vacationBalance: VacationBalance;
   monthlyData: Array<{ month: string; target: number; actual: number; work: number; customer: number }>;
+  // Saldo-Verlauf im Zeitraum (bis heute) fürs Diagramm in der Hero-Karte;
+  // erster Punkt = Stand am Tag vor Periodenbeginn.
+  overtimeSeries: Array<{ date: string; balance: number; delta: number }>;
+  overtimeGranularity: "day" | "week" | "month";
 }
 
 export default function AnalyticsPage() {
@@ -241,25 +246,40 @@ export default function AnalyticsPage() {
               bewusst — sie stand gleichgewichtig neben drei anderen Zahlen und
               wurde dadurch kaum gelesen. */}
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
-            <Card className="p-5 mb-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                <Clock className="w-4 h-4" />
-                {cumulative
-                  ? t("analytics.overtimeHeroTotal", { date: new Date(cumulative.since).toLocaleDateString("de-CH") })
-                  : t("analytics.overtimeHeroPeriod", { label: periodColLabel })}
+            <Card className="p-5 mb-4 flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
+              <div className="sm:shrink-0">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                  <Clock className="w-4 h-4" />
+                  {cumulative
+                    ? t("analytics.overtimeHeroTotal", { date: new Date(cumulative.since).toLocaleDateString("de-CH") })
+                    : t("analytics.overtimeHeroPeriod", { label: periodColLabel })}
+                </div>
+                <div className="flex flex-wrap items-baseline gap-3">
+                  <span className={cn("font-display text-4xl font-semibold tracking-tight", tone(heroVal))}>{signed(heroVal)}</span>
+                  {cumulative && (
+                    <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 border-transparent">
+                      {signed(netOvertimeVal)} {badgeLabel}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  {t("analytics.forecastFoot", { date: periodEndLabel, hours: signed(heroForecast), planned: (data.futureHours ?? 0).toFixed(1) })}
+                  {heroPaidOut > 0 && ` · ${t("analytics.payoutsFootTotal", { hours: heroPaidOut.toFixed(1) })}`}
+                </p>
               </div>
-              <div className="flex flex-wrap items-baseline gap-3">
-                <span className={cn("font-display text-4xl font-semibold tracking-tight", tone(heroVal))}>{signed(heroVal)}</span>
-                {cumulative && (
-                  <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 border-transparent">
-                    {signed(netOvertimeVal)} {badgeLabel}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                {t("analytics.forecastFoot", { date: periodEndLabel, hours: signed(heroForecast), planned: (data.futureHours ?? 0).toFixed(1) })}
-                {heroPaidOut > 0 && ` · ${t("analytics.payoutsFootTotal", { hours: heroPaidOut.toFixed(1) })}`}
-              </p>
+              {/* Saldo-Verlauf: rechts neben der Zahl, auf Mobile volle
+                  Breite darunter. min-w-0, damit der ResponsiveContainer im
+                  Flex-Item schrumpfen darf statt die Karte aufzustossen. */}
+              {(data.overtimeSeries?.length ?? 0) >= 2 && (
+                <div className="w-full sm:flex-1 min-w-0 sm:border-l sm:border-border sm:pl-6">
+                  <div className="text-xs text-muted-foreground mb-1">
+                    {t(data.overtimeGranularity === "day" ? "analytics.overtimeTrendDay" : data.overtimeGranularity === "week" ? "analytics.overtimeTrendWeek" : "analytics.overtimeTrendMonth")}
+                  </div>
+                  <div className="h-20 sm:h-24">
+                    <OvertimeSparkline series={data.overtimeSeries} granularity={data.overtimeGranularity} t={t} />
+                  </div>
+                </div>
+              )}
             </Card>
           </motion.div>
 

@@ -8,6 +8,7 @@ import {
   feriensaldo,
   sollStundenTag,
   tagessollBasis,
+  montagDerWoche,
   type Profil,
   type PensumChangeInput,
   type EintragMitDatum,
@@ -223,13 +224,20 @@ export async function GET(req: Request) {
       netOvertime: number;
       forecastNetOvertime: number;
     } | null = null;
-    if (saldoStart.getTime() < startDate.getTime()) {
+    const hasHistory = saldoStart.getTime() < startDate.getTime();
+    // Einträge/Auszahlungen ab Eintritt — auch für overtimeSeries unten
+    // gebraucht. Ohne Historie vor dem Zeitraum reichen die Periodendaten.
+    let histEintraege = eintraege;
+    let histPayouts = payouts;
+    if (hasHistory) {
       const [cumEntriesRaw, cumPayoutsRaw] = await Promise.all([
         prisma.timeEntry.findMany({ where: { userId, orgId, deletedAt: null, date: { gte: saldoStart, lte: endDate } } }),
         prisma.overtimePayout.findMany({ where: { userId, orgId, date: { gte: saldoStart, lte: endDate } } }),
       ]);
       const cumEintraege = mapEintraege(cumEntriesRaw);
       const cumPayouts: PayoutInput[] = cumPayoutsRaw.map((p) => ({ date: p.date, hours: p.hours }));
+      histEintraege = cumEintraege;
+      histPayouts = cumPayouts;
       // kundenstunden: 0 — Verrechnungsgrad wird aus diesem Aufruf nicht
       // verwendet, ein zusätzlicher billableHoursByUserAndMonth()-Query über
       // die ganze Historie wäre hier reiner Overhead.
@@ -246,6 +254,43 @@ export async function GET(req: Request) {
         netOvertime: kc.ueberstunden,
         forecastNetOvertime: Math.round((kc.prognoseSaldo - cumPaidOutHours) * 10) / 10,
       };
+    }
+
+    // Verlauf des Überstundensaldos im gewählten Zeitraum, für das Diagramm in
+    // der Hero-Karte. balance ist der Nettosaldo seit Eintritt (bzw. seit
+    // Periodenbeginn, wenn es keine Historie davor gibt) per Bucket-Ende —
+    // jeweils per kennzahlen() über die ganze Strecke gerechnet statt Deltas
+    // aufzusummieren, damit der letzte Punkt exakt der Hero-Zahl entspricht.
+    // Nur bis heute: Zukunft wird nicht gezeichnet.
+    const DAY_MS = 86400000;
+    const spanDays = Math.round((endDate.getTime() - startDate.getTime()) / DAY_MS) + 1;
+    const overtimeGranularity: "day" | "week" | "month" = type === "month" ? "day" : spanDays <= 120 ? "week" : "month";
+    const seriesStart = hasHistory ? saldoStart : startDate;
+    const heuteUTC = toUTCDateLocal(heute);
+    const seriesLast = endDate.getTime() < heuteUTC.getTime() ? endDate : heuteUTC;
+    const overtimeSeries: Array<{ date: string; balance: number; delta: number }> = [];
+    if (seriesLast.getTime() >= startDate.getTime()) {
+      const balanceAt = (to: Date) =>
+        kennzahlen({ from: seriesStart, to, heute, eintraege: histEintraege, profil, changes, payouts: histPayouts, holidays, kundenstunden: 0 }).ueberstunden;
+      const dayBefore = new Date(startDate.getTime() - DAY_MS);
+      let prev = hasHistory ? balanceAt(dayBefore) : 0;
+      overtimeSeries.push({ date: dayBefore.toISOString().slice(0, 10), balance: prev, delta: 0 });
+      let cursor = new Date(startDate);
+      while (cursor.getTime() <= seriesLast.getTime()) {
+        let bucketEnd: Date;
+        if (overtimeGranularity === "day") bucketEnd = new Date(cursor);
+        else if (overtimeGranularity === "week") bucketEnd = new Date(montagDerWoche(cursor).getTime() + 6 * DAY_MS);
+        else bucketEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+        const isLast = bucketEnd.getTime() >= seriesLast.getTime();
+        if (isLast) bucketEnd = seriesLast;
+        // Letzter Punkt bis endDate gerechnet (kennzahlen() kappt Soll/Ist
+        // ohnehin bei heute) — so zählen auch Auszahlungen später im Zeitraum
+        // mit, genau wie bei netOvertime/cumulative.netOvertime.
+        const balance = balanceAt(isLast ? endDate : bucketEnd);
+        overtimeSeries.push({ date: bucketEnd.toISOString().slice(0, 10), balance, delta: Math.round((balance - prev) * 10) / 10 });
+        prev = balance;
+        cursor = new Date(bucketEnd.getTime() + DAY_MS);
+      }
     }
 
     // Monatliche Aufschlüsselung fürs Chart
@@ -318,6 +363,8 @@ export async function GET(req: Request) {
         remainingDays: fs.offen,
       },
       monthlyData,
+      overtimeSeries,
+      overtimeGranularity,
     });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });

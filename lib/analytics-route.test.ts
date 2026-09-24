@@ -65,3 +65,32 @@ describe("GET /api/analytics — type=custom ohne oder mit ungültigem Zeitraum"
     expect(res.status).toBe(200);
   });
 });
+
+describe("GET /api/analytics — overtimeSeries (Saldo-Verlauf in der Hero-Karte)", () => {
+  it("Monat in der Vergangenheit: Startpunkt + ein Punkt pro Tag, letzter Saldo == cumulative.netOvertime", async () => {
+    const res = await analyticsGet(req("type=month&year=2026&month=3"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.overtimeGranularity).toBe("day");
+    expect(body.overtimeSeries).toHaveLength(32);
+    expect(body.overtimeSeries[0].date).toBe("2026-02-28");
+    expect(body.overtimeSeries.at(-1).date).toBe("2026-03-31");
+    expect(body.overtimeSeries.at(-1).balance).toBe(body.cumulative.netOvertime);
+  });
+
+  it("Quartal → Wochenpunkte, Jahr → Monatspunkte", async () => {
+    const q = await (await analyticsGet(req("type=quarter&year=2026&quarter=1"))).json();
+    expect(q.overtimeGranularity).toBe("week");
+    expect(q.overtimeSeries.at(-1).date).toBe("2026-03-31");
+    const y = await (await analyticsGet(req("type=year&year=2025"))).json();
+    // Vor dem Eintritt (2026-01-01) — Jahr 2025 liegt komplett davor, der
+    // Verlauf enthält trotzdem nur Monatspunkte bis Periodenende.
+    expect(y.overtimeGranularity).toBe("month");
+    expect(y.overtimeSeries).toHaveLength(13);
+  });
+
+  it("Zeitraum komplett in der Zukunft: keine Punkte", async () => {
+    const body = await (await analyticsGet(req("type=month&year=2029&month=1"))).json();
+    expect(body.overtimeSeries).toHaveLength(0);
+  });
+});

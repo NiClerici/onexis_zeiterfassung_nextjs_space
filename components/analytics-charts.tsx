@@ -1,6 +1,7 @@
 "use client";
 
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line } from "recharts";
+import { useId } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, AreaChart, Area, ReferenceLine } from "recharts";
 
 interface AnalyticsData {
   targetHours: number;
@@ -95,5 +96,97 @@ export default function AnalyticsCharts({ data, t }: { data: AnalyticsData; t: (
         </div>
       </div>
     </div>
+  );
+}
+
+export interface OvertimePoint { date: string; balance: number; delta: number }
+type Granularity = "day" | "week" | "month";
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+const WEEKDAYS_SHORT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const signedH = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}h`;
+
+// Datum kommt als "YYYY-MM-DD" (UTC-Kalendertag) — bewusst per getUTC* gelesen,
+// sonst verrutscht der Tag in Zeitzonen westlich von UTC.
+function parseYMD(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1));
+}
+const dayMonth = (d: Date) => `${d.getUTCDate()}.${d.getUTCMonth() + 1}.`;
+
+// Saldo-Verlauf rechts in der Überstunden-Hero-Karte: Fläche des kumulierten
+// Nettosaldos pro Tag/Woche/Monat, gestrichelte Nulllinie, keine Y-Achse —
+// die Zahl links liefert den Massstab, Details per Tooltip.
+export function OvertimeSparkline({
+  series,
+  granularity,
+  t,
+}: {
+  series: OvertimePoint[];
+  granularity: Granularity;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const gradientId = useId().replace(/:/g, "");
+  if (series.length < 2) return null;
+
+  const last = series[series.length - 1]?.balance ?? 0;
+  const color = last >= 0 ? CHART_2 : "hsl(var(--destructive))";
+  const data = series.map((p, i) => {
+    const d = parseYMD(p.date);
+    const tick = granularity === "month" && i > 0 ? MONTHS_SHORT[d.getUTCMonth()] : dayMonth(d);
+    let label: string;
+    if (i === 0) label = t("analytics.trendStart", { date: dayMonth(d) });
+    else if (granularity === "day") label = `${WEEKDAYS_SHORT[d.getUTCDay()]} ${dayMonth(d)}`;
+    else if (granularity === "week") label = t("analytics.trendWeekUntil", { date: dayMonth(d) });
+    else label = `${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return { ...p, tick, label, first: i === 0 };
+  });
+  const deltaLabel = t(granularity === "day" ? "analytics.trendDeltaDay" : granularity === "week" ? "analytics.trendDeltaWeek" : "analytics.trendDeltaMonth");
+  const balances = series.map((p) => p.balance);
+  const yMin = Math.min(...balances);
+  const yMax = Math.max(...balances);
+  const yPad = Math.max(1, (yMax - yMin) * 0.15);
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <XAxis dataKey="tick" tickLine={false} axisLine={false} tick={AXIS_TICK} interval="preserveStartEnd" minTickGap={24} height={16} />
+        <YAxis hide domain={[yMin - yPad, yMax + yPad]} />
+        <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" strokeOpacity={0.5} />
+        <Tooltip
+          cursor={{ stroke: "hsl(var(--muted-foreground))", strokeOpacity: 0.3 }}
+          wrapperStyle={{ outline: "none", zIndex: 20 }}
+          allowEscapeViewBox={{ x: false, y: false }}
+          isAnimationActive={false}
+          content={({ active, payload }) => {
+            const p = active ? (payload?.[0]?.payload as (typeof data)[number] | undefined) : undefined;
+            if (!p) return null;
+            return (
+              <div style={TOOLTIP_STYLE} className="px-2.5 py-1.5 tabular-nums">
+                <div className="text-muted-foreground mb-0.5">{p.label}</div>
+                <div>{t("analytics.trendBalance")}: <span className="font-semibold">{signedH(p.balance)}</span></div>
+                {!p.first && <div className="text-muted-foreground">{deltaLabel}: {signedH(p.delta)}</div>}
+              </div>
+            );
+          }}
+        />
+        <Area
+          type="monotone"
+          dataKey="balance"
+          stroke={color}
+          strokeWidth={2}
+          fill={`url(#${gradientId})`}
+          dot={false}
+          activeDot={{ r: 3, strokeWidth: 0, fill: color }}
+          isAnimationActive={false}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
   );
 }
