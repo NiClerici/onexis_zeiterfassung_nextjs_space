@@ -187,6 +187,11 @@ export async function GET(req: Request) {
 
     const saldoKumuliertByUser: Record<string, KumulierterSaldoResult> = {};
     const saldoSerieByUser: Record<string, SaldoSeriePunkt[]> = {};
+    // Eintrittsdatum für die Übersicht-Karte im Team-Hub (dort neu editierbar
+    // für owner/admin/manager, siehe app/api/team/member-dates/route.ts) —
+    // bisher nur in der Verwaltung (admin/owner) sichtbar. Steuert über
+    // buildProfil() (lib/export-helpers.ts) auch die Sollstunden-Berechnung.
+    const entryDateByUser: Record<string, string> = {};
 
     for (const m of memberships) {
       const profil = buildProfil(m);
@@ -204,6 +209,7 @@ export async function GET(req: Request) {
       const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
       feriensaldoByUser[m.userId] = fs;
       pensumByUser[m.userId] = pensumAt(endDate, profil, changes).pensum;
+      entryDateByUser[m.userId] = m.entryDate.toISOString();
 
       // Kumulierter Saldo seit Eintritt — Zeitkonto-Gesamtstand, unabhängig
       // vom gewählten Zeitraum (siehe lib/saldo.ts, bisher nur in Analytics
@@ -248,6 +254,7 @@ export async function GET(req: Request) {
         saldoKumuliert: saldoKumuliertByUser[m.userId],
         saldoSerie: saldoSerieByUser[m.userId],
         monthLocked: isSingleMonth ? lockedUserIds.has(m.userId) : null,
+        entryDate: entryDateByUser[m.userId],
       };
     });
 

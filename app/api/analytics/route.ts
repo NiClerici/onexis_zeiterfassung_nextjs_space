@@ -24,11 +24,14 @@ import { parseDateYMD } from "@/lib/dates";
 // aktuelle Wert. membership.pensum/weeklyHours werden von /api/pensum-changes
 // bei jeder Änderung auf den neuesten Stand überschrieben; die Basis liegt in
 // basePensum/baseWeeklyHours. Gleiches Muster wie in bulk-vacation/route.ts.
+// startDate fällt auf entryDate zurück, wenn kein eigenes Startdatum gesetzt
+// ist — siehe ausführlicher Kommentar bei buildProfil in
+// lib/export-helpers.ts (dieselbe Feldzuordnung, hier lokal gehalten).
 function buildProfil(membership: any): Profil {
   return {
     pensum: membership?.basePensum ?? membership?.pensum ?? 100,
     wochenstunden: membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42,
-    startDate: membership?.startDate ?? null,
+    startDate: membership?.startDate ?? membership?.entryDate ?? null,
     exitDate: membership?.exitDate ?? null,
     ferientage: membership?.vacationDays ?? 25,
     maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,
@@ -162,7 +165,7 @@ export async function GET(req: Request) {
     const currentProfil: Profil = {
       pensum: membership?.pensum ?? 100,
       wochenstunden: membership?.weeklyHours ?? 42,
-      startDate: membership?.startDate ?? null,
+      startDate: membership?.startDate ?? membership?.entryDate ?? null,
       exitDate: membership?.exitDate ?? null,
       ferientage: membership?.vacationDays ?? 25,
       maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,

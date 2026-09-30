@@ -6,7 +6,9 @@
 // Kartenliste, die Nico als Referenz gegeben hat (Zeile mit Kernwerten, ein
 // Pfeil klappt alle Details auf, kein separates Drawer).
 
-import { ChevronDown, Download, Settings } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Download, Settings, IdCard } from "lucide-react";
+import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
 import { TYPE_COLOR } from "@/lib/absence-colors";
 import { SaldoSparkline } from "@/components/team/saldo-sparkline";
@@ -21,6 +23,10 @@ function signedH(n: number): string {
 function fmtAbsenz(v: AbsenzVerteilung, tageKurz: string): string {
   return `${v.stunden.toFixed(1)}h · ${v.tage.toFixed(1)} ${tageKurz}`;
 }
+function fmtDateInput(d: string | null): string {
+  if (!d) return "";
+  return d.split("T")[0];
+}
 
 export function MemberCard({
   member,
@@ -30,6 +36,7 @@ export function MemberCard({
   onExport,
   exporting,
   onOpenAdmin,
+  onDatesSaved,
 }: {
   member: TeamMember;
   isAdmin: boolean;
@@ -38,11 +45,34 @@ export function MemberCard({
   onExport: () => void;
   exporting: boolean;
   onOpenAdmin?: () => void;
+  // Wer die Karte sieht, darf laut app/api/team/route.ts (canSeeUser) auch
+  // deren Vertragsdaten ändern — owner/admin für alle, manager für sich
+  // selbst + direkt Unterstellte (app/api/team/member-dates/route.ts).
+  onDatesSaved?: () => void;
 }) {
   const { t } = useI18n();
   const absenzTageSumme = ABSENZ_SPALTEN.reduce((s, typ) => s + member.verteilung.absenzen[typ].tage, 0);
   const istSollPct = member.soll > 0 ? Math.min(100, Math.round((member.ist / member.soll) * 100)) : 0;
   const geplanteAbsenzen = ABSENZ_SPALTEN.filter((typ) => member.verteilung.geplantAbsenzen[typ].stunden > 0);
+  const [savingDates, setSavingDates] = useState(false);
+
+  const saveEntryDate = async (value: string) => {
+    setSavingDates(true);
+    try {
+      const res = await fetch("/api/team/member-dates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: member.userId, entryDate: value }),
+      });
+      if (res?.ok) {
+        toast.success(t("profile.saved"));
+        onDatesSaved?.();
+      } else {
+        const data = await res?.json?.().catch(() => ({}));
+        toast.error(data?.error ?? t("profile.error"));
+      }
+    } catch (err: any) { console.error(err); toast.error(t("profile.error")); } finally { setSavingDates(false); }
+  };
 
   return (
     <div className="border border-border/50 rounded-xl overflow-hidden">
@@ -185,6 +215,24 @@ export function MemberCard({
                   .join(" · ")}
               </div>
             )}
+          </div>
+
+          {/* Eintrittsdatum — wer diese Karte sieht, darf es laut
+              /api/team-Sichtbarkeit auch ändern (owner/admin: alle,
+              manager: sich selbst + direkt Unterstellte). Steuert über
+              buildProfil() (lib/export-helpers.ts) direkt die Sollstunden-
+              Berechnung, ein separates Startdatum gibt es dafür nicht. */}
+          <div onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide flex items-center gap-1.5"><IdCard className="w-3.5 h-3.5" /> {t("team.entryDate")}</h4>
+            <input
+              id={`entry-${member.userId}`}
+              type="date"
+              defaultValue={fmtDateInput(member.entryDate)}
+              disabled={savingDates}
+              onBlur={(e) => e.target.value && e.target.value !== fmtDateInput(member.entryDate) && saveEntryDate(e.target.value)}
+              className="px-2 py-1.5 rounded-lg bg-card text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition disabled:opacity-50"
+            />
+            <p className="text-[10px] text-muted-foreground mt-1.5">{t("team.entryDateHint")}</p>
           </div>
         </div>
       )}

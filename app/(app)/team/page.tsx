@@ -192,7 +192,7 @@ function TeamHubInner() {
           </TabsList>
 
           <TabsContent value="uebersicht">
-            <OverviewTab data={data} isAdmin={isAdmin} onExportMember={handleExportMember} exportingUserId={exportingUserId} onOpenAdmin={isAdmin ? handleOpenAdmin : undefined} />
+            <OverviewTab data={data} isAdmin={isAdmin} onExportMember={handleExportMember} exportingUserId={exportingUserId} onOpenAdmin={isAdmin ? handleOpenAdmin : undefined} onDatesSaved={fetchTeam} />
           </TabsContent>
           <TabsContent value="kunden">
             <CustomersTab data={data} />

@@ -63,6 +63,10 @@ export interface TeamMember {
   saldoSerie: SaldoSeriePunkt[];
   // null bei einem Zeitraum, der kein exakter Kalendermonat ist.
   monthLocked: boolean | null;
+  // ISO-Datumsstring, editierbar über app/api/team/member-dates/route.ts —
+  // für owner/admin jedes Mitglied, für manager nur sich selbst + direkt
+  // Unterstellte. Steuert über buildProfil() auch die Sollstunden-Berechnung.
+  entryDate: string;
 }
 
 export interface ProjectRow {
