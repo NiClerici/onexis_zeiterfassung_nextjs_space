@@ -8,13 +8,13 @@ import {
   feriensaldo,
   sollStundenTag,
   tagessollBasis,
-  montagDerWoche,
   type Profil,
   type PensumChangeInput,
   type EintragMitDatum,
   type PayoutInput,
   type HolidayInput,
 } from "@/lib/calc";
+import { kumulierterSaldo, saldoSerie, type KumulierterSaldoResult } from "@/lib/saldo";
 import { billableHoursByUserAndMonth, combineCustomerHours, type MonthlyCustomerHours } from "@/lib/customer-months";
 import { logError } from "@/lib/error-log";
 import { parseDateYMD } from "@/lib/dates";
@@ -214,16 +214,7 @@ export async function GET(req: Request) {
     // Zeitraum die ganze Historie bereits abdeckt (z.B. custom ab Eintritt) —
     // dann wäre der kumulierte Wert identisch mit dem Zeitraum-Wert.
     const saldoStart = toUTCDateLocal(membership?.startDate ?? membership?.entryDate ?? startDate);
-    let cumulative: {
-      since: string;
-      asOf: string;
-      targetHours: number;
-      actualHours: number;
-      overtimeGross: number;
-      paidOutHours: number;
-      netOvertime: number;
-      forecastNetOvertime: number;
-    } | null = null;
+    let cumulative: KumulierterSaldoResult | null = null;
     const hasHistory = saldoStart.getTime() < startDate.getTime();
     // Einträge/Auszahlungen ab Eintritt — auch für overtimeSeries unten
     // gebraucht. Ohne Historie vor dem Zeitraum reichen die Periodendaten.
@@ -241,19 +232,7 @@ export async function GET(req: Request) {
       // kundenstunden: 0 — Verrechnungsgrad wird aus diesem Aufruf nicht
       // verwendet, ein zusätzlicher billableHoursByUserAndMonth()-Query über
       // die ganze Historie wäre hier reiner Overhead.
-      const kc = kennzahlen({ from: saldoStart, to: endDate, heute, eintraege: cumEintraege, profil, changes, payouts: cumPayouts, holidays, kundenstunden: 0 });
-      const cumPaidOutHours = cumPayouts.reduce((s, p) => s + p.hours, 0);
-      const asOf = endDate.getTime() < heute.getTime() ? endDate : heute;
-      cumulative = {
-        since: saldoStart.toISOString().slice(0, 10),
-        asOf: asOf.toISOString().slice(0, 10),
-        targetHours: kc.soll,
-        actualHours: kc.ist,
-        overtimeGross: Math.round((kc.ist - kc.soll) * 10) / 10,
-        paidOutHours: Math.round(cumPaidOutHours * 10) / 10,
-        netOvertime: kc.ueberstunden,
-        forecastNetOvertime: Math.round((kc.prognoseSaldo - cumPaidOutHours) * 10) / 10,
-      };
+      cumulative = kumulierterSaldo({ profil, changes, holidays, heute, since: saldoStart, to: endDate, eintraege: cumEintraege, payouts: cumPayouts });
     }
 
     // Verlauf des Überstundensaldos im gewählten Zeitraum, für das Diagramm in
@@ -268,30 +247,12 @@ export async function GET(req: Request) {
     const seriesStart = hasHistory ? saldoStart : startDate;
     const heuteUTC = toUTCDateLocal(heute);
     const seriesLast = endDate.getTime() < heuteUTC.getTime() ? endDate : heuteUTC;
-    const overtimeSeries: Array<{ date: string; balance: number; delta: number }> = [];
-    if (seriesLast.getTime() >= startDate.getTime()) {
-      const balanceAt = (to: Date) =>
-        kennzahlen({ from: seriesStart, to, heute, eintraege: histEintraege, profil, changes, payouts: histPayouts, holidays, kundenstunden: 0 }).ueberstunden;
-      const dayBefore = new Date(startDate.getTime() - DAY_MS);
-      let prev = hasHistory ? balanceAt(dayBefore) : 0;
-      overtimeSeries.push({ date: dayBefore.toISOString().slice(0, 10), balance: prev, delta: 0 });
-      let cursor = new Date(startDate);
-      while (cursor.getTime() <= seriesLast.getTime()) {
-        let bucketEnd: Date;
-        if (overtimeGranularity === "day") bucketEnd = new Date(cursor);
-        else if (overtimeGranularity === "week") bucketEnd = new Date(montagDerWoche(cursor).getTime() + 6 * DAY_MS);
-        else bucketEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
-        const isLast = bucketEnd.getTime() >= seriesLast.getTime();
-        if (isLast) bucketEnd = seriesLast;
-        // Letzter Punkt bis endDate gerechnet (kennzahlen() kappt Soll/Ist
-        // ohnehin bei heute) — so zählen auch Auszahlungen später im Zeitraum
-        // mit, genau wie bei netOvertime/cumulative.netOvertime.
-        const balance = balanceAt(isLast ? endDate : bucketEnd);
-        overtimeSeries.push({ date: bucketEnd.toISOString().slice(0, 10), balance, delta: Math.round((balance - prev) * 10) / 10 });
-        prev = balance;
-        cursor = new Date(bucketEnd.getTime() + DAY_MS);
-      }
-    }
+    const overtimeSeries = saldoSerie({
+      profil, changes, holidays, heute,
+      seriesStart, periodStart: startDate, endDate, seriesLast, hasHistory,
+      granularity: overtimeGranularity,
+      eintraege: histEintraege, payouts: histPayouts,
+    });
 
     // Monatliche Aufschlüsselung fürs Chart
     const monthNames = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];

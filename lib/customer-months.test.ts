@@ -10,7 +10,14 @@
 
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
-import { sumCustomerHours, sumCustomerHoursByUser, billableHoursByUserAndMonth, combineCustomerHours } from "@/lib/customer-months";
+import {
+  sumCustomerHours,
+  sumCustomerHoursByUser,
+  billableHoursByUserAndMonth,
+  combineCustomerHours,
+  customerHoursByUserAndCustomer,
+  projectHoursByUserAndProject,
+} from "@/lib/customer-months";
 
 // Eigene Org-ID, bewusst verschieden von lib/customer-months-route.test.ts
 // ("test_customer_months_org") — dieselbe ID in zwei Testdateien führte bei
@@ -166,5 +173,94 @@ describe("billableHoursByUserAndMonth / sumCustomerHours", () => {
     const result = await sumCustomerHoursByUser({ orgId: ORG, userIds: [userAId, userBId], from: new Date("2026-07-01"), to: new Date("2026-07-31") });
     expect(result.get(userAId)).toBe(8); // aus dem ersten Test oben
     expect(result.get(userBId)).toBe(6);
+  });
+});
+
+// customerHoursByUserAndCustomer: dieselbe Auflösungsregel wie oben
+// (billableHoursByUserAndMonth), nur nach Kunde statt nach Monat aggregiert
+// — Grundlage für die Kunden-Aufschlüsselung in der Teamsicht
+// (app/api/team/route.ts), die vorher NUR CustomerMonth-Zeilen zeigte und
+// laufend erfasste Kundenstunden (TimeEntry.customerId) komplett ignorierte.
+describe("customerHoursByUserAndCustomer", () => {
+  it("summiert echte Tageserfassung getrennt je Kunde, über mehrere Monate hinweg", async () => {
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-11-03"), type: "arbeit", hours: 5, customerId, projectId },
+    });
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-12-10"), type: "arbeit", hours: 3, customerId },
+    });
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-11-15"), type: "arbeit", hours: 4, customerId: customerId2 },
+    });
+
+    const perCustomer = await customerHoursByUserAndCustomer({ orgId: ORG, userIds: [userAId], from: new Date("2026-11-01"), to: new Date("2026-12-31") });
+    const map = perCustomer.get(userAId)!;
+    expect(map.get(customerId)).toBe(8); // 5 (Nov) + 3 (Dez)
+    expect(map.get(customerId2)).toBe(4);
+  });
+
+  it("löst CustomerMonth-vs-Legacy pro Kunde auf, wie billableHoursByUserAndMonth", async () => {
+    // Kunde 1: Legacy (30h) + CustomerMonth (33h) → CustomerMonth gewinnt.
+    // Kunde 2: nur echte Tageserfassung (4h). Wiederverwendet die Fixtur aus
+    // dem "Zwei Kunden im selben Monat"-Test oben (Monat Oktober).
+    const perCustomer = await customerHoursByUserAndCustomer({ orgId: ORG, userIds: [userAId], from: new Date("2026-10-01"), to: new Date("2026-10-31") });
+    const map = perCustomer.get(userAId)!;
+    expect(map.get(customerId)).toBe(33); // NICHT 30 + 33
+    expect(map.get(customerId2)).toBe(4);
+  });
+
+  it("Summe über alle Kunden entspricht sumCustomerHours für denselben Zeitraum", async () => {
+    const perCustomer = await customerHoursByUserAndCustomer({ orgId: ORG, userIds: [userAId], from: new Date("2026-05-01"), to: new Date("2026-05-31") });
+    const summe = [...(perCustomer.get(userAId)?.values() ?? [])].reduce((s, h) => s + h, 0);
+    const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-05-01"), to: new Date("2026-05-31") });
+    expect(summe).toBe(total);
+  });
+
+  it("leere userIds liefern eine leere Map ohne Query", async () => {
+    const perCustomer = await customerHoursByUserAndCustomer({ orgId: ORG, userIds: [], from: new Date("2026-05-01"), to: new Date("2026-05-31") });
+    expect(perCustomer.size).toBe(0);
+  });
+});
+
+// projectHoursByUserAndProject: analoge Auflösung wie customerHoursByUser-
+// AndCustomer, aber nach Projekt (TimeEntry.projectId) statt nach Kunde —
+// Grundlage der neuen, aus TimeEntry gespeisten Projektsicht im Team-Hub
+// (vorher zeigte sie ausschliesslich CustomerMonth-Zeilen).
+describe("projectHoursByUserAndProject", () => {
+  it("summiert echte Tageserfassung mit projectId, über mehrere Monate hinweg", async () => {
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-02-03"), type: "arbeit", hours: 5, customerId, projectId },
+    });
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-02-10"), type: "arbeit", hours: 3, customerId, projectId },
+    });
+    // Kundenstunde ohne projectId darf hier nicht mitzählen.
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-02-12"), type: "arbeit", hours: 9, customerId },
+    });
+
+    const perProject = await projectHoursByUserAndProject({ orgId: ORG, userIds: [userAId], from: new Date("2026-02-01"), to: new Date("2026-02-28") });
+    expect(perProject.get(userAId)?.get(projectId)).toBe(8);
+  });
+
+  it("CustomerMonth mit projectId gewinnt über Legacy-Zeilen desselben Projekts/Monats", async () => {
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2026-01-05"), type: "arbeit", hours: 20, customerId, projectId, countsAsWorktime: false },
+    });
+    await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2026, month: 1, customerId, projectId, hours: 22 } });
+    const perProject = await projectHoursByUserAndProject({ orgId: ORG, userIds: [userAId], from: new Date("2026-01-01"), to: new Date("2026-01-31") });
+    expect(perProject.get(userAId)?.get(projectId)).toBe(22); // NICHT 20 + 22
+  });
+
+  it("CustomerMonth-Zeilen ohne projectId (nur auf Kundenebene) tauchen hier nicht auf", async () => {
+    // Direktkunde: Fixtur aus dem "Zwei Kunden im selben Monat"-Test oben
+    // (customerId2, Oktober) hat nie ein Projekt.
+    const perProject = await projectHoursByUserAndProject({ orgId: ORG, userIds: [userAId], from: new Date("2026-10-01"), to: new Date("2026-10-31") });
+    expect(perProject.get(userAId)?.size ?? 0).toBe(0);
+  });
+
+  it("leere userIds liefern eine leere Map ohne Query", async () => {
+    const perProject = await projectHoursByUserAndProject({ orgId: ORG, userIds: [], from: new Date("2026-02-01"), to: new Date("2026-02-28") });
+    expect(perProject.size).toBe(0);
   });
 });

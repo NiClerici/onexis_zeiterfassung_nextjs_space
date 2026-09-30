@@ -9,6 +9,7 @@ import {
   tagessollBasis,
   wochenUebersicht,
   teamKennzahlen,
+  zeitverteilung,
   montagDerWoche,
   type Profil,
   type HolidayInput,
@@ -1167,6 +1168,117 @@ describe("wochenUebersicht (MIGRATION.md Punkt 7)", () => {
 });
 
 // MIGRATION.md Punkt 8 — Teamsicht: Aggregation über mehrere Personen.
+// Verteilung Kunden/Intern/Absenzen für die Team-Übersicht (Teamleiter-
+// Wunsch nach einer einheitlichen Sicht statt verstreuter Info aus
+// Absenzen- und Teamansicht). Dieselben Eingaben wie kennzahlen(), aber
+// eigene, unabhängig verifizierte Rückgabe.
+describe("zeitverteilung", () => {
+  const profil: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: "2026-01-01", exitDate: null, maxWeeklyHours: 45 };
+
+  it("teilt Arbeit in Kunden und Intern auf, Intern = Arbeitsstunden - Kundenstunden", () => {
+    const result = zeitverteilung({
+      from: "2026-08-10",
+      to: "2026-08-11",
+      heute: "2026-08-12",
+      eintraege: [
+        { date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 }, // 8h
+        { date: "2026-08-11", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0 }, // 8h
+      ],
+      profil,
+      changes: [],
+      holidays: [],
+      kundenstunden: 6,
+    });
+    expect(result.arbeitsstunden).toBe(16);
+    expect(result.kunden).toBe(6);
+    expect(result.intern).toBe(10);
+  });
+
+  it("Intern wird nie negativ, auch wenn kundenstunden > arbeitsstunden (Migrationswerte)", () => {
+    const result = zeitverteilung({
+      from: "2026-08-10",
+      to: "2026-08-10",
+      heute: "2026-08-12",
+      eintraege: [{ date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "12:00", pauseMin: 0 }], // 4h
+      profil,
+      changes: [],
+      holidays: [],
+      kundenstunden: 10,
+    });
+    expect(result.intern).toBe(0);
+  });
+
+  it("zählt Absenzen je Typ in Stunden und Tagen — Ganztag und Halbtag", () => {
+    const result = zeitverteilung({
+      from: "2026-08-10",
+      to: "2026-08-14",
+      heute: "2026-08-14",
+      eintraege: [
+        { date: "2026-08-10", typ: "ferien", hours: 8 }, // Ganztag (Tagessoll 8h @ 100%)
+        { date: "2026-08-11", typ: "ferien", hours: 4 }, // Halbtag
+        { date: "2026-08-12", typ: "krank", hours: 8 },
+        { date: "2026-08-13", typ: "militaer", hours: 8 },
+        { date: "2026-08-14", typ: "unbezahlt" }, // hours fehlt → Tagessoll-Äquivalent statt 0
+      ],
+      profil,
+      changes: [],
+      holidays: [],
+      kundenstunden: 0,
+    });
+    expect(result.absenzen.ferien).toEqual({ stunden: 12, tage: 1.5 });
+    expect(result.absenzen.krank).toEqual({ stunden: 8, tage: 1 });
+    expect(result.absenzen.militaer).toEqual({ stunden: 8, tage: 1 });
+    expect(result.absenzen.unbezahlt).toEqual({ stunden: 8, tage: 1 });
+  });
+
+  it("kappt Absenz-Stunden am Feiertag wie kennzahlen() (keine Doppelzählung)", () => {
+    const result = zeitverteilung({
+      from: "2026-08-10",
+      to: "2026-08-10",
+      heute: "2026-08-10",
+      eintraege: [{ date: "2026-08-10", typ: "feiertag", hours: 8 }],
+      profil,
+      changes: [],
+      holidays: [{ date: "2026-08-10", halfDay: false }],
+      kundenstunden: 0,
+    });
+    // Tagessoll ist am Feiertag 0 → gekappt auf 0, trotz hours: 8 im Eintrag.
+    expect(result.absenzen.feiertag).toEqual({ stunden: 0, tage: 0 });
+  });
+
+  it("sortiert zukünftige Absenzen nach geplantAbsenzen statt absenzen", () => {
+    const result = zeitverteilung({
+      from: "2026-08-01",
+      to: "2026-08-20",
+      heute: "2026-08-10",
+      eintraege: [
+        { date: "2026-08-05", typ: "ferien", hours: 8 }, // Vergangenheit
+        { date: "2026-08-15", typ: "ferien", hours: 8 }, // Zukunft
+      ],
+      profil,
+      changes: [],
+      holidays: [],
+      kundenstunden: 0,
+    });
+    expect(result.absenzen.ferien).toEqual({ stunden: 8, tage: 1 });
+    expect(result.geplantAbsenzen.ferien).toEqual({ stunden: 8, tage: 1 });
+  });
+
+  it("ignoriert Einträge mit countsAsWorktime:false (Migrations-Import)", () => {
+    const result = zeitverteilung({
+      from: "2026-08-10",
+      to: "2026-08-10",
+      heute: "2026-08-10",
+      eintraege: [{ date: "2026-08-10", typ: "arbeit", von: "08:00", bis: "16:00", pauseMin: 0, countsAsWorktime: false }],
+      profil,
+      changes: [],
+      holidays: [],
+      kundenstunden: 0,
+    });
+    expect(result.arbeitsstunden).toBe(0);
+  });
+});
+
 describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
   const profilA: Profil = { wochenstunden: 40, pensum: 100, ferientage: 25, startDate: null, exitDate: null, maxWeeklyHours: 45 };
   const profilB: Profil = { wochenstunden: 40, pensum: 50, ferientage: 25, startDate: null, exitDate: null, maxWeeklyHours: 45 };
@@ -1263,7 +1375,21 @@ describe("teamKennzahlen (MIGRATION.md Punkt 8)", () => {
   it("liefert eine leere Mitgliederliste und Null-Totals ohne Mitglieder", () => {
     const result = teamKennzahlen({ from: "2026-08-03", to: "2026-08-03", heute: "2026-08-03", holidays: [], members: [] });
     expect(result.members).toEqual([]);
-    expect(result.totals).toEqual({ soll: 0, ist: 0, ueberstunden: 0, arbeitsstunden: 0, kundenstunden: 0, verrechnungsgrad: 0 });
+    const leereVerteilung = { stunden: 0, tage: 0 };
+    expect(result.totals).toEqual({
+      soll: 0,
+      ist: 0,
+      ueberstunden: 0,
+      arbeitsstunden: 0,
+      kundenstunden: 0,
+      verrechnungsgrad: 0,
+      verteilung: {
+        kunden: 0,
+        intern: 0,
+        absenzen: { ferien: leereVerteilung, krank: leereVerteilung, militaer: leereVerteilung, unbezahlt: leereVerteilung, feiertag: leereVerteilung },
+        geplantAbsenzen: { ferien: leereVerteilung, krank: leereVerteilung, militaer: leereVerteilung, unbezahlt: leereVerteilung, feiertag: leereVerteilung },
+      },
+    });
   });
 });
 

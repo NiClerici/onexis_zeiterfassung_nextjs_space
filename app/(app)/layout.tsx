@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react";
 import { useRouter, usePathname } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { Calendar, BarChart3, UserCircle, Users, CalendarDays, Gauge, CalendarOff, AlertTriangle, ShieldAlert } from "lucide-react";
+import { Calendar, BarChart3, UserCircle, Users, CalendarDays, CalendarOff, AlertTriangle, ShieldAlert } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { isTrialExpired } from "@/lib/billing-rules";
@@ -20,11 +20,11 @@ const baseTabs = [
   { href: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
   { href: "/profile", icon: UserCircle, labelKey: "nav.profile" },
 ];
-// Teamsicht (MIGRATION.md Punkt 8) — für owner/admin/manager, im Unterschied
-// zur reinen Mitgliederverwaltung (teamTab, /admin/team) rein lesend/
-// Kennzahlen-orientiert und deshalb auch für manager freigegeben.
-const teamsichtTab = { href: "/team", icon: Gauge, labelKey: "nav.teamsicht" };
-const teamTab = { href: "/admin/team", icon: Users, labelKey: "nav.team" };
+// Team-Hub (app/(app)/team/page.tsx) — ein Menüpunkt statt der früheren
+// zwei kaum unterscheidbaren Einträge "Teamsicht" (Kennzahlen) und "Team"
+// (Mitgliederverwaltung, nur admin/owner). Für owner/admin/manager; die
+// Verwaltung-Tab darin bleibt admin/owner vorbehalten (siehe team/page.tsx).
+const teamTab = { href: "/team", icon: Users, labelKey: "nav.team" };
 const holidaysTab = { href: "/admin/holidays", icon: CalendarDays, labelKey: "nav.holidays" };
 const legalTab = { href: "/admin/legal", icon: ShieldAlert, labelKey: "nav.legal" };
 
@@ -45,9 +45,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const trialEndsAtDate = trialEndsAt ? new Date(trialEndsAt) : null;
   const tabs =
     role === "owner" || role === "admin"
-      ? [...baseTabs, teamsichtTab, teamTab, holidaysTab, legalTab]
+      ? [...baseTabs, teamTab, holidaysTab, legalTab]
       : role === "manager"
-      ? [...baseTabs, teamsichtTab]
+      ? [...baseTabs, teamTab]
       : baseTabs;
 
   // router.replace() darf nicht während des Renderns aufgerufen werden — das

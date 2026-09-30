@@ -84,26 +84,21 @@ function addToNested(map: NestedSums, userId: string, monthKey: string, customer
   map.set(userId, perMonth);
 }
 
-// Kundenstunden je (userId, Jahr, Monat) — die eigentliche, für alle
-// Aufrufer (Teamsicht, Export, Analytics) gemeinsame Berechnung. Jede
-// "arbeit"-Stunde mit Kunden-/Projektzuordnung zählt als "Kundenstunde" im
-// Sinne von kennzahlen().verrechnungsgrad (Betrieb.md-Nachtrag, 19.08.2026 —
-// vorher gab es zusätzlich einen "billable"-Haken pro Kunde/Eintrag, der
-// entfiel, weil die Zuordnung selbst schon die einzig relevante Aussage ist).
-// Liefert die bereits kombinierten Summen zurück (siehe MonthlyCustomerHours)
-// — Aufrufer, die nur die Gesamtsumme brauchen, nutzen combineCustomerHours()
-// oder direkt sumCustomerHours()/sumCustomerHoursByUser() unten.
-export async function billableHoursByUserAndMonth(params: {
-  orgId: string;
-  userIds: string[];
-  from: Date;
-  to: Date;
-}): Promise<Map<string, Map<string, MonthlyCustomerHours>>> {
+// Lädt die drei Rohquellen (Modulkommentar 1.–3.) für [from, to] und
+// gruppiert sie bereits nach (userId, Monat, Kunde) — die gemeinsame
+// Grundlage für billableHoursByUserAndMonth() (Monats-Summen) und
+// customerHoursByUserAndCustomer() (Kunden-Summen). Zwei Queries statt vier,
+// unabhängig davon, wie viele Aufrufer die Auflösung brauchen.
+async function loadCustomerHourSources(params: { orgId: string; userIds: string[]; from: Date; to: Date }): Promise<{
+  months: { year: number; month: number }[];
+  fromEntriesSums: NestedSums;
+  legacySums: NestedSums;
+  customerMonthSums: NestedSums;
+}> {
   const { orgId, userIds, from, to } = params;
-  const result = new Map<string, Map<string, MonthlyCustomerHours>>();
-  if (userIds.length === 0) return result;
   const months = monthsInRange(from, to);
-  if (months.length === 0) return result;
+  const empty = { months, fromEntriesSums: new Map(), legacySums: new Map(), customerMonthSums: new Map() };
+  if (userIds.length === 0 || months.length === 0) return empty;
 
   const monthStart = new Date(Date.UTC(months[0].year, months[0].month - 1, 1));
   const lastMonth = months[months.length - 1];
@@ -140,6 +135,30 @@ export async function billableHoursByUserAndMonth(params: {
     addToNested(customerMonthSums, r.userId, `${r.year}-${r.month}`, r.customerId, r.hours);
   }
 
+  return { months, fromEntriesSums, legacySums, customerMonthSums };
+}
+
+// Kundenstunden je (userId, Jahr, Monat) — die eigentliche, für alle
+// Aufrufer (Teamsicht, Export, Analytics) gemeinsame Berechnung. Jede
+// "arbeit"-Stunde mit Kunden-/Projektzuordnung zählt als "Kundenstunde" im
+// Sinne von kennzahlen().verrechnungsgrad (Betrieb.md-Nachtrag, 19.08.2026 —
+// vorher gab es zusätzlich einen "billable"-Haken pro Kunde/Eintrag, der
+// entfiel, weil die Zuordnung selbst schon die einzig relevante Aussage ist).
+// Liefert die bereits kombinierten Summen zurück (siehe MonthlyCustomerHours)
+// — Aufrufer, die nur die Gesamtsumme brauchen, nutzen combineCustomerHours()
+// oder direkt sumCustomerHours()/sumCustomerHoursByUser() unten.
+export async function billableHoursByUserAndMonth(params: {
+  orgId: string;
+  userIds: string[];
+  from: Date;
+  to: Date;
+}): Promise<Map<string, Map<string, MonthlyCustomerHours>>> {
+  const { userIds } = params;
+  const result = new Map<string, Map<string, MonthlyCustomerHours>>();
+  if (userIds.length === 0) return result;
+  const { months, fromEntriesSums, legacySums, customerMonthSums } = await loadCustomerHourSources(params);
+  if (months.length === 0) return result;
+
   for (const userId of userIds) {
     const perMonth = new Map<string, MonthlyCustomerHours>();
     for (const mo of months) {
@@ -164,6 +183,142 @@ export async function billableHoursByUserAndMonth(params: {
       perMonth.set(monthKey, { fromEntries, fromMigration });
     }
     result.set(userId, perMonth);
+  }
+  return result;
+}
+
+// Kundenstunden je (userId, Kunde), über [from, to] überlappende Monate
+// summiert — dieselbe Auflösungsregel wie billableHoursByUserAndMonth()
+// (CustomerMonth gewinnt über Legacy, pro Kunde einzeln), nur nach Kunde
+// statt nach Monat aggregiert. Grundlage für die Kunden-Aufschlüsselung in
+// der Teamsicht (app/api/team/route.ts) — vorher zeigte die dortige
+// Kundentabelle AUSSCHLIESSLICH CustomerMonth-Migrationswerte, die laufende
+// Tageserfassung (fromEntries) fehlte komplett.
+export async function customerHoursByUserAndCustomer(params: {
+  orgId: string;
+  userIds: string[];
+  from: Date;
+  to: Date;
+}): Promise<Map<string, Map<string, number>>> {
+  const { userIds } = params;
+  const result = new Map<string, Map<string, number>>();
+  if (userIds.length === 0) return result;
+  const { months, fromEntriesSums, legacySums, customerMonthSums } = await loadCustomerHourSources(params);
+  if (months.length === 0) return result;
+
+  for (const userId of userIds) {
+    const perCustomer = new Map<string, number>();
+    for (const mo of months) {
+      const monthKey = `${mo.year}-${mo.month}`;
+      const fromEntriesByCustomer = fromEntriesSums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+      const legacyByCustomer = legacySums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+      const customerMonthByCustomer = customerMonthSums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+
+      for (const [customerId, h] of fromEntriesByCustomer) {
+        perCustomer.set(customerId, (perCustomer.get(customerId) ?? 0) + h);
+      }
+      // Pro Kunde einzeln auflösen: CustomerMonth gewinnt über Legacy (siehe
+      // Modulkommentar bzw. billableHoursByUserAndMonth() oben).
+      const customerIds = new Set([...legacyByCustomer.keys(), ...customerMonthByCustomer.keys()]);
+      for (const customerId of customerIds) {
+        const cm = customerMonthByCustomer.get(customerId) ?? 0;
+        const legacy = legacyByCustomer.get(customerId) ?? 0;
+        const fromMigration = cm > 0 ? cm : legacy;
+        perCustomer.set(customerId, (perCustomer.get(customerId) ?? 0) + fromMigration);
+      }
+    }
+    result.set(userId, perCustomer);
+  }
+  return result;
+}
+
+// Dieselbe Drei-Quellen-Kombination wie loadCustomerHourSources() oben, nur
+// nach Projekt statt nach Kunde gruppiert — Grundlage für die Projektsicht
+// im Team-Hub (app/api/team/route.ts). Eigene, schlanke Funktion statt einer
+// Erweiterung von loadCustomerHourSources(): die dort gefilterten
+// TimeEntry-Zeilen (customerId not null) sind nicht automatisch dieselben
+// wie die hier gebrauchten (projectId not null) — ein Direktkunde ohne
+// Projekt hat z.B. eine customerId, aber nie eine projectId.
+async function loadProjectHourSources(params: { orgId: string; userIds: string[]; from: Date; to: Date }): Promise<{
+  months: { year: number; month: number }[];
+  fromEntriesSums: NestedSums;
+  legacySums: NestedSums;
+  customerMonthSums: NestedSums;
+}> {
+  const { orgId, userIds, from, to } = params;
+  const months = monthsInRange(from, to);
+  const empty = { months, fromEntriesSums: new Map(), legacySums: new Map(), customerMonthSums: new Map() };
+  if (userIds.length === 0 || months.length === 0) return empty;
+
+  const monthStart = new Date(Date.UTC(months[0].year, months[0].month - 1, 1));
+  const lastMonth = months[months.length - 1];
+  const monthEnd = new Date(Date.UTC(lastMonth.year, lastMonth.month, 0));
+
+  const entries = await prisma.timeEntry.findMany({
+    where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, projectId: { not: null }, date: { gte: monthStart, lte: monthEnd } },
+    select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true, projectId: true, countsAsWorktime: true },
+  });
+  const fromEntriesSums: NestedSums = new Map();
+  const legacySums: NestedSums = new Map();
+  for (const e of entries) {
+    const d = new Date(e.date);
+    const monthKey = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
+    const stunden = stundenAusEintrag({ typ: "arbeit", von: e.von, bis: e.bis, pauseMin: e.pauseMin, hours: e.hours }, 0);
+    const target = e.countsAsWorktime ? fromEntriesSums : legacySums;
+    addToNested(target, e.userId, monthKey, e.projectId as string, stunden);
+  }
+
+  const oldRows = await prisma.customerMonth.findMany({
+    where: { orgId, userId: { in: userIds }, projectId: { not: null }, OR: months.map((mo) => ({ year: mo.year, month: mo.month })) },
+  });
+  const customerMonthSums: NestedSums = new Map();
+  for (const r of oldRows) {
+    if (!r.projectId) continue;
+    addToNested(customerMonthSums, r.userId, `${r.year}-${r.month}`, r.projectId, r.hours);
+  }
+
+  return { months, fromEntriesSums, legacySums, customerMonthSums };
+}
+
+// Projektstunden je (userId, Projekt), über [from, to] überlappende Monate
+// summiert — dieselbe Auflösungsregel wie customerHoursByUserAndCustomer()
+// (CustomerMonth gewinnt über Legacy, pro Projekt einzeln), nur nach Projekt
+// aggregiert. Ersetzt die frühere Projektsicht im Team-Hub, die
+// ausschliesslich CustomerMonth-Zeilen zeigte: täglich über
+// TimeEntry.projectId erfasste Projektstunden (seit dem Nachtrag
+// "Projektstunden pro Tag") fehlten dort komplett.
+export async function projectHoursByUserAndProject(params: {
+  orgId: string;
+  userIds: string[];
+  from: Date;
+  to: Date;
+}): Promise<Map<string, Map<string, number>>> {
+  const { userIds } = params;
+  const result = new Map<string, Map<string, number>>();
+  if (userIds.length === 0) return result;
+  const { months, fromEntriesSums, legacySums, customerMonthSums } = await loadProjectHourSources(params);
+  if (months.length === 0) return result;
+
+  for (const userId of userIds) {
+    const perProject = new Map<string, number>();
+    for (const mo of months) {
+      const monthKey = `${mo.year}-${mo.month}`;
+      const fromEntriesByProject = fromEntriesSums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+      const legacyByProject = legacySums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+      const customerMonthByProject = customerMonthSums.get(userId)?.get(monthKey) ?? new Map<string, number>();
+
+      for (const [projectId, h] of fromEntriesByProject) {
+        perProject.set(projectId, (perProject.get(projectId) ?? 0) + h);
+      }
+      const projectIds = new Set([...legacyByProject.keys(), ...customerMonthByProject.keys()]);
+      for (const projectId of projectIds) {
+        const cm = customerMonthByProject.get(projectId) ?? 0;
+        const legacy = legacyByProject.get(projectId) ?? 0;
+        const fromMigration = cm > 0 ? cm : legacy;
+        perProject.set(projectId, (perProject.get(projectId) ?? 0) + fromMigration);
+      }
+    }
+    result.set(userId, perProject);
   }
   return result;
 }
