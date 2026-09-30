@@ -12,6 +12,7 @@ import { pruefeCompliance } from "@/lib/compliance";
 import { DayEntryDialog, type DayTimeEntry, type DayCustomer, type DayProject } from "@/components/day-entry-dialog";
 import { ProjectMonthSummary, type ProjectSummaryRow } from "@/components/project-month-summary";
 import { downloadBlob } from "@/lib/download-blob";
+import { TYPE_COLOR } from "@/lib/absence-colors";
 
 interface UserProfile {
   firstName: string;
@@ -54,14 +55,9 @@ interface MonthLock {
   month: number;
 }
 
-const TYPE_DOT_COLOR: Record<string, string> = {
-  arbeit: "bg-green-500",
-  ferien: "bg-sky-400",
-  feiertag: "bg-purple-400",
-  krank: "bg-red-400",
-  militaer: "bg-orange-400",
-  unbezahlt: "bg-gray-400",
-};
+// Aus lib/absence-colors.ts (HARDENING.md C1) — eine Absenzfarbe bedeutet
+// in der ganzen App dasselbe.
+const TYPE_DOT_COLOR = TYPE_COLOR;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 

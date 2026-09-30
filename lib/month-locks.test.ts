@@ -127,6 +127,70 @@ describe("MonthLock API — Sperren/Entsperren (admin/owner-only, idempotent)", 
   });
 });
 
+// Team-Hub: manager dürfen seit "Monat für Team abschliessen" ebenfalls
+// sperren/entsperren, aber nur für sich selbst oder ihre direkt
+// unterstellten Personen (canSeeUser) — nie für ein fremdes Mitglied.
+describe("MonthLock API — manager (canSeeUser-Scoping)", () => {
+  let managerId: string;
+  let reportId: string;
+  let strangerId: string;
+
+  beforeAll(async () => {
+    const manager = await prisma.user.create({ data: { email: "monthlock-manager@example.test", password: "irrelevant", firstName: "M", lastName: "Anager" } });
+    const report = await prisma.user.create({ data: { email: "monthlock-report@example.test", password: "irrelevant", firstName: "R", lastName: "Eport" } });
+    const stranger = await prisma.user.create({ data: { email: "monthlock-stranger@example.test", password: "irrelevant", firstName: "S", lastName: "Tranger" } });
+    managerId = manager.id;
+    reportId = report.id;
+    strangerId = stranger.id;
+    const managerMembership = await prisma.membership.create({ data: { orgId: ORG, userId: managerId, role: "manager", entryDate: new Date("2026-01-01") } });
+    await prisma.membership.create({ data: { orgId: ORG, userId: reportId, role: "member", managerId: managerMembership.id, entryDate: new Date("2026-01-01") } });
+    await prisma.membership.create({ data: { orgId: ORG, userId: strangerId, role: "member", entryDate: new Date("2026-01-01") } });
+  });
+
+  afterAll(async () => {
+    await prisma.monthLockAudit.deleteMany({ where: { orgId: ORG, userId: { in: [managerId, reportId, strangerId] } } });
+    await prisma.monthLock.deleteMany({ where: { orgId: ORG, userId: { in: [managerId, reportId, strangerId] } } });
+    await prisma.membership.deleteMany({ where: { orgId: ORG, userId: { in: [managerId, reportId, strangerId] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [managerId, reportId, strangerId] } } });
+  });
+
+  it("manager sperrt den Monat der eigenen, direkt unterstellten Person", async () => {
+    setSession(managerId, ORG, "manager");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: reportId, year: 2026, month: 10 }));
+    expect(res.status).toBe(200);
+    const lock = await prisma.monthLock.findUnique({ where: { orgId_userId_year_month: { orgId: ORG, userId: reportId, year: 2026, month: 10 } } });
+    expect(lock).not.toBeNull();
+  });
+
+  it("manager sperrt sich selbst", async () => {
+    setSession(managerId, ORG, "manager");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: managerId, year: 2026, month: 10 }));
+    expect(res.status).toBe(200);
+  });
+
+  it("manager darf ein fremdes, nicht unterstelltes Mitglied nicht sperren (403)", async () => {
+    setSession(managerId, ORG, "manager");
+    const res = await mlPost(jsonReq("/api/month-locks", "POST", { userId: strangerId, year: 2026, month: 10 }));
+    expect(res.status).toBe(403);
+    const lock = await prisma.monthLock.findUnique({ where: { orgId_userId_year_month: { orgId: ORG, userId: strangerId, year: 2026, month: 10 } } });
+    expect(lock).toBeNull();
+  });
+
+  it("manager darf ein fremdes Mitglied auch nicht entsperren (403)", async () => {
+    setSession(adminId, ORG, "admin");
+    await mlPost(jsonReq("/api/month-locks", "POST", { userId: strangerId, year: 2026, month: 11 }));
+    setSession(managerId, ORG, "manager");
+    const res = await mlDelete(jsonReq("/api/month-locks", "DELETE", { userId: strangerId, year: 2026, month: 11 }));
+    expect(res.status).toBe(403);
+  });
+
+  it("manager entsperrt die eigene, direkt unterstellte Person wieder", async () => {
+    setSession(managerId, ORG, "manager");
+    const res = await mlDelete(jsonReq("/api/month-locks", "DELETE", { userId: reportId, year: 2026, month: 10 }));
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("MonthLock-Durchsetzung auf TimeEntry-Mutationen (POST/PUT/DELETE)", () => {
   beforeAll(async () => {
     setSession(adminId, ORG, "admin");

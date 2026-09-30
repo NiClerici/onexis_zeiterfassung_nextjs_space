@@ -378,6 +378,108 @@ export function kennzahlen(input: KennzahlenInput): KennzahlenResult {
   };
 }
 
+// Absenztypen im Sinne von zeitverteilung() — alles ausser "arbeit". Eigene
+// Konstante statt EINTRAG_TYPEN.filter(), damit die Reihenfolge (und damit
+// die Spaltenreihenfolge in der Teamsicht) fest definiert ist.
+export const ABSENZ_TYPEN = ["ferien", "krank", "militaer", "unbezahlt", "feiertag"] as const;
+export type AbsenzTyp = (typeof ABSENZ_TYPEN)[number];
+
+export interface AbsenzVerteilung {
+  stunden: number;
+  // Anzahl Einträge, Halbtag zählt 0.5 — siehe zeitverteilung() unten.
+  tage: number;
+}
+
+export interface ZeitverteilungResult {
+  // Arbeit MIT Kunden-/Projektzuordnung (kundenstunden, wie in
+  // kennzahlen() — vom Aufrufer vorberechnet aus TimeEntry/CustomerMonth).
+  kunden: number;
+  // Arbeit OHNE Kundenzuordnung: arbeitsstunden - kundenstunden, nie
+  // negativ (kundenstunden kann arbeitsstunden geringfügig übersteigen,
+  // wenn CustomerMonth-Migrationswerte grosszügiger sind als die
+  // tagesgenaue Erfassung — siehe lib/customer-months.ts Modulkommentar).
+  intern: number;
+  arbeitsstunden: number;
+  absenzen: Record<AbsenzTyp, AbsenzVerteilung>;
+  // Ferien/Krank/etc. mit Datum NACH heute (noch nicht "verbraucht") — für
+  // die Teamsicht als "geplant" ausweisbar, analog zu geplantZukunft in
+  // kennzahlen().
+  geplantAbsenzen: Record<AbsenzTyp, AbsenzVerteilung>;
+}
+
+// Verteilung der Arbeitszeit auf Kunden/Intern/Absenzen für die Teamsicht
+// (Betrieb.md-Nachtrag, Teamleiter-Wunsch nach einheitlicher Übersicht statt
+// verstreuter Infos aus Absenzen- und Teamansicht). Bewusst getrennt von
+// kennzahlen() statt dessen Rückgabe zu erweitern: unterschiedliche
+// Aufrufer (Saldo-Kennzahlen vs. Verteilungs-Anzeige), aber dieselben
+// Eingaben und dieselbe Tagesberechnung (sollStundenTag/stundenAusEintrag/
+// feiertagAmTag) — keine Rechenlogik wird verdoppelt.
+export function zeitverteilung(input: Omit<KennzahlenInput, "payouts">): ZeitverteilungResult {
+  const from = toUTCDate(input.from);
+  const to = toUTCDate(input.to);
+  const heute = toUTCDate(input.heute);
+  const bisHeute = to.getTime() < heute.getTime() ? to : heute;
+
+  function leereVerteilung(): Record<AbsenzTyp, AbsenzVerteilung> {
+    const rec = {} as Record<AbsenzTyp, AbsenzVerteilung>;
+    for (const typ of ABSENZ_TYPEN) rec[typ] = { stunden: 0, tage: 0 };
+    return rec;
+  }
+
+  let arbeitsstunden = 0;
+  const absenzen = leereVerteilung();
+  const geplantAbsenzen = leereVerteilung();
+
+  for (const eintrag of input.eintraege) {
+    const d = toUTCDate(eintrag.date);
+    if (d.getTime() > to.getTime() || d.getTime() < from.getTime()) continue;
+    if (eintrag.countsAsWorktime === false) continue;
+    if (eintrag.typ === "arbeit") {
+      if (d.getTime() <= bisHeute.getTime()) {
+        arbeitsstunden += stundenAusEintrag(eintrag, 0);
+      }
+      continue;
+    }
+
+    const tagesSoll = sollStundenTag(d, input.profil, input.changes, input.holidays);
+    // Gleiche Sonderbehandlung wie kennzahlen(): unbezahlt liefert über
+    // stundenAusEintrag() bewusst 0 (zählt nicht zum Ist/Saldo), soll in der
+    // Verteilungs-Anzeige aber trotzdem als Abwesenheit mit Stunden
+    // erscheinen — sonst wirkt ein unbezahlter Urlaubstag wie 0 Aufwand.
+    const rohStunden = eintrag.typ === "unbezahlt" ? (eintrag.hours ?? tagesSoll) : stundenAusEintrag(eintrag, tagesSoll);
+    // Feiertag-Doppelzählung wie in kennzahlen() kappen (siehe dortiger
+    // Kommentar).
+    const stunden = feiertagAmTag(d, input.holidays) ? Math.min(rohStunden, tagesSoll) : rohStunden;
+    const tage = tagesSoll > 0 ? Math.min(1, stunden / tagesSoll) : stunden > 0 ? 1 : 0;
+    const typ = eintrag.typ as AbsenzTyp;
+
+    if (d.getTime() <= bisHeute.getTime()) {
+      absenzen[typ].stunden += stunden;
+      absenzen[typ].tage += tage;
+    } else if (d.getTime() > heute.getTime()) {
+      geplantAbsenzen[typ].stunden += stunden;
+      geplantAbsenzen[typ].tage += tage;
+    }
+  }
+
+  const intern = Math.max(0, arbeitsstunden - input.kundenstunden);
+
+  for (const typ of ABSENZ_TYPEN) {
+    absenzen[typ].stunden = round1(absenzen[typ].stunden);
+    absenzen[typ].tage = round1(absenzen[typ].tage);
+    geplantAbsenzen[typ].stunden = round1(geplantAbsenzen[typ].stunden);
+    geplantAbsenzen[typ].tage = round1(geplantAbsenzen[typ].tage);
+  }
+
+  return {
+    kunden: round1(input.kundenstunden),
+    intern: round1(intern),
+    arbeitsstunden: round1(arbeitsstunden),
+    absenzen,
+    geplantAbsenzen,
+  };
+}
+
 export interface WochenSummary {
   // Montag der Kalenderwoche, "YYYY-MM-DD".
   montag: string;
@@ -456,6 +558,10 @@ export interface TeamMemberResult {
   arbeitsstunden: number;
   kundenstunden: number;
   verrechnungsgrad: number;
+  // Verteilung Kunden/Intern/Absenzen, siehe zeitverteilung() — für die
+  // einheitliche Team-Übersicht (Teamleiter-Wunsch, statt verstreuter Info
+  // aus Absenzen- und Teamansicht).
+  verteilung: ZeitverteilungResult;
 }
 
 export interface TeamKennzahlenInput {
@@ -477,6 +583,14 @@ export interface TeamKennzahlenResult {
     arbeitsstunden: number;
     kundenstunden: number;
     verrechnungsgrad: number;
+    // Team-Summe der Verteilung — kein eigenes verrechnungsgrad/arbeits-
+    // stunden-Duplikat, diese stehen bereits eine Ebene höher in totals.
+    verteilung: {
+      kunden: number;
+      intern: number;
+      absenzen: Record<AbsenzTyp, AbsenzVerteilung>;
+      geplantAbsenzen: Record<AbsenzTyp, AbsenzVerteilung>;
+    };
   };
 }
 
@@ -487,17 +601,18 @@ export interface TeamKennzahlenResult {
 // selbst — sie darf nicht anfangen, soll/ist eigenständig neu zu berechnen.
 export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult {
   const members: TeamMemberResult[] = input.members.map((m) => {
-    const k = kennzahlen({
+    const gemeinsam = {
       from: input.from,
       to: input.to,
       heute: input.heute,
       eintraege: m.eintraege,
       profil: m.profil,
       changes: m.changes,
-      payouts: m.payouts,
       holidays: input.holidays,
       kundenstunden: m.kundenstunden,
-    });
+    };
+    const k = kennzahlen({ ...gemeinsam, payouts: m.payouts });
+    const verteilung = zeitverteilung(gemeinsam);
     return {
       userId: m.userId,
       name: m.name,
@@ -508,6 +623,7 @@ export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult
       arbeitsstunden: k.arbeitsstunden,
       kundenstunden: k.kundenstunden,
       verrechnungsgrad: k.verrechnungsgrad,
+      verteilung,
     };
   });
 
@@ -518,7 +634,27 @@ export function teamKennzahlen(input: TeamKennzahlenInput): TeamKennzahlenResult
   const kundenstunden = round1(members.reduce((s, m) => s + m.kundenstunden, 0));
   const verrechnungsgrad = arbeitsstunden > 0 ? round1((kundenstunden / arbeitsstunden) * 100) : 0;
 
-  return { members, totals: { soll, ist, ueberstunden, arbeitsstunden, kundenstunden, verrechnungsgrad } };
+  function leereVerteilung(): Record<AbsenzTyp, AbsenzVerteilung> {
+    const rec = {} as Record<AbsenzTyp, AbsenzVerteilung>;
+    for (const typ of ABSENZ_TYPEN) rec[typ] = { stunden: 0, tage: 0 };
+    return rec;
+  }
+  const absenzen = leereVerteilung();
+  const geplantAbsenzen = leereVerteilung();
+  for (const m of members) {
+    for (const typ of ABSENZ_TYPEN) {
+      absenzen[typ].stunden = round1(absenzen[typ].stunden + m.verteilung.absenzen[typ].stunden);
+      absenzen[typ].tage = round1(absenzen[typ].tage + m.verteilung.absenzen[typ].tage);
+      geplantAbsenzen[typ].stunden = round1(geplantAbsenzen[typ].stunden + m.verteilung.geplantAbsenzen[typ].stunden);
+      geplantAbsenzen[typ].tage = round1(geplantAbsenzen[typ].tage + m.verteilung.geplantAbsenzen[typ].tage);
+    }
+  }
+  const intern = round1(members.reduce((s, m) => s + m.verteilung.intern, 0));
+
+  return {
+    members,
+    totals: { soll, ist, ueberstunden, arbeitsstunden, kundenstunden, verrechnungsgrad, verteilung: { kunden: kundenstunden, intern, absenzen, geplantAbsenzen } },
+  };
 }
 
 export function feriensaldo(input: FeriensaldoInput): FeriensaldoResult {

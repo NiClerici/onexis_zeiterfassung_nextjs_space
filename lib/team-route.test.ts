@@ -38,6 +38,10 @@ let exactBudgetCustomerId: string, exactBudgetProjectId: string;
 // verrechnen" ab (Teamsicht-Bugfix: die Kundentabelle wurde bisher nie
 // gerendert, obwohl die Route diese Aggregation längst lieferte).
 let directCustomerId: string;
+// Kunde, der AUSSCHLIESSLICH über die tagesgenaue Erfassung gebucht wird
+// (TimeEntry.customerId, kein CustomerMonth) — der Fall, den customers[]
+// vor diesem Fix komplett übersah (Bugfix: einheitliche Teamsicht).
+let dailyCustomerId: string;
 
 beforeAll(async () => {
   await prisma.organization.create({ data: { id: ORG, name: "Team Route Test Org", slug: "team-route-test-org" } });
@@ -112,9 +116,31 @@ beforeAll(async () => {
     data: { userId: reportId, orgId: ORG, date: new Date("2026-08-06"), type: "arbeit", von: "08:00", bis: "11:00", pauseMin: 0 },
   });
   await prisma.customerMonth.create({ data: { orgId: ORG, userId: reportId, year: 2026, month: 8, customerId: directCustomerId, hours: 3 } });
+
+  // Zeitverteilung (Kunden/Intern/Absenzen) — eigener Monat (September),
+  // damit er nicht mit den CustomerMonth-Fixturen von MONTH_QS (August)
+  // interferiert. report arbeitet 5h beim Tageskunden (echte tagesgenaue
+  // Erfassung, KEIN CustomerMonth), 3h ohne Kundenzuordnung (intern), und
+  // hat einen ganzen Ferientag.
+  const dailyCustomer = await prisma.customer.create({ data: { orgId: ORG, name: "Tageskunde", hourlyRate: 140 } });
+  dailyCustomerId = dailyCustomer.id;
+  await prisma.timeEntry.create({
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-09-02"), type: "arbeit", von: "08:00", bis: "13:00", pauseMin: 0, customerId: dailyCustomerId },
+  });
+  await prisma.timeEntry.create({
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-09-03"), type: "arbeit", von: "08:00", bis: "11:00", pauseMin: 0 },
+  });
+  // Ohne explizites hours-Feld → stundenAusEintrag() füllt das volle
+  // Tagessoll ein, damit tage exakt 1 wird (statt eines krummen Verhältnisses
+  // zu einem fest verdrahteten hours-Wert).
+  await prisma.timeEntry.create({
+    data: { userId: reportId, orgId: ORG, date: new Date("2026-09-07"), type: "ferien" },
+  });
 });
 
 afterAll(async () => {
+  await prisma.monthLockAudit.deleteMany({ where: { orgId: ORG } });
+  await prisma.monthLock.deleteMany({ where: { orgId: ORG } });
   await prisma.timeEntry.deleteMany({ where: { orgId: ORG } });
   await prisma.customerMonth.deleteMany({ where: { orgId: ORG } });
   await prisma.pensumChange.deleteMany({ where: { orgId: ORG } });
@@ -126,6 +152,7 @@ afterAll(async () => {
 });
 
 const MONTH_QS = "type=month&year=2026&month=8";
+const SEPT_QS = "type=month&year=2026&month=9";
 
 describe("GET /api/team — Berechtigungs-Scoping", () => {
   it("member erhält 403", async () => {
@@ -262,6 +289,132 @@ describe("GET /api/team — Randfälle (HARDENING.md A4)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.requests).toEqual([]);
+  });
+});
+
+// Einheitliche Team-Übersicht (Teamleiter-Wunsch: Kunden/Intern/Absenzen an
+// einer Stelle statt verstreut über Absenzen- und Teamansicht) sowie der
+// Bugfix, dass customers[] vorher ausschliesslich CustomerMonth-Zeilen zeigte.
+describe("GET /api/team — Zeitverteilung (Kunden/Intern/Absenzen) und Kunden aus Tageserfassung", () => {
+  it("customers[] enthält jetzt auch Kunden, die nur tagesgenau (TimeEntry.customerId) gebucht wurden", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${SEPT_QS}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const customer = body.customers.find((c: any) => c.id === dailyCustomerId);
+    expect(customer).toBeTruthy();
+    expect(customer.stunden).toBe(5);
+    expect(customer.umsatz).toBe(700); // 5h * 140 CHF/h
+  });
+
+  it("members[].kundenNachKunde schlüsselt die Kundenstunden dieser Person einzeln auf", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${SEPT_QS}`));
+    const body = await res.json();
+    const reportMember = body.members.find((m: any) => m.userId === reportId);
+    expect(reportMember.kundenNachKunde).toEqual([{ customerId: dailyCustomerId, name: "Tageskunde", stunden: 5 }]);
+  });
+
+  it("members[].verteilung trennt Kunden-Arbeit, interne Arbeit und Absenzen", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${SEPT_QS}`));
+    const body = await res.json();
+    const reportMember = body.members.find((m: any) => m.userId === reportId);
+    expect(reportMember.verteilung.kunden).toBe(5);
+    expect(reportMember.verteilung.intern).toBe(3); // 3h ohne Kundenzuordnung
+    expect(reportMember.verteilung.absenzen.ferien).toEqual({ stunden: expect.any(Number), tage: 1 });
+    expect(reportMember.verteilung.absenzen.ferien.stunden).toBeGreaterThan(0);
+  });
+
+  it("totals.verteilung summiert die Verteilung über alle sichtbaren Mitglieder", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${SEPT_QS}`));
+    const body = await res.json();
+    expect(body.totals.verteilung.kunden).toBeGreaterThanOrEqual(5);
+    expect(body.totals.verteilung.absenzen.ferien.tage).toBeGreaterThanOrEqual(1);
+  });
+
+  it("manager sieht in customers[] nur Kunden seines eigenen Teams", async () => {
+    setSession(managerId, ORG, "manager");
+    const res = await teamGet(req(`/api/team?${SEPT_QS}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // reportId ist dem manager unterstellt → dessen Tageskunde ist sichtbar.
+    expect(body.customers.find((c: any) => c.id === dailyCustomerId)).toBeTruthy();
+    // otherMemberId ist NICHT unterstellt und hat ohnehin keine Buchung —
+    // der lone manager (kein Team) darf denselben Kunden gar nicht sehen.
+    setSession(loneManagerId, ORG, "manager");
+    const loneRes = await teamGet(req(`/api/team?${SEPT_QS}`));
+    const loneBody = await loneRes.json();
+    expect(loneBody.customers.find((c: any) => c.id === dailyCustomerId)).toBeUndefined();
+  });
+});
+
+// Team-Hub: kumulierter Saldo seit Eintritt (lib/saldo.ts) und Monatsabschluss
+// je Person, bisher nur in Analytics (eigene Person) bzw. /admin/team
+// (Admin-only, ohne Zahlen) verfügbar.
+describe("GET /api/team — Saldo kumuliert und Monatsabschluss", () => {
+  it("members[].saldoKumuliert ist seit dem Eintrittsdatum gerechnet, nicht seit Periodenbeginn", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${MONTH_QS}`)); // August 2026
+    const body = await res.json();
+    const reportMember = body.members.find((m: any) => m.userId === reportId);
+    // reportId ist seit 01.01.2026 Mitglied (entryDate) — der kumulierte
+    // Saldo beginnt dort, nicht erst am 01.08.
+    expect(reportMember.saldoKumuliert.since).toBe("2026-01-01");
+    expect(typeof reportMember.saldoKumuliert.netOvertime).toBe("number");
+    expect(Array.isArray(reportMember.saldoSerie)).toBe(true);
+    expect(reportMember.saldoSerie.length).toBeGreaterThan(0);
+  });
+
+  it("monthLock/monthLocked sind nur bei einem exakten Kalendermonat gesetzt, sonst null", async () => {
+    setSession(adminId, ORG, "admin");
+    const monthRes = await teamGet(req(`/api/team?${MONTH_QS}`));
+    const monthBody = await monthRes.json();
+    expect(monthBody.monthLock).toEqual({ year: 2026, month: 8 });
+    expect(monthBody.members.find((m: any) => m.userId === reportId).monthLocked).toBe(false);
+
+    const customRes = await teamGet(req("/api/team?type=custom&from=2026-08-10&to=2026-08-20"));
+    const customBody = await customRes.json();
+    expect(customBody.monthLock).toBeNull();
+    expect(customBody.members.find((m: any) => m.userId === reportId).monthLocked).toBeNull();
+  });
+
+  it("monthLocked wird true, sobald der Monat für diese Person gesperrt ist", async () => {
+    await prisma.monthLock.create({ data: { orgId: ORG, userId: reportId, year: 2026, month: 8, lockedBy: adminId } });
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+    const body = await res.json();
+    expect(body.members.find((m: any) => m.userId === reportId).monthLocked).toBe(true);
+    // otherMemberId ist für diesen Monat nicht gesperrt.
+    expect(body.members.find((m: any) => m.userId === otherMemberId).monthLocked).toBe(false);
+  });
+});
+
+// Projektsicht jetzt primär aus der Tageserfassung (TimeEntry.projectId) statt
+// ausschliesslich aus CustomerMonth (Nachtrag "Projektstunden pro Tag").
+describe("GET /api/team — Projektstunden aus der Tageserfassung", () => {
+  it("ein täglich über TimeEntry.projectId gebuchtes Projekt erscheint in projects[]", async () => {
+    setSession(adminId, ORG, "admin");
+    await prisma.timeEntry.create({
+      data: {
+        userId: reportId,
+        orgId: ORG,
+        date: new Date("2026-09-10"),
+        type: "arbeit",
+        von: "08:00",
+        bis: "12:30",
+        pauseMin: 0,
+        customerId: dailyCustomerId,
+        projectId,
+      },
+    });
+    const res = await teamGet(req(`/api/team?${SEPT_QS}`));
+    const body = await res.json();
+    const project = body.projects.find((p: any) => p.id === projectId);
+    expect(project).toBeTruthy();
+    expect(project.stunden).toBe(4.5);
+    expect(project.customerName).toBe("Team-Route-Kunde");
   });
 });
 

@@ -2,8 +2,17 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireOrg, requireRole, canSeeUser, AccessError } from "@/lib/access";
+import { requireOrg, requireRole, canSeeUser, type OrgContext, AccessError } from "@/lib/access";
 import { logError } from "@/lib/error-log";
+
+// owner/admin dürfen jedes Mitglied sperren/entsperren, manager nur sich
+// selbst und ihre direkt unterstellten Personen (canSeeUser, dieselbe
+// Sichtbarkeits-Hierarchie wie /api/team) — nie ein beliebiges Mitglied der
+// Organisation.
+async function assertMayLock(ctx: OrgContext, targetUserId: string): Promise<void> {
+  if (ctx.role === "owner" || ctx.role === "admin") return;
+  if (!(await canSeeUser(ctx, targetUserId))) throw new AccessError(403, "Forbidden");
+}
 
 function parseYearMonth(body: any): { userId: string; year: number; month: number } | null {
   const userId = body?.userId;
@@ -58,10 +67,16 @@ export async function GET(req: Request) {
 // Sperrt einen Monat für einen Nutzer. Idempotent: ist der Monat bereits
 // gesperrt, wird die bestehende Zeile zurückgegeben statt eine zweite
 // MonthLockAudit-"locked"-Zeile zu erzeugen.
+//
+// Team-Hub: manager dürfen seit "Monat für Team abschliessen" ebenfalls
+// sperren/entsperren (bisher owner/admin-only) — aber nur für sich selbst
+// oder ihre direkt unterstellten Personen (canSeeUser), nie für ein
+// beliebiges Mitglied der Organisation.
 export async function POST(req: Request) {
   try {
-    const { orgId, userId: actorId, role } = await requireOrg();
-    requireRole(role, ["owner", "admin"]);
+    const ctx = await requireOrg();
+    const { orgId, userId: actorId, role } = ctx;
+    requireRole(role, ["owner", "admin", "manager"]);
 
     const body = await req?.json?.().catch(() => ({}));
     const parsed = parseYearMonth(body);
@@ -70,6 +85,7 @@ export async function POST(req: Request) {
 
     const membership = await prisma.membership.findUnique({ where: { orgId_userId: { orgId, userId } } });
     if (!membership) return NextResponse.json({ error: "Membership not found" }, { status: 404 });
+    await assertMayLock(ctx, userId);
 
     const existing = await prisma.monthLock.findUnique({
       where: { orgId_userId_year_month: { orgId, userId, year, month } },
@@ -95,13 +111,15 @@ export async function POST(req: Request) {
 // Audit-Trail landet").
 export async function DELETE(req: Request) {
   try {
-    const { orgId, userId: actorId, role } = await requireOrg();
-    requireRole(role, ["owner", "admin"]);
+    const ctx = await requireOrg();
+    const { orgId, userId: actorId, role } = ctx;
+    requireRole(role, ["owner", "admin", "manager"]);
 
     const body = await req?.json?.().catch(() => ({}));
     const parsed = parseYearMonth(body);
     if (!parsed) return NextResponse.json({ error: "Ungültige Eingabe" }, { status: 400 });
     const { userId, year, month } = parsed;
+    await assertMayLock(ctx, userId);
 
     const existing = await prisma.monthLock.findUnique({
       where: { orgId_userId_year_month: { orgId, userId, year, month } },
