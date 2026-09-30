@@ -354,12 +354,34 @@ describe("GET /api/team — Zeitverteilung (Kunden/Intern/Absenzen) und Kunden a
 // je Person, bisher nur in Analytics (eigene Person) bzw. /admin/team
 // (Admin-only, ohne Zahlen) verfügbar.
 describe("GET /api/team — Eintrittsdatum je Person", () => {
-  it("liefert entryDate roh mit, editierbar über /api/team/member-dates", async () => {
+  it("liefert den wirksamen Wert (entryDate, sofern kein startDate abweicht), editierbar über /api/team/member-dates", async () => {
     setSession(adminId, ORG, "admin");
     const res = await teamGet(req(`/api/team?${MONTH_QS}`));
     const body = await res.json();
     const reportMember = body.members.find((m: any) => m.userId === reportId);
     expect(reportMember.entryDate.slice(0, 10)).toBe("2026-01-01");
+  });
+
+  // Produktionsfund: entryDate ist bei einer bereits laufenden Firma, die
+  // die App erst später einführt, oft nur das technische Anlagedatum der
+  // Mitgliedschaft — das echte, korrekt gepflegte startDate liegt davor und
+  // muss angezeigt werden, nicht das spätere entryDate (effectiveEntryDate,
+  // lib/export-helpers.ts).
+  it("zeigt startDate statt entryDate, wenn startDate gesetzt ist und davon abweicht", async () => {
+    setSession(adminId, ORG, "admin");
+    const migratedUser = await prisma.user.create({ data: { email: "team-route-entrydate-display@example.test", password: "irrelevant", firstName: "Display", lastName: "Person" } });
+    await prisma.membership.create({
+      data: { orgId: ORG, userId: migratedUser.id, role: "member", entryDate: new Date("2026-10-01"), startDate: new Date("2026-04-01") },
+    });
+    try {
+      const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+      const body = await res.json();
+      const m = body.members.find((x: any) => x.userId === migratedUser.id);
+      expect(m.entryDate.slice(0, 10)).toBe("2026-04-01"); // NICHT 2026-10-01
+    } finally {
+      await prisma.membership.deleteMany({ where: { orgId: ORG, userId: migratedUser.id } });
+      await prisma.user.delete({ where: { id: migratedUser.id } });
+    }
   });
 
   // Kernpunkt der Vereinfachung (kein separates Startdatum-Feld mehr):

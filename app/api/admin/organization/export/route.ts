@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import ExcelJS from "exceljs";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
 import { gatherOrgExport } from "@/lib/org-export";
-import { styleHeaderRow, styleDataRow } from "@/lib/export-helpers";
+import { styleHeaderRow, styleDataRow, effectiveEntryDate } from "@/lib/export-helpers";
 import { logError } from "@/lib/error-log";
 
 function fmtDate(d: Date | string | null): string {
@@ -37,7 +37,10 @@ function buildExcelWorkbook(data: Awaited<ReturnType<typeof gatherOrgExport>>): 
       email: m.user.email,
       role: m.role,
       status: m.status,
-      entry: fmtDate(m.entryDate),
+      // Wirksamer Wert (startDate, sofern gesetzt, sonst entryDate) — siehe
+      // lib/export-helpers.ts effectiveEntryDate. Konsistent mit Team-Hub,
+      // Verwaltung und Profil.
+      entry: fmtDate(effectiveEntryDate(m)),
       exit: fmtDate(m.exitDate),
     });
     styleDataRow(row, 6);

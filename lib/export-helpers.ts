@@ -32,6 +32,17 @@ export function buildProfil(membership: any): Profil {
   };
 }
 
+// Nach aussen gibt es nur EIN Datum ("Eintrittsdatum"): startDate, sofern
+// gesetzt, sonst entryDate — dieselbe Regel wie buildProfil() oben und
+// membershipActiveInPeriod() (lib/access.ts). Jede Anzeige nutzt diesen
+// Wert statt roh entryDate: bei einer Firma, die die App erst später
+// einführt, ist entryDate oft nur das technische Anlagedatum der
+// Mitgliedschaft (Produktionsfund: Team-Hub zeigte 18.08. statt des echten
+// Arbeitsbeginns 01.04.).
+export function effectiveEntryDate(m: { startDate: Date | null; entryDate: Date }): Date {
+  return m.startDate ?? m.entryDate;
+}
+
 export function mapChanges(changes: any[]): PensumChangeInput[] {
   return changes.map((c) => ({ effectiveFrom: c.effectiveFrom, pensum: c.pensum, wochenstunden: c.weeklyHours }));
 }

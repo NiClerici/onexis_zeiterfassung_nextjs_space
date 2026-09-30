@@ -11,6 +11,7 @@
 // braucht diese rein lesende Übersicht ohnehin nicht.)
 
 import { prisma } from "@/lib/db";
+import { effectiveEntryDate } from "@/lib/export-helpers";
 import { PLAN_LIMITS, type Plan } from "@/lib/billing-rules";
 import { WINDOW_MS as RATE_LIMIT_WINDOW_MS, MAX_ATTEMPTS as RATE_LIMIT_MAX_ATTEMPTS } from "@/lib/rate-limit";
 import { isSmtpConfigured } from "@/lib/mail";
@@ -332,7 +333,9 @@ export async function getOrgDetail(slug: string, now: Date = new Date()): Promis
       lastName: m.user.lastName,
       role: m.role,
       status: m.status,
-      entryDate: m.entryDate,
+      // Wirksamer Wert (startDate, sofern gesetzt, sonst entryDate) — siehe
+      // lib/export-helpers.ts effectiveEntryDate, konsistent mit Team-Hub.
+      entryDate: effectiveEntryDate(m),
       exitDate: m.exitDate,
       pensum: m.pensum,
       mustSetPassword: m.user.mustSetPassword,

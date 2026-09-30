@@ -722,7 +722,7 @@ export default function ProfilePage() {
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.pensum")}</label><input type="number" step="5" min="0" max="200" value={pensum} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPensum(clampNumInput(e?.target?.value ?? "", 0, 200))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div><label className="text-xs text-muted-foreground mb-1 block">{t("register.vacationDays")}</label><input type="number" step="0.5" min="0" max="100" value={vacationDays} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setVacationDays(clampNumInput(e?.target?.value ?? "", 0, 100))} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 transition" /></div>
           <div className="min-w-0">
-            <label className="text-xs text-muted-foreground mb-1 block">{t("register.startDate")}</label>
+            <label className="text-xs text-muted-foreground mb-1 block">{t("team.entryDate")}</label>
             <input type="date" value={startDate} disabled title={t("profile.startDateReadOnly")} className="w-full px-3 py-2 rounded-xl bg-secondary text-sm text-muted-foreground cursor-not-allowed" />
             <p className="text-[11px] text-muted-foreground mt-1">{t("profile.startDateReadOnly")}</p>
           </div>

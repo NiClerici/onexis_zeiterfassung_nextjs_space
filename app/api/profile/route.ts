@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { checkPasswordPolicy } from "@/lib/password-policy";
 import { requireOrg, AccessError } from "@/lib/access";
+import { effectiveEntryDate } from "@/lib/export-helpers";
 import { logError } from "@/lib/error-log";
 import { validateMembershipNumbers } from "@/lib/membership-validation";
 
@@ -37,13 +38,14 @@ export async function GET() {
       // ArG-Warnungen im Kalender (lib/compliance.ts ComplianceOptions).
       warnPauseZuKurz: (membership as any)?.org?.warnPauseZuKurz ?? true,
       warnSonntagsarbeit: (membership as any)?.org?.warnSonntagsarbeit ?? false,
-      // Nur lesend — Eintritts- UND Austrittsdatum werden ausschliesslich
-      // über /admin/team gesetzt (MIGRATION.md Punkt 4c), nicht von der
-      // Person selbst: startDate wirkt in sollStundenTag() (lib/calc.ts)
-      // spiegelbildlich zu exitDate und war deshalb dieselbe Lücke wie
-      // exitDate, bevor es hier aus dem PUT entfernt wurde (Audit-Fund HOCH,
-      // REVIEW_LOOP.md).
-      startDate: membership?.startDate?.toISOString?.() ?? null,
+      // Nur lesend — wird über den Team-Hub gesetzt (Übersicht oder
+      // Verwaltung), nicht von der Person selbst. Zeigt den wirksamen Wert
+      // (effectiveEntryDate: startDate, sofern gesetzt, sonst entryDate),
+      // damit dieses Feld dasselbe Datum zeigt wie Team-Hub und Verwaltung
+      // (Produktionsfund: hier stand vorher roh startDate, das bei nie
+      // korrigierten Mitgliedschaften leer blieb, während entryDate anderswo
+      // längst als Eintrittsdatum angezeigt wurde).
+      startDate: membership ? effectiveEntryDate(membership).toISOString() : null,
       exitDate: membership?.exitDate?.toISOString?.() ?? null,
       language: user?.language ?? "de",
       standardWeek: {

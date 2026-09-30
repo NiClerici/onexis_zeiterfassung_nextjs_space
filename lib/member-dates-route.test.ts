@@ -3,8 +3,10 @@
 // /api/admin/team). Berechtigung folgt derselben Regel wie der
 // Monatsabschluss: owner/admin für alle, manager nur für sich selbst und
 // direkt Unterstellte (assertCanManageMember, lib/access.ts). Bewusst kein
-// separates Startdatum mehr — buildProfil() (lib/export-helpers.test.ts)
-// fällt dafür auf entryDate zurück.
+// separates Startdatum-Eingabefeld mehr: jede Änderung schreibt entryDate
+// UND startDate auf denselben Wert (siehe Kommentar in der Route), damit
+// effectiveEntryDate() (lib/export-helpers.ts) überall dasselbe Datum
+// liefert.
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { prisma } from "@/lib/db";
@@ -135,10 +137,11 @@ describe("PUT /api/team/member-dates — Validierung", () => {
 // die die App erst später einführen, um Monate auseinander (entryDate =
 // rein technisches Anlage-Datum der Mitgliedschaft, startDate = echter,
 // separat gepflegter Arbeitsbeginn) — sichtbar u.a. in lib/team-route.test.ts
-// "Soll zählt erst ab dem Eintrittsdatum...". Diese Route synct startDate
-// deshalb NUR, wenn dort noch kein eigener Wert steht, damit ein bereits
-// korrekt gesetztes (historisches) startDate nie überschrieben wird.
-describe("PUT /api/team/member-dates — startDate-Synchronisierung", () => {
+// "Soll zählt erst ab dem Eintrittsdatum...". Diese Route schreibt deshalb
+// bei JEDER Änderung beide Spalten auf denselben Wert — auch wenn startDate
+// vorher schon einen (ggf. anderen) Wert hatte, damit die Karte im Team-Hub
+// nie wieder ein anderes Datum zeigt als das, was gerade gespeichert wurde.
+describe("PUT /api/team/member-dates — entryDate und startDate bleiben synchron", () => {
   let freshId: string;
 
   beforeAll(async () => {
@@ -159,18 +162,19 @@ describe("PUT /api/team/member-dates — startDate-Synchronisierung", () => {
     const res = await memberDatesPut(jsonReq({ userId: freshId, entryDate: "2026-05-01" }));
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.entryDate.slice(0, 10)).toBe("2026-05-01");
     expect(body.startDate?.slice(0, 10)).toBe("2026-05-01");
     const after = await prisma.membership.findUnique({ where: { orgId_userId: { orgId: ORG, userId: freshId } } });
     expect(after?.startDate?.toISOString().slice(0, 10)).toBe("2026-05-01");
   });
 
-  it("startDate ist bereits gesetzt: eine spätere entryDate-Korrektur lässt es unangetastet", async () => {
+  it("startDate hatte bereits einen anderen Wert: eine Korrektur überschreibt ihn trotzdem — beide bleiben gleich", async () => {
     setSession(adminId, ORG, "admin");
     // freshId hat aus dem vorigen Test bereits startDate=2026-05-01.
     const res = await memberDatesPut(jsonReq({ userId: freshId, entryDate: "2026-09-01" }));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.entryDate.slice(0, 10)).toBe("2026-09-01");
-    expect(body.startDate?.slice(0, 10)).toBe("2026-05-01"); // unverändert
+    expect(body.startDate?.slice(0, 10)).toBe("2026-09-01"); // mitgezogen, nicht mehr 2026-05-01
   });
 });

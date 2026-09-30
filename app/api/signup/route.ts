@@ -56,16 +56,22 @@ export async function POST(req: Request) {
           language: "de",
         },
       });
+      // entryDate = startDate: nach aussen gibt es nur EIN Datum
+      // (lib/export-helpers.ts effectiveEntryDate). Bleibt das Startdatum-
+      // Feld im Formular leer, erhalten beide denselben Wert (heute) statt
+      // wie zuvor entryDate=heute/startDate=null — genau dieses Auseinander-
+      // laufen war der Produktionsfund im Team-Hub.
+      const joinDate = startDate ? new Date(startDate) : new Date();
       await tx.membership.create({
         data: {
           orgId: org.id,
           userId: user.id,
           role: "owner",
-          entryDate: startDate ? new Date(startDate) : new Date(),
+          entryDate: joinDate,
           weeklyHours: weeklyHours ?? 42,
           pensum: pensum ?? 100,
           vacationDays: vacationDays ?? 25,
-          startDate: startDate ? new Date(startDate) : null,
+          startDate: joinDate,
         },
       });
       return { user };

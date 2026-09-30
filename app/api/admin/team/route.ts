@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, AccessError } from "@/lib/access";
+import { effectiveEntryDate } from "@/lib/export-helpers";
 import { logError } from "@/lib/error-log";
 import { parseDateYMD } from "@/lib/dates";
 import { validateMembershipNumbers } from "@/lib/membership-validation";
@@ -34,7 +35,12 @@ export async function GET() {
         role: m.role,
         status: m.status,
         managerId: m.managerId,
-        entryDate: m.entryDate,
+        // Nach aussen nur EIN Datum: startDate, sofern gesetzt, sonst
+        // entryDate (lib/export-helpers.ts effectiveEntryDate) — dieselbe
+        // Regel, die die Team-Hub-Karte und die Sollstunden-Berechnung
+        // schon verwenden. Sonst zeigte die Verwaltung ein anderes Datum
+        // als Team-Hub/Profil (Produktionsfund).
+        entryDate: effectiveEntryDate(m),
         exitDate: m.exitDate,
         weeklyHours: m.weeklyHours,
         pensum: m.pensum,
@@ -111,10 +117,17 @@ export async function PUT(req: Request) {
     // wurde daraus ein 500er statt eines 400ers auf einen Eingabefehler
     // (dasselbe Muster wie bei PUT /api/profile, Audit-Fund HOCH,
     // REVIEW_LOOP.md). parseDateYMD validiert zusätzlich den Kalendertag.
+    // entryDate und startDate zeigen nach aussen als ein einziges Datum
+    // (effectiveEntryDate) — deshalb schreibt jede Änderung des einen Feldes
+    // automatisch auch das andere, damit sie nie mehr auseinanderlaufen
+    // (Produktionsfund: rein technisches entryDate wich monatelang vom
+    // echten, separat gepflegten startDate ab). Kommt ausnahmsweise beides
+    // im selben Aufruf, gewinnt der jeweils explizit übergebene Wert.
     if (entryDate !== undefined) {
       const parsed = parseDateYMD(entryDate);
       if (!parsed) return NextResponse.json({ error: "Ungültiges Eintrittsdatum" }, { status: 400 });
       updateData.entryDate = parsed;
+      if (startDate === undefined) updateData.startDate = parsed;
     }
     if (exitDate !== undefined) {
       if (exitDate === null || exitDate === "") {
@@ -132,6 +145,7 @@ export async function PUT(req: Request) {
         const parsed = parseDateYMD(startDate);
         if (!parsed) return NextResponse.json({ error: "Ungültiges Startdatum" }, { status: 400 });
         updateData.startDate = parsed;
+        if (entryDate === undefined) updateData.entryDate = parsed;
       }
     }
 

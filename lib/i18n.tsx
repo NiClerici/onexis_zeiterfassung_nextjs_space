@@ -290,7 +290,7 @@ const translations: Record<string, string> = {
   "profile.title": "Profil",
   "profile.personalInfo": "Persönliche Daten",
   "profile.workSettings": "Arbeitseinstellungen",
-  "profile.startDateReadOnly": "Wird automatisch aus deinem Eintrittsdatum abgeleitet, sofern hier kein eigener Wert gesetzt ist",
+  "profile.startDateReadOnly": "Nur von deiner vorgesetzten Person oder Admin im Team-Hub änderbar",
   "profile.kuerzel": "Kürzel",
   "profile.kuerzelPlaceholder": "z.B. CLN",
   "profile.security": "Sicherheit",

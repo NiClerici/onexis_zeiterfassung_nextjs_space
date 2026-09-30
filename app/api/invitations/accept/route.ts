@@ -76,13 +76,19 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: true, accountExists: true });
       }
 
+      // startDate = entryDate beim Anlegen: nach aussen gibt es nur EIN
+      // Datum (lib/export-helpers.ts effectiveEntryDate) — ohne diesen
+      // gleichen Startwert würde eine spätere Korrektur des einen Feldes
+      // sofort wieder von den beiden Spalten abweichen (Produktionsfund).
+      const joinedAt = new Date();
       await prisma.$transaction([
         prisma.membership.create({
           data: {
             orgId: invitation.orgId,
             userId: existingUser.id,
             role: invitation.role,
-            entryDate: new Date(),
+            entryDate: joinedAt,
+            startDate: joinedAt,
           },
         }),
         prisma.invitation.update({ where: { id: invitation.id }, data: { usedAt: new Date() } }),
@@ -111,8 +117,9 @@ export async function POST(req: Request) {
           language: "de",
         },
       });
+      const joinedAt = new Date();
       await tx.membership.create({
-        data: { orgId: invitation.orgId, userId: user.id, role: invitation.role, entryDate: new Date() },
+        data: { orgId: invitation.orgId, userId: user.id, role: invitation.role, entryDate: joinedAt, startDate: joinedAt },
       });
       await tx.invitation.update({ where: { id: invitation.id }, data: { usedAt: new Date() } });
     });

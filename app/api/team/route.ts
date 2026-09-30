@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireOrg, requireRole, listVisibleUserIds, membershipActiveInPeriod, AccessError } from "@/lib/access";
 import { teamKennzahlen, feriensaldo, pensumAt, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { kumulierterSaldo, saldoSerie, type KumulierterSaldoResult, type SaldoSeriePunkt } from "@/lib/saldo";
-import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
+import { buildProfil, effectiveEntryDate, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
 import { monthsInRange, sumCustomerHoursByUser, customerHoursByUserAndCustomer, projectHoursByUserAndProject } from "@/lib/customer-months";
 import { logError } from "@/lib/error-log";
 
@@ -213,7 +213,7 @@ export async function GET(req: Request) {
       const fs = feriensaldo({ jahr: startDate.getUTCFullYear(), heute, profil, changes, holidays, eintraege: mapEintraege(ferienRaw) });
       feriensaldoByUser[m.userId] = fs;
       pensumByUser[m.userId] = pensumAt(endDate, profil, changes).pensum;
-      entryDateByUser[m.userId] = m.entryDate.toISOString();
+      entryDateByUser[m.userId] = effectiveEntryDate(m).toISOString();
 
       // Kumulierter Saldo seit Eintritt — Zeitkonto-Gesamtstand, unabhängig
       // vom gewählten Zeitraum (siehe lib/saldo.ts, bisher nur in Analytics
