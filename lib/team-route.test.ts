@@ -353,6 +353,45 @@ describe("GET /api/team — Zeitverteilung (Kunden/Intern/Absenzen) und Kunden a
 // Team-Hub: kumulierter Saldo seit Eintritt (lib/saldo.ts) und Monatsabschluss
 // je Person, bisher nur in Analytics (eigene Person) bzw. /admin/team
 // (Admin-only, ohne Zahlen) verfügbar.
+describe("GET /api/team — Eintrittsdatum je Person", () => {
+  it("liefert entryDate roh mit, editierbar über /api/team/member-dates", async () => {
+    setSession(adminId, ORG, "admin");
+    const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+    const body = await res.json();
+    const reportMember = body.members.find((m: any) => m.userId === reportId);
+    expect(reportMember.entryDate.slice(0, 10)).toBe("2026-01-01");
+  });
+
+  // Kernpunkt der Vereinfachung (kein separates Startdatum-Feld mehr):
+  // eine Person mit entryDate MITTEN im abgefragten Monat bekommt ihr Soll
+  // erst ab diesem Tag, nicht rückwirkend ab dem 1. — buildProfil()
+  // (lib/export-helpers.ts) lässt startDate auf entryDate zurückfallen.
+  it("Soll zählt erst ab dem Eintrittsdatum, nicht ab Periodenbeginn (ohne separates Startdatum)", async () => {
+    setSession(adminId, ORG, "admin");
+    // Eigene, unabhängige Fixtur: tritt am 20.08.2026 ein, kein startDate.
+    // August statt eines Zukunftsmonats, weil kennzahlen() soll ohnehin bei
+    // "heute" kappt — ein Monat komplett in der Zukunft läge sonst gänzlich
+    // ausserhalb von bisHeute und ergäbe soll=0, unabhängig vom Eintritt.
+    const lateUser = await prisma.user.create({ data: { email: "team-route-late-entry@example.test", password: "irrelevant", firstName: "Late", lastName: "Entry" } });
+    await prisma.membership.create({
+      data: { orgId: ORG, userId: lateUser.id, role: "member", entryDate: new Date("2026-08-20"), weeklyHours: 40, pensum: 100 },
+    });
+    try {
+      const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const m = body.members.find((x: any) => x.userId === lateUser.id);
+      expect(m).toBeTruthy();
+      // August 2026: 20.–31.8. enthält 8 Werktage (Do 20. bis Mo 31.) à 8h =
+      // 64h — NICHT das volle Monatssoll ab dem 1.
+      expect(m.soll).toBe(64);
+    } finally {
+      await prisma.membership.deleteMany({ where: { orgId: ORG, userId: lateUser.id } });
+      await prisma.user.delete({ where: { id: lateUser.id } });
+    }
+  });
+});
+
 describe("GET /api/team — Saldo kumuliert und Monatsabschluss", () => {
   it("members[].saldoKumuliert ist seit dem Eintrittsdatum gerechnet, nicht seit Periodenbeginn", async () => {
     setSession(adminId, ORG, "admin");

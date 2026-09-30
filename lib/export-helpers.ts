@@ -14,11 +14,18 @@ import type { Profil, PensumChangeInput, EintragMitDatum } from "@/lib/calc";
 // aktuelle Wert. membership.pensum/weeklyHours werden von /api/pensum-changes
 // bei jeder Änderung auf den neuesten Stand überschrieben; die Basis liegt in
 // basePensum/baseWeeklyHours. Gleiches Muster wie in bulk-vacation/route.ts.
+//
+// startDate fällt auf entryDate zurück, wenn kein eigenes Startdatum gesetzt
+// ist (der Normalfall — dafür gibt es keine eigene Eingabemaske mehr, siehe
+// app/api/team/member-dates/route.ts). Ohne diesen Fallback hätte
+// sollStundenTag() (lib/calc.ts) keine Untergrenze: eine Person mit
+// entryDate mitten im Monat bekäme für den GANZEN Monat ein Soll, nicht erst
+// ab ihrem Eintritt — sichtbar als falscher Minussaldo im ersten (Teil-)Monat.
 export function buildProfil(membership: any): Profil {
   return {
     pensum: membership?.basePensum ?? membership?.pensum ?? 100,
     wochenstunden: membership?.baseWeeklyHours ?? membership?.weeklyHours ?? 42,
-    startDate: membership?.startDate ?? null,
+    startDate: membership?.startDate ?? membership?.entryDate ?? null,
     exitDate: membership?.exitDate ?? null,
     ferientage: membership?.vacationDays ?? 25,
     maxWeeklyHours: membership?.org?.maxWeeklyHours ?? 45,

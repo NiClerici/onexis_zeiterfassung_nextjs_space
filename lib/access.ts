@@ -109,6 +109,18 @@ export async function canSeeUser(ctx: OrgContext, targetUserId: string): Promise
   return false;
 }
 
+// owner/admin dürfen jedes Mitglied verwalten (Monatsabschluss, Eintritts-/
+// Start-/Austrittsdatum), manager nur sich selbst und ihre direkt
+// unterstellten Personen (canSeeUser) — nie ein beliebiges Mitglied der
+// Organisation. Gemeinsame Prüfung für alle "manager darf das für sein Team
+// tun"-Aktionen im Team-Hub (app/api/month-locks/route.ts,
+// app/api/team/member-dates/route.ts), damit diese Regel nicht mehrfach
+// leicht unterschiedlich implementiert wird.
+export async function assertCanManageMember(ctx: OrgContext, targetUserId: string): Promise<void> {
+  if (ctx.role === "admin" || ctx.role === "owner") return;
+  if (!(await canSeeUser(ctx, targetUserId))) throw new AccessError(403, "Forbidden");
+}
+
 // Liste statt Einzelprüfung derselben Sichtbarkeits-Hierarchie wie
 // canSeeUser() — gebraucht von Routen, die eine ganze Team-Übersicht bauen
 // (/api/team, /api/export?scope=org, /api/absence-requests?scope=team,

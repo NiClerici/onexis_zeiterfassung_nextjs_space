@@ -21,12 +21,14 @@ export function OverviewTab({
   onExportMember,
   exportingUserId,
   onOpenAdmin,
+  onDatesSaved,
 }: {
   data: TeamData;
   isAdmin: boolean;
   onExportMember: (userId: string) => void;
   exportingUserId: string | null;
   onOpenAdmin?: (userId: string) => void;
+  onDatesSaved?: () => void;
 }) {
   const { t } = useI18n();
   const [filterText, setFilterText] = useState("");
@@ -123,6 +125,7 @@ export function OverviewTab({
                 onExport={() => onExportMember(m.userId)}
                 exporting={exportingUserId === m.userId}
                 onOpenAdmin={onOpenAdmin ? () => onOpenAdmin(m.userId) : undefined}
+                onDatesSaved={onDatesSaved}
               />
             ))}
           </div>
