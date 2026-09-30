@@ -161,6 +161,38 @@ describe("GET /api/export/payroll — Lohnexport CSV (immer org-weit, admin/owne
   });
 });
 
+// Produktions-Bugfund (Team-Hub): entryDate ist bei einer bereits laufenden
+// Firma, die die App erst später einführt, oft nur das technische
+// Anlage-Datum der Mitgliedschaft — der echte, frühere Arbeitsbeginn steht
+// separat in startDate. membershipActiveInPeriod() (lib/access.ts) lässt
+// startDate gewinnen, wenn gesetzt; vorher filterte der Lohnexport nur nach
+// entryDate und liess die Person für frühere Monate komplett fehlen.
+describe("GET /api/export/payroll — startDate vor entryDate (Migrations-Fall)", () => {
+  let localAdminId: string, migratedId: string;
+
+  beforeAll(async () => {
+    localAdminId = (await prisma.user.create({ data: { email: "export-payroll-admin@example.test", password: "irrelevant", firstName: "P", lastName: "Admin" } })).id;
+    migratedId = (await prisma.user.create({ data: { email: "export-payroll-migrated@example.test", password: "irrelevant", firstName: "M", lastName: "Igrated" } })).id;
+    await prisma.membership.create({ data: { orgId: ORG, userId: localAdminId, role: "admin", entryDate: new Date("2026-01-01") } });
+    await prisma.membership.create({
+      data: { orgId: ORG, userId: migratedId, role: "member", entryDate: new Date("2026-10-01"), startDate: new Date("2026-04-01") },
+    });
+  });
+
+  afterAll(async () => {
+    await prisma.membership.deleteMany({ where: { orgId: ORG, userId: { in: [localAdminId, migratedId] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [localAdminId, migratedId] } } });
+  });
+
+  it("erscheint im Lohnexport für Mai (vor entryDate, aber nach startDate)", async () => {
+    setSession(localAdminId, ORG, "admin");
+    const res = await payrollGet(req("/api/export/payroll?year=2026&month=5"));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text.includes(migratedId)).toBe(true);
+  });
+});
+
 // HARDENING.md B2 — Fehlerpfade der Export-Routen. Der Coverage-Bericht aus
 // B1 zeigte für /api/export 92.63% Statements bei nur 53.57% Branches: der
 // Happy Path lief, die Eingabevalidierung nicht. Dabei kam heraus, dass

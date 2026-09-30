@@ -15,10 +15,16 @@ import { logError } from "@/lib/error-log";
 // und nie Rolle/Status/Pensum/Austritt, die bleiben admin/owner-only in
 // PUT /api/admin/team.
 //
-// Bewusst kein separates Startdatum mehr: buildProfil() (lib/export-
-// helpers.ts, app/api/analytics/route.ts) fällt auf entryDate zurück, wenn
-// kein eigenes Startdatum gesetzt ist — das Eintrittsdatum steuert die
-// Sollstunden-Berechnung also bereits direkt, ohne ein zweites Feld.
+// Bewusst kein separates Startdatum-Eingabefeld mehr: buildProfil()
+// (lib/export-helpers.ts, app/api/analytics/route.ts) UND die Sichtbarkeits-
+// Filter (lib/access.ts membershipActiveInPeriod) fallen auf entryDate
+// zurück, wenn kein eigenes Startdatum gesetzt ist. Damit die beiden Felder
+// nicht wieder auseinanderlaufen (Audit-Fund: bei einer schon laufenden
+// Firma, die die App erst später einführt, wich das rein technische
+// entryDate monatelang vom echten, separat gepflegten startDate ab — siehe
+// membershipActiveInPeriod-Kommentar), schreibt diese Route startDate NUR
+// dann mit, wenn dort noch kein eigener Wert steht. Ein bereits gesetztes
+// startDate (typischerweise historisch korrigiert) bleibt unangetastet.
 export async function PUT(req: Request) {
   try {
     const ctx = await requireOrg();
@@ -38,9 +44,12 @@ export async function PUT(req: Request) {
     const parsed = parseDateYMD(body?.entryDate);
     if (!parsed) return NextResponse.json({ error: "Ungültiges Eintrittsdatum" }, { status: 400 });
 
-    const updated = await prisma.membership.update({ where: { id: target.id }, data: { entryDate: parsed } });
+    const updated = await prisma.membership.update({
+      where: { id: target.id },
+      data: { entryDate: parsed, ...(target.startDate === null ? { startDate: parsed } : {}) },
+    });
 
-    return NextResponse.json({ success: true, entryDate: updated.entryDate.toISOString() });
+    return NextResponse.json({ success: true, entryDate: updated.entryDate.toISOString(), startDate: updated.startDate?.toISOString() ?? null });
   } catch (error: any) {
     if (error instanceof AccessError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error("PUT team/member-dates error:", error);

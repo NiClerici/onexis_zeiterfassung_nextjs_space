@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireOrg, requireRole, listVisibleUserIds, AccessError } from "@/lib/access";
+import { requireOrg, requireRole, listVisibleUserIds, membershipActiveInPeriod, AccessError } from "@/lib/access";
 import { teamKennzahlen, feriensaldo, pensumAt, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { kumulierterSaldo, saldoSerie, type KumulierterSaldoResult, type SaldoSeriePunkt } from "@/lib/saldo";
 import { buildProfil, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
@@ -39,11 +39,15 @@ export async function GET(req: Request) {
 
     // Nur Mitgliedschaften, die im gewählten Zeitraum mindestens einen Tag
     // aktiv waren — dieselbe Logik wie im Lohnexport (Punkt 7), damit ein
-    // während des Zeitraums ausgetretenes Mitglied nicht fehlt.
+    // während des Zeitraums ausgetretenes Mitglied nicht fehlt. Untere
+    // Grenze ist startDate, sofern gesetzt, sonst entryDate (lib/access.ts
+    // membershipActiveInPeriod) — sonst fällt eine Person mit korrektem,
+    // aber vor ihrem (rein technischen) entryDate liegendem startDate für
+    // frühere Perioden fälschlich aus der Liste.
     const memberships = await prisma.membership.findMany({
       where: {
         orgId,
-        AND: [{ entryDate: { lte: endDate }, OR: [{ exitDate: null }, { exitDate: { gte: startDate } }] }, visibilityFilter],
+        AND: [membershipActiveInPeriod(startDate, endDate), visibilityFilter],
       },
       include: { org: true, user: { select: { firstName: true, lastName: true, email: true } } },
       orderBy: [{ user: { lastName: "asc" } }, { user: { firstName: "asc" } }],

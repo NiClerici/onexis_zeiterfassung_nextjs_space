@@ -390,6 +390,33 @@ describe("GET /api/team — Eintrittsdatum je Person", () => {
       await prisma.user.delete({ where: { id: lateUser.id } });
     }
   });
+
+  // Produktions-Bugfund: eine bereits laufende Firma führt die App erst
+  // später ein — die Mitgliedschaft wird dabei technisch erst z.B. im
+  // Oktober angelegt (entryDate), während startDate separat korrekt auf den
+  // echten, früheren Arbeitsbeginn gesetzt ist. Die Sichtbarkeits-Filterung
+  // prüfte bisher NUR entryDate und blendete die Person für frühere Perioden
+  // komplett aus — obwohl ihr Soll über startDate längst korrekt berechnet
+  // würde. membershipActiveInPeriod() (lib/access.ts) behebt das.
+  it("eine Person mit startDate VOR ihrem (rein technischen) entryDate erscheint trotzdem in früheren Perioden", async () => {
+    setSession(adminId, ORG, "admin");
+    const migratedUser = await prisma.user.create({ data: { email: "team-route-migrated@example.test", password: "irrelevant", firstName: "Migrated", lastName: "Person" } });
+    await prisma.membership.create({
+      data: { orgId: ORG, userId: migratedUser.id, role: "member", entryDate: new Date("2026-10-01"), startDate: new Date("2026-04-01"), weeklyHours: 40, pensum: 100 },
+    });
+    try {
+      // August 2026 liegt vor entryDate (Oktober), aber nach startDate (April).
+      const res = await teamGet(req(`/api/team?${MONTH_QS}`));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const m = body.members.find((x: any) => x.userId === migratedUser.id);
+      expect(m).toBeTruthy(); // vorher: fehlte komplett in der Liste
+      expect(m.soll).toBeGreaterThan(0); // volles August-Soll, startDate liegt davor
+    } finally {
+      await prisma.membership.deleteMany({ where: { orgId: ORG, userId: migratedUser.id } });
+      await prisma.user.delete({ where: { id: migratedUser.id } });
+    }
+  });
 });
 
 describe("GET /api/team — Saldo kumuliert und Monatsabschluss", () => {

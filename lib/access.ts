@@ -109,6 +109,25 @@ export async function canSeeUser(ctx: OrgContext, targetUserId: string): Promise
   return false;
 }
 
+// War die Mitgliedschaft irgendwann in [from, to] aktiv? Dieselbe COALESCE-
+// Regel wie buildProfil() (lib/export-helpers.ts): startDate gewinnt, wenn
+// gesetzt, sonst zählt entryDate als unterer Rand. Vorher wurde hier nur
+// entryDate geprüft — für eine Person, deren startDate (korrekt, echter
+// Arbeitsbeginn) VOR ihrem entryDate liegt (rein technisches Datum, an dem
+// die Mitgliedschaft im System angelegt wurde, z.B. bei einer Migration
+// einer bereits laufenden Firma), fiel sie dadurch für Perioden vor ihrem
+// entryDate still aus Team-Auswertungen (app/api/team/route.ts) und dem
+// Lohnexport (app/api/export/payroll/route.ts), obwohl ihr Soll für genau
+// diese Tage über startDate längst korrekt berechnet wurde.
+export function membershipActiveInPeriod(from: Date, to: Date) {
+  return {
+    AND: [
+      { OR: [{ startDate: { lte: to } }, { AND: [{ startDate: null }, { entryDate: { lte: to } }] }] },
+      { OR: [{ exitDate: null }, { exitDate: { gte: from } }] },
+    ],
+  };
+}
+
 // owner/admin dürfen jedes Mitglied verwalten (Monatsabschluss, Eintritts-/
 // Start-/Austrittsdatum), manager nur sich selbst und ihre direkt
 // unterstellten Personen (canSeeUser) — nie ein beliebiges Mitglied der

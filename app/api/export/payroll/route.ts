@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireOrg, requireRole, AccessError } from "@/lib/access";
+import { requireOrg, requireRole, membershipActiveInPeriod, AccessError } from "@/lib/access";
 import { kennzahlen, sollStundenTag, stundenAusEintrag, pensumAt, type HolidayInput } from "@/lib/calc";
 import { buildProfil, mapChanges, mapEintraege, parseYearMonthFromUrl } from "@/lib/export-helpers";
 import { logError } from "@/lib/error-log";
@@ -48,12 +48,13 @@ export async function GET(req: Request) {
     // waren (Ein-/Austritt mitten im Monat zählt anteilig, dieselbe Logik
     // wie sollStundenTag via profil.startDate/exitDate) — nicht nur
     // status: "aktiv" heute, sonst fehlt ein während des Monats ausgetretenes
-    // Mitglied im Lohnexport für genau den Monat seines Austritts.
+    // Mitglied im Lohnexport für genau den Monat seines Austritts. Untere
+    // Grenze ist startDate, sofern gesetzt, sonst entryDate (lib/access.ts
+    // membershipActiveInPeriod) — siehe dortiger Kommentar.
     const memberships = await prisma.membership.findMany({
       where: {
         orgId,
-        entryDate: { lte: endDate },
-        OR: [{ exitDate: null }, { exitDate: { gte: startDate } }],
+        ...membershipActiveInPeriod(startDate, endDate),
       },
       include: { org: true, user: { select: { firstName: true, lastName: true, email: true } } },
       orderBy: [{ user: { lastName: "asc" } }, { user: { firstName: "asc" } }],
