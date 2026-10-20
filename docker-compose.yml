@@ -79,6 +79,9 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN muss in .env gesetzt sein, z.B. zeit.deine-firma.ch}
+      # Zweite Site hinter demselben Caddy: Frappe CRM, das als eigenes
+      # Compose-Projekt läuft (~/crm auf der VM, deploy/README.md Abschnitt 8).
+      CRM_DOMAIN: ${CRM_DOMAIN:?CRM_DOMAIN muss in .env gesetzt sein, z.B. crm.deine-firma.ch}
     ports:
       - "80:80"
       - "443:443"
@@ -88,8 +91,23 @@ services:
       - caddy_config:/config
     depends_on:
       - app
+    # "default" muss hier ausdrücklich mit aufgeführt werden: sobald
+    # "networks:" gesetzt ist, hängt Compose den Service nicht mehr
+    # automatisch ans Projekt-Netz, und Caddy würde "app" nicht mehr erreichen.
+    networks:
+      - default
+      - proxy
 
 volumes:
   db_data:
   caddy_data:
   caddy_config:
+
+networks:
+  # Gemeinsames Netz mit dem Frappe-CRM-Projekt, damit Caddy "crm-frontend"
+  # erreicht. Gehört keinem der beiden Compose-Projekte, deshalb "external":
+  # einmalig per "docker network create proxy" anlegen (deploy/README.md
+  # Abschnitt 8) — ohne das bricht "docker compose up" mit "network proxy
+  # declared as external, but could not be found" ab.
+  proxy:
+    external: true

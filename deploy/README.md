@@ -52,12 +52,16 @@ cd zeiterfassung
 
 # .env aus der Vorlage erstellen und ausfüllen
 cp .env.example .env
-nano .env   # POSTGRES_PASSWORD, NEXTAUTH_SECRET, NEXTAUTH_URL, DOMAIN, SMTP_*
+nano .env   # POSTGRES_PASSWORD, NEXTAUTH_SECRET, NEXTAUTH_URL, DOMAIN, CRM_DOMAIN, SMTP_*
 
 # Zusätzlich für die Backups (nicht in .env.example, da nur fürs Backup-
 # Skript gebraucht — S3_ENDPOINT und S3_BUCKET ans Ende von .env anhängen):
 echo 'S3_ENDPOINT="https://objects.rma.cloudscale.ch"' >> .env
 echo 'S3_BUCKET="zeiterfassung-backups"' >> .env
+
+# Gemeinsames Docker-Netz mit dem Frappe CRM (Abschnitt 8) — einmalig, muss
+# vor dem ersten "up" existieren, auch wenn das CRM erst später installiert wird:
+docker network create proxy
 
 # Container bauen und starten
 docker compose up -d --build
@@ -174,3 +178,62 @@ sonst.
 - **App startet, aber `/api/health` liefert 503**: Datenbankverbindung
   prüfen, `docker compose exec app node -e "process.exit(0)"` als
   minimaler Container-Lebendigkeitstest, danach `docker compose logs app`.
+
+## 8. Frappe CRM auf derselben VM
+
+Das CRM läuft als **eigenes Compose-Projekt** `crm` in `~/crm` (nicht in
+diesem Repo) und teilt sich mit der Zeiterfassung nur Caddy. Caddy nimmt
+Port 80/443 an und leitet `CRM_DOMAIN` über das Docker-Netz `proxy` an den
+nginx des CRM weiter (`crm-frontend:8080`, Alias aus `~/crm/compose.proxy-net.yaml`).
+Das CRM veröffentlicht selbst keine Ports.
+
+```
+Internet ─▶ caddy ─┬─ DOMAIN      ─▶ app:3000
+                   └─ CRM_DOMAIN  ─▶ crm-frontend:8080  (Projekt crm, Netz "proxy")
+```
+
+**Voraussetzungen vor `deploy/deploy.sh`:** `CRM_DOMAIN` in `.env` setzen,
+DNS-A-Record dafür auf die VM-IP, Netz `proxy` existiert. Fehlt etwas davon,
+bricht `docker compose up` ab — und weil `deploy.sh` vorher schon `git pull`
+gemacht hat, meldet ein zweiter Lauf "Bereits aktuell" und baut nichts. Dann
+Ursache beheben und `docker compose up -d --build` direkt ausführen.
+
+**Installation (einmalig), Kurzfassung:**
+
+```bash
+mkdir -p ~/crm && cd ~/crm
+git clone --depth 1 https://github.com/frappe/frappe_docker
+
+# Eigenes Image bauen. Das fertige ghcr.io/frappe/crm:stable (Stand
+# 15.10.2026) enthält die App "crm" NICHT, nur "frappe": frappe_docker liest
+# die App-Liste inzwischen als BuildKit-Secret, nicht mehr als Build-Argument.
+echo '[{"url": "https://github.com/frappe/crm", "branch": "v1.88.0"}]' > apps.json
+cd frappe_docker
+DOCKER_BUILDKIT=1 docker build --build-arg FRAPPE_BRANCH=version-15 \
+  --secret id=apps_json,src=$HOME/crm/apps.json \
+  -f images/layered/Containerfile -t crm-local:v1.88.0 .
+docker run --rm --entrypoint ls crm-local:v1.88.0 apps   # → crm, frappe
+```
+
+Danach in `~/crm/.env` `CUSTOM_IMAGE=crm-local`, `CUSTOM_TAG=v1.88.0`,
+`PULL_POLICY=never`, `DB_PASSWORD=<zufällig>` setzen, die Compose-Dateien
+`frappe_docker/compose.yaml` + `overrides/compose.mariadb.yaml` +
+`overrides/compose.redis.yaml` + `compose.proxy-net.yaml` mit
+`docker compose config > docker-compose.yml` zusammenführen, mit
+`docker compose up -d` starten und die Site anlegen:
+
+```bash
+docker compose exec backend bench new-site <CRM_DOMAIN> \
+  --mariadb-user-host-login-scope='%' --db-root-password "$DB_PASSWORD" \
+  --admin-password '<passwort>' --install-app crm
+docker compose exec backend bench --site <CRM_DOMAIN> set-config host_name https://<CRM_DOMAIN>
+docker compose exec backend bench --site <CRM_DOMAIN> enable-scheduler
+```
+
+**Prüfen:** `/crm` liefert für nicht angemeldete Besucher bewusst `403` (Frappe
+leitet im Browser per JavaScript auf `/login` weiter). Als Healthcheck taugen
+`/api/method/ping` und `/login` (beide `200`).
+
+**Update:** neue Version in `apps.json` eintragen, mit neuem Tag bauen,
+`CUSTOM_TAG` ändern, Compose neu erzeugen, `up -d`, dann
+`bench --site <CRM_DOMAIN> migrate`. Vorher ein Backup ziehen.

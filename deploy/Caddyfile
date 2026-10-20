@@ -4,6 +4,11 @@
 # Die Sicherheits-Header (CSP, HSTS, X-Frame-Options, ...) setzt bereits
 # die App selbst (next.config.js, MIGRATION.md Punkt 10) — hier deshalb
 # bewusst nicht dupliziert.
+#
+# Zweite Site: Frappe CRM ({$CRM_DOMAIN}), ein eigenes Compose-Projekt auf
+# derselben VM (deploy/README.md Abschnitt 8). Caddy erreicht dessen nginx
+# über das gemeinsame Docker-Netz "proxy" unter dem Alias "crm-frontend".
+# Eigenes Access-Log, damit sich die beiden Anwendungen nicht vermischen.
 
 {$DOMAIN} {
 	reverse_proxy app:3000
@@ -12,6 +17,19 @@
 
 	log {
 		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}
+
+{$CRM_DOMAIN} {
+	reverse_proxy crm-frontend:8080
+
+	encode gzip
+
+	log {
+		output file /data/access-crm.log {
 			roll_size 10mb
 			roll_keep 5
 		}
