@@ -128,6 +128,14 @@ const translations: Record<string, string> = {
   "calendar.entryDeleted": "Eintrag gelöscht",
   "calendar.entryError": "Fehler beim Speichern des Eintrags",
   "calendar.saveDay": "Tag speichern",
+  "calendar.editEntry": "Eintrag bearbeiten",
+  "calendar.back": "Zurück",
+  "calendar.done": "Fertig",
+  "calendar.dayTotal": "Total {hours} h / Soll {soll} h",
+  "calendar.newBadge": "Neu",
+  "calendar.selectEntryHint": "Eintrag links wählen oder neuen Eintrag hinzufügen.",
+  "calendar.hoursDirectShort": "{hours} h direkt",
+  "calendar.notCountedShort": "Zählt noch nicht zur Arbeitszeit",
   "calendar.daySaved": "Tag gespeichert",
   "calendar.dayShiftClamped": "Eine Folgezeit wurde auf 23:59 begrenzt.",
   "calendar.unsavedWarning": "Es gibt ungespeicherte Änderungen an diesem Tag. Trotzdem schliessen?",
@@ -573,6 +581,7 @@ const translations: Record<string, string> = {
   "legal.warnSonntagsarbeitHint": "Warnt bei jeder Sonntagsarbeit (Art. 18 ArG) — sinnvoll ohne generelle Bewilligung, sonst meist Rauschen.",
   // Common
   "common.loading": "Laden...",
+  "common.close": "Schliessen",
   "common.error": "Ein Fehler ist aufgetreten",
   "common.success": "Erfolgreich",
 };
