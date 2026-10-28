@@ -82,10 +82,6 @@ export function OverviewTab({
         </div>
       </motion.div>
 
-      {data.kundenstundenUnscharf && (
-        <div className="text-xs text-muted-foreground bg-secondary/60 rounded-xl px-3 py-2">{t("team.approxHint")}</div>
-      )}
-
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="bg-card rounded-2xl p-4" style={{ boxShadow: "var(--shadow-sm)" }}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="flex gap-1.5 flex-wrap">

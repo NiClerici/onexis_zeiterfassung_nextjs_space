@@ -6,7 +6,7 @@ import { requireOrg, requireRole, listVisibleUserIds, membershipActiveInPeriod, 
 import { teamKennzahlen, feriensaldo, pensumAt, type HolidayInput, type TeamMemberInput } from "@/lib/calc";
 import { kumulierterSaldo, saldoSerie, type KumulierterSaldoResult, type SaldoSeriePunkt } from "@/lib/saldo";
 import { buildProfil, effectiveEntryDate, mapChanges, mapEintraege, parseExportRange } from "@/lib/export-helpers";
-import { monthsInRange, sumCustomerHoursByUser, customerHoursByUserAndCustomer, projectHoursByUserAndProject } from "@/lib/customer-months";
+import { sumCustomerHoursByUser, customerHoursByUserAndCustomer, projectHoursByUserAndProject } from "@/lib/customer-months";
 import { logError } from "@/lib/error-log";
 
 // Lokale Kopie von lib/calc.ts toUTCDate() (dort nicht exportiert) —
@@ -69,7 +69,6 @@ export async function GET(req: Request) {
     const alleUserIds = memberships.map((m) => m.userId);
     const jahrStart = new Date(Date.UTC(startDate.getUTCFullYear(), 0, 1));
     const jahrEnde = new Date(Date.UTC(startDate.getUTCFullYear(), 11, 31));
-    const monate = monthsInRange(startDate, endDate);
 
     // Team-Hub: ist der gewählte Zeitraum genau ein Kalendermonat? Nur dann
     // ergibt ein Monatsabschluss für diesen Zeitraum Sinn (MonthLock ist
@@ -325,11 +324,6 @@ export async function GET(req: Request) {
       totals: result.totals,
       customers,
       projects,
-      // Zeigt der Oberfläche, ob [startDate,endDate] nicht exakt auf
-      // Monatsgrenzen liegt — dann sind Kundenstunden/Umsatz nur eine
-      // Annäherung (volle überlappende Monate gezählt), siehe
-      // lib/customer-months.ts.
-      kundenstundenUnscharf: monate.length > 0 && !(isMonthStart(startDate) && isMonthEnd(endDate)),
       // Für den "Monat für Team abschliessen"-Button im Hub-Kopf: nur bei
       // einem exakten Kalendermonat gesetzt (siehe isSingleMonth oben).
       monthLock: isSingleMonth ? { year: lockYear, month: lockMonth } : null,

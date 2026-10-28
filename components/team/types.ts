@@ -109,6 +109,5 @@ export interface TeamData {
   totals: TeamTotals;
   customers: CustomerRow[];
   projects: ProjectRow[];
-  kundenstundenUnscharf: boolean;
   monthLock: { year: number; month: number } | null;
 }

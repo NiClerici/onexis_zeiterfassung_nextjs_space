@@ -176,6 +176,55 @@ describe("billableHoursByUserAndMonth / sumCustomerHours", () => {
   });
 });
 
+// Regression (28.10.2026): Zeiträume, die keine vollen Kalendermonate
+// treffen, zählten die Kundenstunden der GANZEN überlappenden Monate,
+// während der Nenner (kennzahlen().arbeitsstunden) tagesgenau war —
+// Analytics zeigte für 19.10.–24.10. "80.9h von 23.9h" = 338 %.
+describe("Teilzeitraum innerhalb eines Monats", () => {
+  it("zählt nur Tageseinträge innerhalb [from, to], nicht den ganzen Monat", async () => {
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2027-02-05"), type: "arbeit", hours: 8, customerId, projectId },
+    });
+    await prisma.timeEntry.create({
+      data: { orgId: ORG, userId: userAId, date: new Date("2027-02-20"), type: "arbeit", hours: 6, customerId, projectId },
+    });
+    const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2027-02-19"), to: new Date("2027-02-24") });
+    expect(total).toBe(6); // NICHT 14 (ganzer Februar)
+  });
+
+  it("Grenztage from und to zählen mit", async () => {
+    const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2027-02-05"), to: new Date("2027-02-20") });
+    expect(total).toBe(14);
+  });
+
+  it("CustomerMonth zählt in einem angeschnittenen Monat nicht — Legacy-Zeilen im Zeitraum dienen als Fallback", async () => {
+    // Oktober-Fixtur aus "Zwei Kunden im selben Monat": Kunde 1 hat Legacy
+    // 30h am 03.10. + CustomerMonth 33h, Kunde 2 echte Erfassung 4h am 15.10.
+    const anfang = await customerHoursByUserAndCustomer({ orgId: ORG, userIds: [userAId], from: new Date("2026-10-01"), to: new Date("2026-10-10") });
+    expect(anfang.get(userAId)?.get(customerId)).toBe(30); // Legacy statt CustomerMonth
+    expect(anfang.get(userAId)?.get(customerId2) ?? 0).toBe(0);
+
+    const mitte = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2026-10-10"), to: new Date("2026-10-20") });
+    expect(mitte).toBe(4); // nur Kunde 2; Kunde 1 hat im Zeitraum keine Tageszeile
+  });
+
+  it("über zwei Monate: der voll abgedeckte Monat nutzt CustomerMonth, der angeschnittene nicht", async () => {
+    await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2027, month: 1, customerId, hours: 40 } });
+    await prisma.customerMonth.create({ data: { orgId: ORG, userId: userAId, year: 2027, month: 2, customerId: customerId2, hours: 50 } });
+    const total = await sumCustomerHours({ orgId: ORG, userId: userAId, from: new Date("2027-01-01"), to: new Date("2027-02-19") });
+    // Januar voll: CustomerMonth 40. Februar angeschnitten: nur der Tageseintrag
+    // vom 05.02. (8h), CustomerMonth 50 NICHT.
+    expect(total).toBe(48);
+  });
+
+  it("billableHoursByUserAndMonth gruppiert einen Teilzeitraum weiterhin nach Monat", async () => {
+    const perMonth = await billableHoursByUserAndMonth({ orgId: ORG, userIds: [userAId], from: new Date("2027-01-15"), to: new Date("2027-02-19") });
+    const map = perMonth.get(userAId)!;
+    expect(combineCustomerHours(map.get("2027-1")!)).toBe(0); // Januar angeschnitten, nur CustomerMonth vorhanden
+    expect(combineCustomerHours(map.get("2027-2")!)).toBe(8);
+  });
+});
+
 // customerHoursByUserAndCustomer: dieselbe Auflösungsregel wie oben
 // (billableHoursByUserAndMonth), nur nach Kunde statt nach Monat aggregiert
 // — Grundlage für die Kunden-Aufschlüsselung in der Teamsicht

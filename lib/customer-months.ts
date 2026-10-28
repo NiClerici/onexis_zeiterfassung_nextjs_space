@@ -28,13 +28,27 @@
 // verdecken.
 //
 // Für einen Zeitraum [from, to], der keine vollen Kalendermonate trifft
-// (z.B. "custom"-Export vom 10. bis 20. eines Monats), werden die
-// überlappenden Monate VOLL gezählt — das ist unscharf, aber die einzige
-// Zahl, die sich aus Kalendermonaten hergibt. Aufrufer, die das anzeigen,
-// sollten das entsprechend kennzeichnen (siehe app/(app)/team/page.tsx).
+// (z.B. "custom" vom 19. bis 24. eines Monats), zählen TimeEntry-Zeilen
+// (laufende wie Legacy) tagesgenau nur innerhalb [from, to]. Bis 28.10.2026
+// wurden die überlappenden Monate VOLL gezählt, während der Nenner von
+// kennzahlen().verrechnungsgrad (arbeitsstunden) tagesgenau war — eine
+// Woche im Oktober zeigte so die Kundenstunden des ganzen Oktobers gegen
+// eine Woche Arbeit (338 %). CustomerMonth-Zeilen haben kein Tagesdatum
+// und zählen deshalb nur für Monate, die ganz in [from, to] liegen; in
+// angeschnittenen Monaten fällt die Auflösung pro Kunde auf die Legacy-
+// Zeilen zurück (siehe isMonthFullyCovered()).
 
 import { prisma } from "@/lib/db";
 import { stundenAusEintrag } from "@/lib/calc";
+
+// true, wenn der Kalendermonat (year, month 1-12) komplett in [from, to]
+// liegt. Grundlage dafür, ob eine CustomerMonth-Monatssumme in einem
+// Zeitraum mitzählt — eine Monatssumme lässt sich nicht auf Tage aufteilen.
+function isMonthFullyCovered(year: number, month: number, from: Date, to: Date): boolean {
+  const first = Date.UTC(year, month - 1, 1);
+  const last = Date.UTC(year, month, 0);
+  return from.getTime() <= first && to.getTime() >= last;
+}
 
 export function monthsInRange(from: Date, to: Date): { year: number; month: number }[] {
   const months: { year: number; month: number }[] = [];
@@ -100,9 +114,8 @@ async function loadCustomerHourSources(params: { orgId: string; userIds: string[
   const empty = { months, fromEntriesSums: new Map(), legacySums: new Map(), customerMonthSums: new Map() };
   if (userIds.length === 0 || months.length === 0) return empty;
 
-  const monthStart = new Date(Date.UTC(months[0].year, months[0].month - 1, 1));
-  const lastMonth = months[months.length - 1];
-  const monthEnd = new Date(Date.UTC(lastMonth.year, lastMonth.month, 0));
+  // CustomerMonth-Summen nur für ganz abgedeckte Monate (siehe Modulkommentar).
+  const fullMonths = months.filter((mo) => isMonthFullyCovered(mo.year, mo.month, from, to));
 
   // Laufende Tageserfassung (countsAsWorktime=true) UND Legacy-Zeilen aus
   // dem entfernten Stundenrapport-Import (countsAsWorktime=false) getrennt
@@ -111,7 +124,7 @@ async function loadCustomerHourSources(params: { orgId: string; userIds: string[
   // rechnet für diesen Typ direkt aus von/bis/pauseMin bzw. hours), deshalb
   // genügt ein einzelnes Query ohne Pensum-/Feiertagsauflösung.
   const entries = await prisma.timeEntry.findMany({
-    where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, customerId: { not: null }, date: { gte: monthStart, lte: monthEnd } },
+    where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, customerId: { not: null }, date: { gte: from, lte: to } },
     select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true, customerId: true, countsAsWorktime: true },
   });
   const fromEntriesSums: NestedSums = new Map();
@@ -127,8 +140,8 @@ async function loadCustomerHourSources(params: { orgId: string; userIds: string[
   // CustomerMonth: manuell nacherfasste Migrationswerte, je (userId, Monat,
   // Kunde) — gewinnt über die Legacy-Zeilen desselben Kunden/Monats (siehe
   // Modulkommentar).
-  const oldRows = await prisma.customerMonth.findMany({
-    where: { orgId, userId: { in: userIds }, OR: months.map((mo) => ({ year: mo.year, month: mo.month })) },
+  const oldRows = fullMonths.length === 0 ? [] : await prisma.customerMonth.findMany({
+    where: { orgId, userId: { in: userIds }, OR: fullMonths.map((mo) => ({ year: mo.year, month: mo.month })) },
   });
   const customerMonthSums: NestedSums = new Map();
   for (const r of oldRows) {
@@ -250,12 +263,11 @@ async function loadProjectHourSources(params: { orgId: string; userIds: string[]
   const empty = { months, fromEntriesSums: new Map(), legacySums: new Map(), customerMonthSums: new Map() };
   if (userIds.length === 0 || months.length === 0) return empty;
 
-  const monthStart = new Date(Date.UTC(months[0].year, months[0].month - 1, 1));
-  const lastMonth = months[months.length - 1];
-  const monthEnd = new Date(Date.UTC(lastMonth.year, lastMonth.month, 0));
+  // CustomerMonth-Summen nur für ganz abgedeckte Monate (siehe Modulkommentar).
+  const fullMonths = months.filter((mo) => isMonthFullyCovered(mo.year, mo.month, from, to));
 
   const entries = await prisma.timeEntry.findMany({
-    where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, projectId: { not: null }, date: { gte: monthStart, lte: monthEnd } },
+    where: { orgId, userId: { in: userIds }, type: "arbeit", deletedAt: null, projectId: { not: null }, date: { gte: from, lte: to } },
     select: { userId: true, date: true, von: true, bis: true, pauseMin: true, hours: true, projectId: true, countsAsWorktime: true },
   });
   const fromEntriesSums: NestedSums = new Map();
@@ -268,8 +280,8 @@ async function loadProjectHourSources(params: { orgId: string; userIds: string[]
     addToNested(target, e.userId, monthKey, e.projectId as string, stunden);
   }
 
-  const oldRows = await prisma.customerMonth.findMany({
-    where: { orgId, userId: { in: userIds }, projectId: { not: null }, OR: months.map((mo) => ({ year: mo.year, month: mo.month })) },
+  const oldRows = fullMonths.length === 0 ? [] : await prisma.customerMonth.findMany({
+    where: { orgId, userId: { in: userIds }, projectId: { not: null }, OR: fullMonths.map((mo) => ({ year: mo.year, month: mo.month })) },
   });
   const customerMonthSums: NestedSums = new Map();
   for (const r of oldRows) {

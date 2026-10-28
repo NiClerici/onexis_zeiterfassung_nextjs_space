@@ -495,7 +495,6 @@ const translations: Record<string, string> = {
   "team.tabAdmin": "Verwaltung",
   "team.errorLoading": "Die Team-Daten konnten nicht geladen werden.",
   "team.retry": "Erneut versuchen",
-  "team.approxHint": "Der gewählte Zeitraum deckt sich nicht mit vollen Kalendermonaten — Kundenstunden und Umsatz sind eine Näherung (volle überlappende Monate gezählt).",
   "team.colSaldoKum": "Saldo kum.",
   "team.colUeberzeit": "Überzeit",
   "team.groupZeitkonto": "Zeitkonto",
